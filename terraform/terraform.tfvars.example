@@ -1,0 +1,20 @@
+# AWS Configuration
+aws_region  = "ap-southeast-2"
+environment = "production"
+
+# Email Domain Configuration
+domain            = "mail.example.com"
+email_bucket_name = "ses-mail-storage-example-com"
+
+# Email Retention
+email_retention_days = 90
+
+# Alarm Configuration
+alarm_sns_topic_arn            = "arn:aws:sns:ap-southeast-2:123456789012:AlarmTopic"
+alarm_email_count_threshold    = 100  # emails per 5 minutes
+alarm_rejection_rate_threshold = 50   # percentage
+
+# Email Security (optional)
+mta_sts_mode       = "testing"  # testing, enforce, or none
+dmarc_rua_email    = ""         # Email for DMARC reports (optional)
+tlsrpt_rua_email   = ""         # Email for TLS reports (optional)

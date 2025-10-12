@@ -1,0 +1,12 @@
+client_secret.json
+token.json
+
+# Terraform
+terraform/terraform.tfvars
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+terraform/*.tfstate
+terraform/*.tfstate.backup
+terraform/lambda/*.zip
+terraform/terraform.plan
+terraform/terraform.destroy.plan
