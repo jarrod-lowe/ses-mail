@@ -70,11 +70,11 @@ Once you have created your Gmail OAuth token (above), you can deploy the AWS inf
 
    ```bash
    make init   # Initialize Terraform and create state bucket
-   make plan   # Create a plan file
+   make plan   # Package Lambda and create a plan file
    make apply  # Apply the plan (creates resources and outputs DNS records)
    ```
 
-   **Note:** If MTA-STS is enabled, the first apply will create the ACM certificate but CloudFront creation will fail. This is expected - continue to step 4.
+   **Note:** The `make plan` target automatically packages the Lambda function with its dependencies. If MTA-STS is enabled, the first apply will create the ACM certificate but CloudFront creation will fail. This is expected - continue to step 4.
 
 4. Configure DNS records in Route53:
 
@@ -189,6 +189,7 @@ Once you have created your Gmail OAuth token (above), you can deploy the AWS inf
 
 ### Workflow
 
+* **make package**: Packages the Lambda function with dependencies (automatically run by make plan)
 * **make plan**: Creates a plan file showing what changes will be made
 * **make apply**: Applies the plan file (depends on plan, so will create it if missing)
 * **make plan-destroy**: Creates a destroy plan

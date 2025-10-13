@@ -1,4 +1,4 @@
-.PHONY: help init plan apply plan-destroy destroy clean
+.PHONY: help package init plan apply plan-destroy destroy clean
 
 # Get environment from terraform.tfvars or default to production
 ENVIRONMENT ?= $(shell grep '^environment' terraform/terraform.tfvars 2>/dev/null | cut -d'=' -f2 | tr -d ' "' || echo "production")
@@ -16,6 +16,7 @@ BACKEND_CONFIG = -backend-config="bucket=$(STATE_BUCKET)" \
 help:
 	@echo "SES Mail Infrastructure - Makefile targets:"
 	@echo ""
+	@echo "  make package       - Package Lambda function with dependencies"
 	@echo "  make init          - Initialize Terraform (creates state bucket)"
 	@echo "  make plan          - Create Terraform plan file"
 	@echo "  make apply         - Apply the plan file (requires plan)"
@@ -26,6 +27,17 @@ help:
 	@echo "Current environment: $(ENVIRONMENT)"
 	@echo "Current region: $(AWS_REGION)"
 	@echo ""
+
+# Package Lambda function with dependencies
+terraform/lambda/package: requirements.txt terraform/lambda/email_processor.py
+	@echo "Packaging Lambda function with dependencies..."
+	@rm -rf terraform/lambda/package
+	@mkdir -p terraform/lambda/package
+	@pip3 install -q -r requirements.txt -t terraform/lambda/package
+	@cp terraform/lambda/email_processor.py terraform/lambda/package/
+	@echo "Lambda package created"
+
+package: terraform/lambda/package
 
 # Initialize Terraform (depends on state bucket existing)
 terraform/.terraform: terraform/scripts/ensure-state-bucket.sh terraform/terraform.tfvars
@@ -38,7 +50,7 @@ terraform/.terraform: terraform/scripts/ensure-state-bucket.sh terraform/terrafo
 init: terraform/.terraform
 
 # Create plan file
-terraform/terraform.plan: terraform/.terraform terraform/*.tf terraform/lambda/*.py
+terraform/terraform.plan: terraform/.terraform terraform/*.tf terraform/lambda/package
 	@echo "Creating Terraform plan..."
 	cd terraform && terraform plan -out=terraform.plan
 	@echo "Plan created: terraform/terraform.plan"
@@ -75,4 +87,5 @@ clean:
 	rm -f terraform/*.tfstate
 	rm -f terraform/*.tfstate.backup
 	rm -f terraform/lambda/*.zip
+	rm -rf terraform/lambda/package
 	@echo "Clean-up complete"

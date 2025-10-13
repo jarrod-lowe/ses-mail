@@ -1,8 +1,11 @@
-# Archive the Lambda function code
+# Archive the Lambda function code with dependencies
+# Note: Dependencies must be installed in lambda/package/ directory first
+# Run: pip install -r ../requirements.txt -t lambda/package/
 data "archive_file" "lambda_zip" {
   type        = "zip"
-  source_file = "${path.module}/lambda/email_processor.py"
+  source_dir  = "${path.module}/lambda/package"
   output_path = "${path.module}/lambda/email_processor.zip"
+  excludes    = ["__pycache__", "*.pyc", ".DS_Store"]
 }
 
 # Lambda function for processing emails
