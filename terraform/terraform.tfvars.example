@@ -3,7 +3,7 @@ aws_region  = "ap-southeast-2"
 environment = "production"
 
 # Email Domain Configuration
-domain = "mail.example.com"
+domain = ["mail.example.com", "mail2.example.com"]
 
 # Email Retention
 email_retention_days = 90

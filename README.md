@@ -63,7 +63,8 @@ Once you have created your Gmail OAuth token (above), you can deploy the AWS inf
 
    ```bash
    vi terraform/terraform.tfvars
-   # Update domain and SNS topic ARN as needed
+   # Update domain(s) and SNS topic ARN as needed
+   # domain should be a list: ["mail.example.com", "mail2.example.com"]
    ```
 
 3. Deploy the infrastructure (first pass):
@@ -85,7 +86,7 @@ Once you have created your Gmail OAuth token (above), you can deploy the AWS inf
    terraform output dns_configuration_summary
    ```
 
-   You'll need to add the following records to your Route53 hosted zone:
+   The output will be grouped by domain. For each domain, you'll need to add the following records to your Route53 hosted zone:
 
    **Domain Verification (TXT record)**
 
@@ -101,7 +102,7 @@ Once you have created your Gmail OAuth token (above), you can deploy the AWS inf
    * Value: `10 inbound-smtp.ap-southeast-2.amazonaws.com` (adjust region as needed)
    * TTL: 1800 (or default)
 
-   **DKIM Authentication (3 CNAME records)**
+   **DKIM Authentication (3 CNAME records per domain)**
 
    * For each of the 3 DKIM tokens in the output:
      * Name: `{token}._domainkey.YOUR_DOMAIN`
@@ -109,15 +110,15 @@ Once you have created your Gmail OAuth token (above), you can deploy the AWS inf
      * Value: `{token}.dkim.amazonses.com`
      * TTL: 1800 (or default)
 
-   **DMARC Policy (TXT record)**
+   **DMARC Policy (TXT record per domain)**
 
    * Name: `_dmarc.YOUR_DOMAIN`
    * Type: TXT
-   * Value: `v=DMARC1; p=reject` (or with reports email if configured)
+   * Value: `v=DMARC1; p=reject; rua=mailto:dmarc@YOUR_DOMAIN` (if prefix configured)
    * TTL: 1800 (or default)
    * Purpose: Prevents others from spoofing your domain
 
-   **MTA-STS (if enabled)**
+   **MTA-STS (if enabled - records per domain)**
 
    * Name: `_mta-sts.YOUR_DOMAIN`
    * Type: TXT
@@ -129,13 +130,13 @@ Once you have created your Gmail OAuth token (above), you can deploy the AWS inf
    * Value: CloudFront distribution URL from output
    * TTL: 1800 (or default)
 
-   * ACM validation CNAME records (from terraform output)
+   * ACM validation CNAME records (from terraform output, one set per domain)
 
-   **TLS Reporting (if email configured)**
+   **TLS Reporting (if email configured - per domain)**
 
    * Name: `_smtp._tls.YOUR_DOMAIN`
    * Type: TXT
-   * Value: `v=TLSRPTv1; rua=mailto:YOUR_EMAIL`
+   * Value: `v=TLSRPTv1; rua=mailto:tlsrpt@YOUR_DOMAIN`
    * TTL: 1800 (or default)
 
    **Via AWS Console:**
@@ -158,19 +159,19 @@ Once you have created your Gmail OAuth token (above), you can deploy the AWS inf
    Wait 5-15 minutes for DNS propagation, then verify:
 
    ```bash
-   aws ses get-identity-verification-attributes --identities YOUR_DOMAIN
+   aws ses get-identity-verification-attributes --identities mail.example.com mail2.example.com
    ```
 
 5. Complete MTA-STS setup (if enabled):
 
-   After adding the DNS records (including ACM validation records), wait for the ACM certificate to validate:
+   After adding the DNS records (including ACM validation records for each domain), wait for all ACM certificates to validate:
 
    ```bash
-   # Check certificate status (should show ISSUED)
+   # Check certificate status (should show ISSUED for all)
    aws acm list-certificates --region us-east-1
    ```
 
-   Once validated (usually 5-30 minutes), run terraform again to create CloudFront:
+   Once all certificates are validated (usually 5-30 minutes), run terraform again to create CloudFront distributions:
 
    ```bash
    make plan

@@ -12,12 +12,12 @@ provider "aws" {
   }
 }
 
-# ACM certificate for mta-sts subdomain
+# ACM certificate for mta-sts subdomain (one per domain)
 resource "aws_acm_certificate" "mta_sts" {
-  count    = var.mta_sts_mode != "none" ? 1 : 0
+  for_each = var.mta_sts_mode != "none" ? toset(var.domain) : []
   provider = aws.us_east_1
 
-  domain_name       = "mta-sts.${var.domain}"
+  domain_name       = "mta-sts.${each.value}"
   validation_method = "DNS"
 
   lifecycle {

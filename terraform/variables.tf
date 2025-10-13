@@ -11,8 +11,13 @@ variable "environment" {
 }
 
 variable "domain" {
-  description = "Domain for receiving emails"
-  type        = string
+  description = "List of domains for receiving emails"
+  type        = list(string)
+
+  validation {
+    condition     = length(var.domain) > 0
+    error_message = "At least one domain must be provided"
+  }
 }
 
 variable "email_retention_days" {

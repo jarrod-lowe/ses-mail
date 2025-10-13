@@ -1,11 +1,13 @@
-# SES domain identity
+# SES domain identity for each domain
 resource "aws_ses_domain_identity" "main" {
-  domain = var.domain
+  for_each = toset(var.domain)
+  domain   = each.value
 }
 
 # Enable DKIM signing with AWS managed keys (Easy DKIM)
 resource "aws_ses_domain_dkim" "main" {
-  domain = aws_ses_domain_identity.main.domain
+  for_each = aws_ses_domain_identity.main
+  domain   = each.value.domain
 }
 
 # SES receipt rule set
@@ -22,7 +24,7 @@ resource "aws_ses_active_receipt_rule_set" "main" {
 resource "aws_ses_receipt_rule" "main" {
   name          = "receive-emails-${var.environment}"
   rule_set_name = aws_ses_receipt_rule_set.main.rule_set_name
-  recipients    = [var.domain]
+  recipients    = var.domain
   enabled       = true
   scan_enabled  = true # Enable spam and virus scanning
 

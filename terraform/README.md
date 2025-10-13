@@ -54,7 +54,7 @@ Required variables:
 ```hcl
 aws_region                      = "ap-southeast-2"
 environment                     = "production"
-domain                          = "mail.example.com"
+domain                          = ["mail.example.com", "mail2.example.com"]
 email_retention_days            = 90
 alarm_sns_topic_arn             = "arn:aws:sns:ap-southeast-2:123456789012:AlarmTopic"
 alarm_email_count_threshold     = 100
@@ -108,52 +108,59 @@ Or from the project root:
 make -C terraform output dns_configuration_summary
 ```
 
-You'll need to add:
+The output will be grouped by domain. For each domain, you'll need to add:
 
 * **1 TXT record** for domain verification
 * **1 MX record** for receiving emails
 * **3 CNAME records** for DKIM authentication
+* **Optional**: MTA-STS and TLS-RPT records (if enabled)
 
-Example output:
+Example output structure:
 
 ```json
 {
-  "name": "_amazonses.mail.example.com",
-  "type": "TXT",
-  "value": "abc123...",
-  "purpose": "Domain verification"
+  "domains": {
+    "mail.example.com": [
+      {
+        "name": "_amazonses.mail.example.com",
+        "type": "TXT",
+        "value": "abc123...",
+        "purpose": "Domain verification"
+      }
+    ]
+  }
 }
 ```
 
-Add the displayed DNS records to your Route53 hosted zone.
+Add the displayed DNS records to your Route53 hosted zone for each domain.
 
-### 6. Verify domain in SES
+### 6. Verify domains in SES
 
 After adding the DNS records, wait for DNS propagation (usually 5-15 minutes). Check the status:
 
 ```bash
-aws ses get-identity-verification-attributes --identities YOUR_DOMAIN
+aws ses get-identity-verification-attributes --identities mail.example.com mail2.example.com
 ```
 
 ### 7. Complete MTA-STS setup (if enabled)
 
-If you configured `mta_sts_mode` to `testing` or `enforce`, the first `make apply` will create the ACM certificate but CloudFront creation will fail. This is expected because the certificate needs DNS validation records added first.
+If you configured `mta_sts_mode` to `testing` or `enforce`, the first `make apply` will create ACM certificates (one per domain) but CloudFront creation will fail. This is expected because the certificates need DNS validation records added first.
 
-After adding all DNS records from step 5 (including the ACM validation CNAME records), wait for the certificate to validate:
+After adding all DNS records from step 5 (including the ACM validation CNAME records for each domain), wait for the certificates to validate:
 
 ```bash
 # Check certificate status (should show ISSUED when ready)
 aws acm list-certificates --region us-east-1
 ```
 
-Certificate validation usually takes 5-30 minutes. Once the certificate shows `Status: ISSUED`, run terraform again to create the CloudFront distribution:
+Certificate validation usually takes 5-30 minutes. Once all certificates show `Status: ISSUED`, run terraform again to create the CloudFront distributions:
 
 ```bash
 make plan
 make apply
 ```
 
-The second apply will successfully create the CloudFront distribution and complete the MTA-STS setup.
+The second apply will successfully create the CloudFront distributions (one per domain) and complete the MTA-STS setup.
 
 ### 8. Update Gmail OAuth token
 
@@ -196,17 +203,19 @@ All alarms send notifications to the configured SNS topic.
 
 ## Testing
 
-Send a test email to any address at your domain:
+Send a test email to any address at any of your configured domains:
 
 ```bash
-echo "Test email body" | mail -s "Test Subject" test@your-domain.com
+echo "Test email body" | mail -s "Test Subject" test@mail.example.com
 ```
 
 Check the Lambda logs:
 
 ```bash
-aws logs tail /aws/lambda/ses-mail-email-processor --follow
+aws logs tail /aws/lambda/ses-mail-email-processor-ENVIRONMENT --follow
 ```
+
+Replace `ENVIRONMENT` with your environment name from terraform.tfvars.
 
 ## Future Development
 

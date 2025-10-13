@@ -52,13 +52,13 @@ resource "aws_cloudfront_origin_access_control" "mta_sts" {
   signing_protocol                  = "sigv4"
 }
 
-# CloudFront distribution
+# CloudFront distribution (one per domain)
 resource "aws_cloudfront_distribution" "mta_sts" {
-  count   = var.mta_sts_mode != "none" ? 1 : 0
-  enabled = true
-  comment = "MTA-STS policy for ${var.domain} (${var.environment})"
+  for_each = var.mta_sts_mode != "none" ? toset(var.domain) : []
+  enabled  = true
+  comment  = "MTA-STS policy for ${each.value} (${var.environment})"
 
-  aliases = ["mta-sts.${var.domain}"]
+  aliases = ["mta-sts.${each.value}"]
 
   origin {
     domain_name              = aws_s3_bucket.mta_sts[0].bucket_regional_domain_name
@@ -92,7 +92,7 @@ resource "aws_cloudfront_distribution" "mta_sts" {
   }
 
   viewer_certificate {
-    acm_certificate_arn      = aws_acm_certificate.mta_sts[0].arn
+    acm_certificate_arn      = aws_acm_certificate.mta_sts[each.value].arn
     ssl_support_method       = "sni-only"
     minimum_protocol_version = "TLSv1.2_2021"
   }
@@ -101,7 +101,7 @@ resource "aws_cloudfront_distribution" "mta_sts" {
   # User must add DNS validation records and wait for validation before this succeeds
 }
 
-# S3 bucket policy to allow CloudFront OAC access
+# S3 bucket policy to allow CloudFront OAC access from all distributions
 data "aws_iam_policy_document" "mta_sts_bucket_policy" {
   count = var.mta_sts_mode != "none" ? 1 : 0
 
@@ -120,7 +120,7 @@ data "aws_iam_policy_document" "mta_sts_bucket_policy" {
     condition {
       test     = "StringEquals"
       variable = "AWS:SourceArn"
-      values   = [aws_cloudfront_distribution.mta_sts[0].arn]
+      values   = [for dist in aws_cloudfront_distribution.mta_sts : dist.arn]
     }
   }
 }
