@@ -53,7 +53,7 @@ Required variables:
 
 ```hcl
 aws_region                      = "ap-southeast-2"
-environment                     = "production"
+environment                     = "prod"
 domain                          = ["mail.example.com", "mail2.example.com"]
 email_retention_days            = 90
 alarm_sns_topic_arn             = "arn:aws:sns:ap-southeast-2:123456789012:AlarmTopic"
@@ -167,9 +167,9 @@ The second apply will successfully create the CloudFront distributions (one per 
 Update the SSM parameter with your Gmail OAuth token from the token.json file:
 
 ```bash
-# Replace 'production' with your environment name from terraform.tfvars
+# Replace 'prod' with your environment name from terraform.tfvars
 aws ssm put-parameter \
-  --name "/ses-mail/production/gmail-token" \
+  --name "/ses-mail/prod/gmail-token" \
   --value "$(cat ../token.json)" \
   --type SecureString \
   --overwrite

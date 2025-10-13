@@ -1,7 +1,7 @@
 .PHONY: help package init plan apply plan-destroy destroy clean
 
-# Get environment from terraform.tfvars or default to production
-ENVIRONMENT ?= $(shell grep '^environment' terraform/terraform.tfvars 2>/dev/null | cut -d'=' -f2 | tr -d ' "' || echo "production")
+# Get environment from terraform.tfvars or default to prod
+ENVIRONMENT ?= $(shell grep '^environment' terraform/terraform.tfvars 2>/dev/null | cut -d'=' -f2 | tr -d ' "' || echo "prod")
 AWS_REGION ?= $(shell grep '^aws_region' terraform/terraform.tfvars 2>/dev/null | cut -d'=' -f2 | tr -d ' "' || echo "ap-southeast-2")
 
 # Ensure state bucket and get its name
