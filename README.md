@@ -63,7 +63,7 @@ Once you have created your Gmail OAuth token (above), you can deploy the AWS inf
 
    ```bash
    vi terraform/terraform.tfvars
-   # Update domain, bucket name, and SNS topic ARN as needed
+   # Update domain and SNS topic ARN as needed
    ```
 
 3. Deploy the infrastructure (first pass):

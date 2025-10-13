@@ -89,7 +89,7 @@ output "dns_configuration_summary" {
         {
           name    = "_dmarc.${var.domain}"
           type    = "TXT"
-          value   = var.dmarc_rua_email != "" ? "v=DMARC1; p=reject; rua=mailto:${var.dmarc_rua_email}" : "v=DMARC1; p=reject"
+          value   = var.dmarc_rua_prefix != "" ? "v=DMARC1; p=reject; rua=mailto:${var.dmarc_rua_prefix}@${var.domain}" : "v=DMARC1; p=reject"
           purpose = "DMARC policy - prevents domain spoofing"
         }
       ],
@@ -115,11 +115,11 @@ output "dns_configuration_summary" {
           purpose = "MTA-STS policy endpoint"
         }
       ] : [],
-      var.tlsrpt_rua_email != "" ? [
+      var.tlsrpt_rua_prefix != "" ? [
         {
           name    = "_smtp._tls.${var.domain}"
           type    = "TXT"
-          value   = "v=TLSRPTv1; rua=mailto:${var.tlsrpt_rua_email}"
+          value   = "v=TLSRPTv1; rua=mailto:${var.tlsrpt_rua_prefix}@${var.domain}"
           purpose = "TLS reporting"
         }
       ] : [],

@@ -1,6 +1,11 @@
+# Local variables for resource naming
+locals {
+  email_bucket_name = "ses-mail-storage-${var.environment}"
+}
+
 # S3 bucket for storing incoming emails
 resource "aws_s3_bucket" "email_storage" {
-  bucket = var.email_bucket_name
+  bucket = local.email_bucket_name
 }
 
 # Enable versioning for the email storage bucket

@@ -15,11 +15,6 @@ variable "domain" {
   type        = string
 }
 
-variable "email_bucket_name" {
-  description = "S3 bucket name for storing emails"
-  type        = string
-}
-
 variable "email_retention_days" {
   description = "Number of days to retain emails in S3"
   type        = number
@@ -54,14 +49,14 @@ variable "mta_sts_mode" {
   }
 }
 
-variable "dmarc_rua_email" {
-  description = "Email address for DMARC aggregate reports (optional)"
+variable "dmarc_rua_prefix" {
+  description = "Email prefix for DMARC aggregate reports (domain will be appended automatically)"
   type        = string
-  default     = ""
+  default     = "dmarc"
 }
 
-variable "tlsrpt_rua_email" {
-  description = "Email address for TLS failure reports (optional)"
+variable "tlsrpt_rua_prefix" {
+  description = "Email prefix for TLS failure reports (domain will be appended automatically)"
   type        = string
-  default     = ""
+  default     = "tlsrpt"
 }

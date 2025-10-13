@@ -55,7 +55,6 @@ Required variables:
 aws_region                      = "ap-southeast-2"
 environment                     = "production"
 domain                          = "mail.example.com"
-email_bucket_name               = "ses-mail-storage-example-com"
 email_retention_days            = 90
 alarm_sns_topic_arn             = "arn:aws:sns:ap-southeast-2:123456789012:AlarmTopic"
 alarm_email_count_threshold     = 100
@@ -161,8 +160,9 @@ The second apply will successfully create the CloudFront distribution and comple
 Update the SSM parameter with your Gmail OAuth token from the token.json file:
 
 ```bash
+# Replace 'production' with your environment name from terraform.tfvars
 aws ssm put-parameter \
-  --name "/ses-mail/gmail-token" \
+  --name "/ses-mail/production/gmail-token" \
   --value "$(cat ../token.json)" \
   --type SecureString \
   --overwrite
