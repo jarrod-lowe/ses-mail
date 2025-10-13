@@ -11,7 +11,7 @@ data "archive_file" "lambda_zip" {
 # Lambda function for processing emails
 resource "aws_lambda_function" "email_processor" {
   filename         = data.archive_file.lambda_zip.output_path
-  function_name    = "ses-mail-email-processor"
+  function_name    = "ses-mail-email-processor-${var.environment}"
   role            = aws_iam_role.lambda_execution.arn
   handler         = "email_processor.lambda_handler"
   source_code_hash = data.archive_file.lambda_zip.output_base64sha256

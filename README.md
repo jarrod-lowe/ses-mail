@@ -125,7 +125,7 @@ Once you have created your Gmail OAuth token (above), you can deploy the AWS inf
    * TTL: 1800 (or default)
 
    * Name: `mta-sts.YOUR_DOMAIN`
-   * Type: A; Alias
+   * Type: CNAME
    * Value: CloudFront distribution URL from output
    * TTL: 1800 (or default)
 
@@ -180,8 +180,9 @@ Once you have created your Gmail OAuth token (above), you can deploy the AWS inf
 6. Upload your Gmail token to SSM Parameter Store:
 
    ```bash
+   # Replace 'test' with your environment name from terraform.tfvars
    aws ssm put-parameter \
-     --name "/ses-mail/gmail-token" \
+     --name "/ses-mail/test/gmail-token" \
      --value "$(cat token.json)" \
      --type SecureString \
      --overwrite

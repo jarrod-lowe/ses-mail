@@ -1,7 +1,7 @@
 # SSM Parameter for storing Gmail OAuth token
 resource "aws_ssm_parameter" "gmail_token" {
-  name        = "/ses-mail/gmail-token"
-  description = "Gmail OAuth token for inserting emails via API"
+  name        = "/ses-mail/${var.environment}/gmail-token"
+  description = "Gmail OAuth token for inserting emails via API (${var.environment})"
   type        = "SecureString"
   value       = "PLACEHOLDER - Update this value after deployment"
 
@@ -25,7 +25,7 @@ data "aws_iam_policy_document" "lambda_assume_role" {
 
 # IAM role for Lambda function
 resource "aws_iam_role" "lambda_execution" {
-  name               = "ses-mail-lambda-execution-role"
+  name               = "ses-mail-lambda-execution-${var.environment}"
   assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
 }
 
@@ -47,7 +47,7 @@ data "aws_iam_policy_document" "lambda_s3_access" {
 
 # IAM policy for Lambda to access S3
 resource "aws_iam_role_policy" "lambda_s3_access" {
-  name   = "lambda-s3-access"
+  name   = "lambda-s3-access-${var.environment}"
   role   = aws_iam_role.lambda_execution.id
   policy = data.aws_iam_policy_document.lambda_s3_access.json
 }
@@ -67,7 +67,7 @@ data "aws_iam_policy_document" "lambda_ssm_access" {
 
 # IAM policy for Lambda to access SSM Parameter Store
 resource "aws_iam_role_policy" "lambda_ssm_access" {
-  name   = "lambda-ssm-access"
+  name   = "lambda-ssm-access-${var.environment}"
   role   = aws_iam_role.lambda_execution.id
   policy = data.aws_iam_policy_document.lambda_ssm_access.json
 }

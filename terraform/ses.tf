@@ -10,7 +10,7 @@ resource "aws_ses_domain_dkim" "main" {
 
 # SES receipt rule set
 resource "aws_ses_receipt_rule_set" "main" {
-  rule_set_name = "ses-mail-receipt-rules"
+  rule_set_name = "ses-mail-receipt-rules-${var.environment}"
 }
 
 # Set the receipt rule set as active
@@ -20,7 +20,7 @@ resource "aws_ses_active_receipt_rule_set" "main" {
 
 # SES receipt rule for incoming emails
 resource "aws_ses_receipt_rule" "main" {
-  name          = "receive-emails"
+  name          = "receive-emails-${var.environment}"
   rule_set_name = aws_ses_receipt_rule_set.main.rule_set_name
   recipients    = [var.domain]
   enabled       = true
