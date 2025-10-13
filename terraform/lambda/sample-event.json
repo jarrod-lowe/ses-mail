@@ -1,0 +1,152 @@
+{
+    "Records": [
+        {
+            "eventSource": "aws:ses",
+            "eventVersion": "1.0",
+            "ses": {
+                "mail": {
+                    "timestamp": "2025-01-15T08:55:02.392Z",
+                    "source": "sender@example.com",
+                    "messageId": "mt45lkqi2ko47mgccgis5iafkl2e3eejk0eold01",
+                    "destination": [
+                        "test@mail.example.com"
+                    ],
+                    "headersTruncated": false,
+                    "headers": [
+                        {
+                            "name": "Return-Path",
+                            "value": "<sender@example.com>"
+                        },
+                        {
+                            "name": "Received",
+                            "value": "from mail-server.example.com (mail-server.example.com [192.0.2.1]) by inbound-smtp.ap-southeast-2.amazonaws.com with SMTP id mt45lkqi2ko47mgccgis5iafkl2e3eejk0eold01 for test@mail.example.com; Wed, 15 Jan 2025 08:55:02 +0000 (UTC)"
+                        },
+                        {
+                            "name": "X-SES-Spam-Verdict",
+                            "value": "PASS"
+                        },
+                        {
+                            "name": "X-SES-Virus-Verdict",
+                            "value": "PASS"
+                        },
+                        {
+                            "name": "Received-SPF",
+                            "value": "pass (spfCheck: domain of _spf.example.com designates 192.0.2.1 as permitted sender) client-ip=192.0.2.1; envelope-from=sender@example.com; helo=mail-server.example.com;"
+                        },
+                        {
+                            "name": "Authentication-Results",
+                            "value": "amazonses.com; spf=pass (spfCheck: domain of _spf.example.com designates 192.0.2.1 as permitted sender) client-ip=192.0.2.1; envelope-from=sender@example.com; helo=mail-server.example.com; dkim=pass header.i=@example.com; dmarc=pass header.from=example.com;"
+                        },
+                        {
+                            "name": "X-SES-RECEIPT",
+                            "value": "AEFBQUFBQUFBQUFFaEd5bHNndHNwMWhxMkRQa2Rpa0RMYVlYbnpqS29qM25Mbk4va2lVeHZEYXJMMUV5TDdvbHhuMS94OHNzUU8yRlk4MUpQVTFiQjFMMVA3bE9TQmlXTFdDRDVFeVVRRDBwdDdtTUE3ZytSaU5iN2xxR2JVQ3RjYzlmaWNLUlNHUEZWYzFxejlTYzJUOW9DN2VwUGdNKy85c3ZCczdoYlM0MGRaaXBFRG5oOHUvQTRELzNGbjVqcVoyZjhmS2U1Tit5ckxOeHo2b09EVWlqY3A0OXN3UDIwVUlHOGFYMDNwcE13VVl3QXNPak1JRVNsMnllbXQ5aXExKzFJT1dKVHllK0pmZ3grRGJUUFZjaHkveFdGR1pSWE9ScG50TGNOMTQyUzl0M21DNVlCc2c9PQ=="
+                        },
+                        {
+                            "name": "X-SES-DKIM-SIGNATURE",
+                            "value": "a=rsa-sha256; q=dns/txt; b=LHZqZ0CNygycxAcW/jq1b20g5cW0hMlQBpapUax/Ns1mNbcYGyB7p9Brb32AUmgqCt24je0mUL3i+O6Nh63kRdQ6nWM01ELzVZAbirq+2vIePqhEmgHxmRuzMVvtjREQAh9u3L21Dx7vozfPcadRSqZ3Bsh+SjiRdXC9kj/IJ4U=; c=relaxed/simple; s=o6ptibvfbllhpdhtxr7klizy2riobquz; d=amazonses.com; t=1737793502; v=1; bh=IKWrq6/bKLZHvB9sJHR5AO9xdQfgtj7CtIUkYbI+mQw=; h=From:To:Cc:Bcc:Subject:Date:Message-ID:MIME-Version:Content-Type:X-SES-RECEIPT;"
+                        },
+                        {
+                            "name": "Received",
+                            "value": "by mail-server.example.com with SMTP id d9443c01a7336-273a0aeed57so52755455ad.1 for <test@mail.example.com>; Wed, 15 Jan 2025 01:55:01 -0700 (PDT)"
+                        },
+                        {
+                            "name": "DKIM-Signature",
+                            "value": "v=1; a=rsa-sha256; c=relaxed/relaxed; d=example.com; s=20230601; t=1737793500; x=1738398300; darn=mail.example.com; h=to:subject:message-id:date:from:mime-version:from:to:cc:subject:date:message-id:reply-to; bh=ZnlEi5q9q26zlVAEdqrynVNj3bInMaNrQI5DUNJ6oXE=; b=dZ7ABNU7p4UItySFfl+kK+udmsGwdABirbguGG+1xSzc0XIloHb/vSaL/9b/4IpLkeMjRyuLsT9aWDPISjIw4110393XJ5DlEOsUWB9fUVRZVpQDbI36dkGI07XnXw22s7ggqSxIdc6MSDPDE6IaWphkCfynA8QY1o/JK3FvB8Ygl7L94PZ+KA+JrsVnUKvVTgGaWpmoX0ZRd4+AFb9sNjj6PRy3CTfbkGhcMTl8J27L7vEqd73gWX1thBBHz08edFfODtwMID9gPxMuKWqSdyKlgp4OynOaulpaeGtlSykc1ToTORr0u6zyuTlWF62WhN7Y/ZCTlOCqvPjjgVcL8Q=="
+                        },
+                        {
+                            "name": "X-Google-DKIM-Signature",
+                            "value": "v=1; a=rsa-sha256; c=relaxed/relaxed; d=1e100.net; s=20230601; t=1737793500; x=1738398300; h=to:subject:message-id:date:from:mime-version:x-gm-message-state :from:to:cc:subject:date:message-id:reply-to; bh=ZnlEi5q9q26zlVAEdqrynVNj3bInMaNrQI5DUNJ6oXE=; b=aaTEmPb+dHrdIHkEhYr8P2ip7iynyUXpLuykAev6SFfQXP0uQu1oSThbSfC2npQnpx 8YGzgQnZoc0ZDeOzBN7XLuMxXmqqFCCMcF1K0pXBFQXZIknXsxAhcIRbo11OyI+JTLSJ stmvvv23VYKkLWf/p0NPq0VaE0PjDnclKOzrEEtMI2wQoPhyKJBvG0HO+rvpJWLwgToi jfw61A+/G/PA9v59P4RG0mSAR+yc0ercqQnPe0qEB8kIGqQV8dhiMI7i4hAj8K5AiIN5 6sduicUgXxtpp8kxb85V/1M4tq/ts7NhH8H7gTpDArd4MukS74KJzel66yuCm5tlJ2R7 BShg=="
+                        },
+                        {
+                            "name": "X-Gm-Message-State",
+                            "value": "AOJu0Yzsus7ahrrd2AkEPPRazKaYOjwsxhhUCyj4ltZToRyfCM1/lZrq 3fQ9DF+EJj0kd++wiLJr2nwaRSIe3dJwjEiirU/3YErtAz5ws/l+xNzsyufHJX0HthLfA/bvWWa /IdkaOvTs28cq5QFOzpSvOMuQIZnHKiKrkg=="
+                        },
+                        {
+                            "name": "X-Gm-Gg",
+                            "value": "ASbGncsiEfdqyCy0Rlmf2V0r59fUv6B85/ryiOEEUVAVl8DVdq2nq1UGvyS1/WXpD7y 6Ihno5vJO2kw0nE13JJDFrGF3pq0HXLyspZJ/c7l2fdY1H5j8g72nY7HtgaTkRLaZiOC311K+/x NINdzmZR/IUtuFdqb0mlYoiB2H6Ykc7n+Z5lJYKFMo0DULp3ocZa1V4m7ysLZiD6pp5uoCynefT weFGq0JohUVdAuvzqYW7VTi"
+                        },
+                        {
+                            "name": "X-Google-Smtp-Source",
+                            "value": "AGHT+IGA5XjUxGuFYrRAM6xbkSmpPhOCQRL3nRZMm6P732ahpNzwFEVDjLnY1M0D1hOX5KKP1sDLH5fCnNpLj8KNxrQ="
+                        },
+                        {
+                            "name": "X-Received",
+                            "value": "by 2002:a17:902:ccd0:b0:26c:4280:4860 with SMTP id d9443c01a7336-28ec9c277abmr275302915ad.8.1737793499954; Wed, 15 Jan 2025 01:54:59 -0700 (PDT)"
+                        },
+                        {
+                            "name": "MIME-Version",
+                            "value": "1.0"
+                        },
+                        {
+                            "name": "From",
+                            "value": "Example Sender <sender@example.com>"
+                        },
+                        {
+                            "name": "Date",
+                            "value": "Wed, 15 Jan 2025 21:54:48 +1300"
+                        },
+                        {
+                            "name": "X-Gm-Features",
+                            "value": "AS18NWBIVvIWCP7-JB42GtD77uAMYjLkhJiVDz_TRJ_Xj-lnT34hVGZb5iY6NSo"
+                        },
+                        {
+                            "name": "Message-ID",
+                            "value": "<CACtz7o_9-1AeQ-hY5+NTD7PhaK3fgbjYYuixLxw0RCR1tv3DzA@mail.example.com>"
+                        },
+                        {
+                            "name": "Subject",
+                            "value": "Hello"
+                        },
+                        {
+                            "name": "To",
+                            "value": "test@mail.example.com"
+                        },
+                        {
+                            "name": "Content-Type",
+                            "value": "multipart/alternative; boundary=\"0000000000004956b80640f24ec4\""
+                        }
+                    ],
+                    "commonHeaders": {
+                        "returnPath": "sender@example.com",
+                        "from": [
+                            "Example Sender <sender@example.com>"
+                        ],
+                        "date": "Wed, 15 Jan 2025 21:54:48 +1300",
+                        "to": [
+                            "test@mail.example.com"
+                        ],
+                        "messageId": "<CACtz7o_9-1AeQ-hY5+NTD7PhaK3fgbjYYuixLxw0RCR1tv3DzA@mail.example.com>",
+                        "subject": "Hello"
+                    }
+                },
+                "receipt": {
+                    "timestamp": "2025-01-15T08:55:02.392Z",
+                    "processingTimeMillis": 757,
+                    "recipients": [
+                        "test@mail.example.com"
+                    ],
+                    "spamVerdict": {
+                        "status": "PASS"
+                    },
+                    "virusVerdict": {
+                        "status": "PASS"
+                    },
+                    "spfVerdict": {
+                        "status": "PASS"
+                    },
+                    "dkimVerdict": {
+                        "status": "PASS"
+                    },
+                    "dmarcVerdict": {
+                        "status": "PASS"
+                    },
+                    "action": {
+                        "type": "Lambda",
+                        "functionArn": "arn:aws:lambda:ap-southeast-2:123456789012:function:ses-mail-email-processor",
+                        "invocationType": "Event"
+                    }
+                }
+            }
+        }
+    ]
+}

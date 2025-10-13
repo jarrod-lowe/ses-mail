@@ -34,6 +34,8 @@ resource "aws_s3_bucket_public_access_block" "email_storage" {
 }
 
 # Lifecycle rule to expire old emails
+# Note: Lambda deletes emails immediately after successful Gmail import
+# This lifecycle rule serves as a safety net for emails that failed to be deleted
 resource "aws_s3_bucket_lifecycle_configuration" "email_storage" {
   bucket = aws_s3_bucket.email_storage.id
 

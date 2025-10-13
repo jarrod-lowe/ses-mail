@@ -35,6 +35,7 @@ data "aws_iam_policy_document" "lambda_s3_access" {
     effect = "Allow"
     actions = [
       "s3:GetObject",
+      "s3:DeleteObject",
       "s3:ListBucket"
     ]
     resources = [
@@ -57,7 +58,8 @@ data "aws_iam_policy_document" "lambda_ssm_access" {
     effect = "Allow"
     actions = [
       "ssm:GetParameter",
-      "ssm:GetParameters"
+      "ssm:GetParameters",
+      "ssm:PutParameter"
     ]
     resources = [aws_ssm_parameter.gmail_token.arn]
   }

@@ -117,6 +117,10 @@ def process_ses_record(record, service):
 
         logger.info(f"  Successfully imported to Gmail: {gmail_response.get('id')}")
 
+        # Delete email from S3 after successful import
+        delete_email_from_s3(message_id)
+        logger.info(f"  Deleted email from S3")
+
         return {
             'messageId': message_id,
             'gmail_id': gmail_response.get('id'),
@@ -230,6 +234,28 @@ def fetch_raw_email_from_s3(message_id: str) -> bytes:
         return obj['Body'].read()
     except ClientError as e:
         raise RuntimeError(f"Failed to fetch email from S3: {e}")
+
+
+def delete_email_from_s3(message_id: str) -> None:
+    """
+    Delete the email from S3 after successful import to Gmail.
+
+    Args:
+        message_id: SES message ID
+    """
+    if not EMAIL_BUCKET:
+        raise RuntimeError("EMAIL_BUCKET environment variable must be set")
+
+    # Construct S3 key: emails/{messageId}
+    s3_key = f"{S3_PREFIX}/{message_id}"
+
+    try:
+        s3_client.delete_object(Bucket=EMAIL_BUCKET, Key=s3_key)
+        logger.info(f"Deleted s3://{EMAIL_BUCKET}/{s3_key}")
+    except ClientError as e:
+        # Log error but don't fail the whole operation
+        # Email is already in Gmail, so S3 cleanup failure is not critical
+        logger.error(f"Failed to delete email from S3: {e}")
 
 
 def gmail_import(service, raw_bytes: bytes, label_ids: List[str]) -> Dict[str, Any]:
