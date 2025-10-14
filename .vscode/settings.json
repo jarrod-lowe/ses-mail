@@ -8,6 +8,8 @@
         "googleapiclient",
         "noncurrent",
         "resp",
+        "rrod",
+        "testmail",
         "tfstate",
         "tfvars",
         "TLSRP",

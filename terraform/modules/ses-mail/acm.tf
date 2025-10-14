@@ -1,16 +1,5 @@
 # ACM Certificate for MTA-STS (must be in us-east-1 for CloudFront)
-provider "aws" {
-  alias  = "us_east_1"
-  region = "us-east-1"
-
-  default_tags {
-    tags = {
-      Project     = "ses-mail"
-      ManagedBy   = "terraform"
-      Environment = var.environment
-    }
-  }
-}
+# Provider is passed in from the calling environment
 
 # ACM certificate for mta-sts subdomain (one per domain)
 resource "aws_acm_certificate" "mta_sts" {

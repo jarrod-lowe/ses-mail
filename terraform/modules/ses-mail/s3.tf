@@ -1,6 +1,9 @@
+# Get current AWS account ID
+data "aws_caller_identity" "current" {}
+
 # Local variables for resource naming
 locals {
-  email_bucket_name = "ses-mail-storage-${var.environment}"
+  email_bucket_name = "ses-mail-storage-${data.aws_caller_identity.current.account_id}-${var.environment}"
 }
 
 # S3 bucket for storing incoming emails
@@ -93,6 +96,3 @@ resource "aws_s3_bucket_policy" "email_storage" {
   bucket = aws_s3_bucket.email_storage.id
   policy = data.aws_iam_policy_document.s3_bucket_policy.json
 }
-
-# Get current AWS account ID
-data "aws_caller_identity" "current" {}

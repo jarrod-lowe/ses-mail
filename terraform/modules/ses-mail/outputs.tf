@@ -38,6 +38,11 @@ output "lambda_function_arn" {
   value       = aws_lambda_function.email_processor.arn
 }
 
+output "ses_receipt_rule_set" {
+  description = "Name of the SES receipt rule set"
+  value       = aws_ses_receipt_rule_set.main.rule_set_name
+}
+
 output "ssm_parameter_name" {
   description = "SSM Parameter Store parameter name for Gmail token"
   value       = aws_ssm_parameter.gmail_token.name

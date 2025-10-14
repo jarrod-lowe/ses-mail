@@ -4,7 +4,7 @@
 # S3 bucket for MTA-STS policy file
 resource "aws_s3_bucket" "mta_sts" {
   count  = var.mta_sts_mode != "none" ? 1 : 0
-  bucket = "mta-sts-ses-mail-${var.environment}"
+  bucket = "mta-sts-ses-mail-${data.aws_caller_identity.current.account_id}-${var.environment}"
 }
 
 # Block public access (CloudFront will access via OAC)

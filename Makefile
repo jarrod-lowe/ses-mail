@@ -1,11 +1,23 @@
 .PHONY: help package init plan apply plan-destroy destroy clean
 
-# Get environment from terraform.tfvars or default to prod
-ENVIRONMENT ?= $(shell grep '^environment' terraform/terraform.tfvars 2>/dev/null | cut -d'=' -f2 | tr -d ' "' || echo "prod")
-AWS_REGION ?= $(shell grep '^aws_region' terraform/terraform.tfvars 2>/dev/null | cut -d'=' -f2 | tr -d ' "' || echo "ap-southeast-2")
+# Environment selection (test or prod)
+ENV ?= test
+
+# Validate environment
+ifeq ($(filter $(ENV),test prod),)
+$(error ENV must be 'test' or 'prod'. Usage: make <target> ENV=test)
+endif
+
+# Environment directory
+ENV_DIR = terraform/environments/$(ENV)
+MODULE_DIR = terraform/modules/ses-mail
+
+# Get configuration from environment's terraform.tfvars
+AWS_REGION ?= $(shell grep '^aws_region' $(ENV_DIR)/terraform.tfvars 2>/dev/null | cut -d'=' -f2 | tr -d ' "' || echo "ap-southeast-2")
+ENVIRONMENT ?= $(ENV)
 
 # Ensure state bucket and get its name
-STATE_BUCKET = $(shell terraform/scripts/ensure-state-bucket.sh | grep TERRAFORM_STATE_BUCKET | cut -d'=' -f2)
+STATE_BUCKET = $(shell $(MODULE_DIR)/scripts/ensure-state-bucket.sh | grep TERRAFORM_STATE_BUCKET | cut -d'=' -f2)
 
 # Terraform backend config
 BACKEND_CONFIG = -backend-config="bucket=$(STATE_BUCKET)" \
@@ -16,76 +28,81 @@ BACKEND_CONFIG = -backend-config="bucket=$(STATE_BUCKET)" \
 help:
 	@echo "SES Mail Infrastructure - Makefile targets:"
 	@echo ""
-	@echo "  make package       - Package Lambda function with dependencies"
-	@echo "  make init          - Initialize Terraform (creates state bucket)"
-	@echo "  make plan          - Create Terraform plan file"
-	@echo "  make apply         - Apply the plan file (requires plan)"
-	@echo "  make plan-destroy  - Create destroy plan file"
-	@echo "  make destroy       - Apply the destroy plan (requires plan-destroy)"
-	@echo "  make clean         - Clean up Terraform files and plans"
+	@echo "  make package ENV=<env>       - Package Lambda function with dependencies"
+	@echo "  make init ENV=<env>          - Initialize Terraform (creates state bucket)"
+	@echo "  make plan ENV=<env>          - Create Terraform plan file"
+	@echo "  make apply ENV=<env>         - Apply the plan file (requires plan)"
+	@echo "  make plan-destroy ENV=<env>  - Create destroy plan file"
+	@echo "  make destroy ENV=<env>       - Apply the destroy plan (requires plan-destroy)"
+	@echo "  make clean ENV=<env>         - Clean up Terraform files and plans"
 	@echo ""
-	@echo "Current environment: $(ENVIRONMENT)"
+	@echo "Environments: test, prod"
+	@echo "Current environment: $(ENV)"
 	@echo "Current region: $(AWS_REGION)"
+	@echo ""
+	@echo "Examples:"
+	@echo "  make init ENV=test"
+	@echo "  make plan ENV=prod"
 	@echo ""
 
 # Package Lambda function with dependencies
-terraform/lambda/package: requirements.txt terraform/lambda/email_processor.py
+$(MODULE_DIR)/lambda/package: requirements.txt $(MODULE_DIR)/lambda/email_processor.py
 	@echo "Packaging Lambda function with dependencies..."
-	@rm -rf terraform/lambda/package
-	@mkdir -p terraform/lambda/package
-	@pip3 install -q -r requirements.txt -t terraform/lambda/package
-	@cp terraform/lambda/email_processor.py terraform/lambda/package/
+	@rm -rf $(MODULE_DIR)/lambda/package
+	@mkdir -p $(MODULE_DIR)/lambda/package
+	@pip3 install -q -r requirements.txt -t $(MODULE_DIR)/lambda/package
+	@cp $(MODULE_DIR)/lambda/email_processor.py $(MODULE_DIR)/lambda/package/
 	@echo "Lambda package created"
 
-package: terraform/lambda/package
+package: $(MODULE_DIR)/lambda/package
 
 # Initialize Terraform (depends on state bucket existing)
-terraform/.terraform: terraform/scripts/ensure-state-bucket.sh terraform/terraform.tfvars
+$(ENV_DIR)/.terraform: $(MODULE_DIR)/scripts/ensure-state-bucket.sh $(ENV_DIR)/terraform.tfvars
 	@echo "Ensuring state bucket exists..."
-	@terraform/scripts/ensure-state-bucket.sh
-	@echo "Initializing Terraform..."
-	cd terraform && terraform init $(BACKEND_CONFIG)
-	@touch terraform/.terraform
+	@$(MODULE_DIR)/scripts/ensure-state-bucket.sh
+	@echo "Initializing Terraform for $(ENV) environment..."
+	cd $(ENV_DIR) && terraform init $(BACKEND_CONFIG)
+	@touch $(ENV_DIR)/.terraform
 
-init: terraform/.terraform
+init: $(ENV_DIR)/.terraform
 
 # Create plan file
-terraform/terraform.plan: terraform/.terraform terraform/*.tf terraform/lambda/package
-	@echo "Creating Terraform plan..."
-	cd terraform && terraform plan -out=terraform.plan
-	@echo "Plan created: terraform/terraform.plan"
+$(ENV_DIR)/terraform.plan: $(ENV_DIR)/.terraform $(ENV_DIR)/*.tf $(MODULE_DIR)/*.tf $(MODULE_DIR)/lambda/package
+	@echo "Creating Terraform plan for $(ENV) environment..."
+	cd $(ENV_DIR) && terraform plan -out=terraform.plan
+	@echo "Plan created: $(ENV_DIR)/terraform.plan"
 
-plan: terraform/terraform.plan
+plan: $(ENV_DIR)/terraform.plan
 
 # Apply the plan file
-apply: terraform/terraform.plan
-	@echo "Applying Terraform plan..."
-	cd terraform && terraform apply terraform.plan && rm -f terraform.plan || { rm -f terraform.plan; exit 1; }
+apply: $(ENV_DIR)/terraform.plan
+	@echo "Applying Terraform plan for $(ENV) environment..."
+	cd $(ENV_DIR) && terraform apply terraform.plan && rm -f terraform.plan || { rm -f terraform.plan; exit 1; }
 	@echo "Plan applied and removed"
 
 # Create destroy plan file
-terraform/terraform.destroy.plan: terraform/.terraform
-	@echo "Creating Terraform destroy plan..."
-	cd terraform && terraform plan -destroy -out=terraform.destroy.plan
-	@echo "Destroy plan created: terraform/terraform.destroy.plan"
+$(ENV_DIR)/terraform.destroy.plan: $(ENV_DIR)/.terraform
+	@echo "Creating Terraform destroy plan for $(ENV) environment..."
+	cd $(ENV_DIR) && terraform plan -destroy -out=terraform.destroy.plan
+	@echo "Destroy plan created: $(ENV_DIR)/terraform.destroy.plan"
 
-plan-destroy: terraform/terraform.destroy.plan
+plan-destroy: $(ENV_DIR)/terraform.destroy.plan
 
 # Apply the destroy plan
-destroy: terraform/terraform.destroy.plan
-	@echo "Applying Terraform destroy plan..."
-	cd terraform && terraform apply terraform.destroy.plan && rm -f terraform.destroy.plan || { rm -f terraform.destroy.plan; exit 1; }
+destroy: $(ENV_DIR)/terraform.destroy.plan
+	@echo "Applying Terraform destroy plan for $(ENV) environment..."
+	cd $(ENV_DIR) && terraform apply terraform.destroy.plan && rm -f terraform.destroy.plan || { rm -f terraform.destroy.plan; exit 1; }
 	@echo "Destroy plan applied and removed"
 
 # Clean up Terraform files
 clean:
-	@echo "Cleaning up Terraform files..."
-	rm -rf terraform/.terraform
-	rm -f terraform/.terraform.lock.hcl
-	rm -f terraform/terraform.plan
-	rm -f terraform/terraform.destroy.plan
-	rm -f terraform/*.tfstate
-	rm -f terraform/*.tfstate.backup
-	rm -f terraform/lambda/*.zip
-	rm -rf terraform/lambda/package
-	@echo "Clean-up complete"
+	@echo "Cleaning up Terraform files for $(ENV) environment..."
+	rm -rf $(ENV_DIR)/.terraform
+	rm -f $(ENV_DIR)/.terraform.lock.hcl
+	rm -f $(ENV_DIR)/terraform.plan
+	rm -f $(ENV_DIR)/terraform.destroy.plan
+	rm -f $(ENV_DIR)/*.tfstate
+	rm -f $(ENV_DIR)/*.tfstate.backup
+	rm -f $(MODULE_DIR)/lambda/*.zip
+	rm -rf $(MODULE_DIR)/lambda/package
+	@echo "Clean-up complete for $(ENV) environment"

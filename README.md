@@ -55,14 +55,32 @@
 
 Once you have created your Gmail OAuth token (above), you can deploy the AWS infrastructure:
 
+### Directory Structure
+
+The infrastructure is organized into environments and a reusable module:
+
+```
+terraform/
+├── environments/
+│   ├── test/          # Test environment configuration
+│   └── prod/          # Production environment configuration
+└── modules/
+    └── ses-mail/      # Reusable SES mail module
+```
+
 ### Quick Start
 
 1. The infrastructure uses a Terraform state bucket in S3. The Makefile will automatically create `terraform-state-{account-id}` in your AWS account on first run.
 
-2. Review and customize the configuration:
+2. Review and customize the configuration for your environment:
 
    ```bash
-   vi terraform/terraform.tfvars
+   # For test environment
+   vi terraform/environments/test/terraform.tfvars
+
+   # For production environment
+   vi terraform/environments/prod/terraform.tfvars
+
    # Update domain(s) and SNS topic ARN as needed
    # domain should be a list: ["mail.example.com", "mail2.example.com"]
    ```
@@ -70,9 +88,15 @@ Once you have created your Gmail OAuth token (above), you can deploy the AWS inf
 3. Deploy the infrastructure (first pass):
 
    ```bash
-   make init   # Initialize Terraform and create state bucket
-   make plan   # Package Lambda and create a plan file
-   make apply  # Apply the plan (creates resources and outputs DNS records)
+   # For test environment
+   make init ENV=test   # Initialize Terraform and create state bucket
+   make plan ENV=test   # Package Lambda and create a plan file
+   make apply ENV=test  # Apply the plan (creates resources and outputs DNS records)
+
+   # For production environment
+   make init ENV=prod   # Initialize Terraform and create state bucket
+   make plan ENV=prod   # Package Lambda and create a plan file
+   make apply ENV=prod  # Apply the plan (creates resources and outputs DNS records)
    ```
 
    **Note:** The `make plan` target automatically packages the Lambda function with its dependencies. If MTA-STS is enabled, the first apply will create the ACM certificate but CloudFront creation will fail. This is expected - continue to step 4.
@@ -82,7 +106,12 @@ Once you have created your Gmail OAuth token (above), you can deploy the AWS inf
    First, get the DNS records from Terraform:
 
    ```bash
-   cd terraform
+   # For test environment
+   cd terraform/environments/test
+   terraform output dns_configuration_summary
+
+   # For production environment
+   cd terraform/environments/prod
    terraform output dns_configuration_summary
    ```
 
@@ -149,11 +178,11 @@ Once you have created your Gmail OAuth token (above), you can deploy the AWS inf
 
    ```bash
    # Get the records in JSON format
-   cd terraform
+   cd terraform/environments/test  # or prod
    terraform output -json dns_configuration_summary > /tmp/dns-records.json
 
    # Then manually create records or use change-resource-record-sets
-   # See terraform/README.md for detailed CLI examples
+   # See terraform/modules/ses-mail/README.md for detailed CLI examples
    ```
 
    Wait 5-15 minutes for DNS propagation, then verify:
@@ -174,16 +203,23 @@ Once you have created your Gmail OAuth token (above), you can deploy the AWS inf
    Once all certificates are validated (usually 5-30 minutes), run terraform again to create CloudFront distributions:
 
    ```bash
-   make plan
-   make apply
+   make plan ENV=test  # or ENV=prod
+   make apply ENV=test  # or ENV=prod
    ```
 
 6. Upload your Gmail token to SSM Parameter Store:
 
    ```bash
-   # Replace 'test' with your environment name from terraform.tfvars
+   # For test environment
    aws ssm put-parameter \
      --name "/ses-mail/test/gmail-token" \
+     --value "$(cat token.json)" \
+     --type SecureString \
+     --overwrite
+
+   # For production environment
+   aws ssm put-parameter \
+     --name "/ses-mail/prod/gmail-token" \
      --value "$(cat token.json)" \
      --type SecureString \
      --overwrite
@@ -191,10 +227,12 @@ Once you have created your Gmail OAuth token (above), you can deploy the AWS inf
 
 ### Workflow
 
-* **make package**: Packages the Lambda function with dependencies (automatically run by make plan)
-* **make plan**: Creates a plan file showing what changes will be made
-* **make apply**: Applies the plan file (depends on plan, so will create it if missing)
-* **make plan-destroy**: Creates a destroy plan
-* **make destroy**: Applies the destroy plan (depends on plan-destroy)
+All commands now require an `ENV` parameter to specify which environment (test or prod):
 
-For detailed instructions and configuration options, see [terraform/README.md](terraform/README.md).
+* **make package ENV=test**: Packages the Lambda function with dependencies (automatically run by make plan)
+* **make plan ENV=test**: Creates a plan file showing what changes will be made
+* **make apply ENV=test**: Applies the plan file (depends on plan, so will create it if missing)
+* **make plan-destroy ENV=test**: Creates a destroy plan
+* **make destroy ENV=test**: Applies the destroy plan (depends on plan-destroy)
+
+For detailed instructions and configuration options, see [terraform/modules/ses-mail/README.md](terraform/modules/ses-mail/README.md).

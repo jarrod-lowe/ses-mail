@@ -1,13 +1,12 @@
 client_secret.json
 token.json
 
-# Terraform
-terraform/terraform.tfvars
-terraform/.terraform/
-terraform/.terraform.lock.hcl
-terraform/*.tfstate
-terraform/*.tfstate.backup
-terraform/lambda/*.zip
-terraform/lambda/package/
-terraform/terraform.plan
-terraform/terraform.destroy.plan
+# Terraform - keep tfvars since they're environment-specific and tracked
+terraform/environments/*/.terraform/
+terraform/environments/*/.terraform.lock.hcl
+terraform/environments/*/*.tfstate
+terraform/environments/*/*.tfstate.backup
+terraform/environments/*/terraform.plan
+terraform/environments/*/terraform.destroy.plan
+terraform/modules/ses-mail/lambda/*.zip
+terraform/modules/ses-mail/lambda/package/
