@@ -35,24 +35,41 @@ resource "aws_ses_receipt_rule" "main" {
     position          = 1
   }
 
-  # Trigger Lambda function
+  # Validate email synchronously (RequestResponse)
+  lambda_action {
+    function_arn    = aws_lambda_function.email_validator.arn
+    invocation_type = "RequestResponse"
+    position        = 2
+  }
+
+  # Trigger email processor Lambda function
   lambda_action {
     function_arn    = aws_lambda_function.email_processor.arn
     invocation_type = "Event"
-    position        = 2
+    position        = 3
   }
 
   depends_on = [
     aws_s3_bucket_policy.email_storage,
-    aws_lambda_permission.allow_ses
+    aws_lambda_permission.allow_ses,
+    aws_lambda_permission.allow_ses_validator
   ]
 }
 
-# Permission for SES to invoke Lambda
+# Permission for SES to invoke email processor Lambda
 resource "aws_lambda_permission" "allow_ses" {
   statement_id  = "AllowExecutionFromSES"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.email_processor.function_name
+  principal     = "ses.amazonaws.com"
+  source_account = data.aws_caller_identity.current.account_id
+}
+
+# Permission for SES to invoke email validator Lambda
+resource "aws_lambda_permission" "allow_ses_validator" {
+  statement_id  = "AllowExecutionFromSES"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.email_validator.function_name
   principal     = "ses.amazonaws.com"
   source_account = data.aws_caller_identity.current.account_id
 }

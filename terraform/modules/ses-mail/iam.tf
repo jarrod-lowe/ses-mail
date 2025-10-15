@@ -77,3 +77,15 @@ resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
   role       = aws_iam_role.lambda_execution.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
+
+# IAM role for email validator Lambda function
+resource "aws_iam_role" "lambda_validator_execution" {
+  name               = "ses-mail-lambda-validator-${var.environment}"
+  assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
+}
+
+# Attach AWS managed policy for basic Lambda execution (CloudWatch Logs) to validator
+resource "aws_iam_role_policy_attachment" "lambda_validator_basic_execution" {
+  role       = aws_iam_role.lambda_validator_execution.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}

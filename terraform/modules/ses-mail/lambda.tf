@@ -38,3 +38,32 @@ resource "aws_cloudwatch_log_group" "lambda_logs" {
   name              = "/aws/lambda/${aws_lambda_function.email_processor.function_name}"
   retention_in_days = 30
 }
+
+# Archive the email validator Lambda function code (single file, no dependencies)
+data "archive_file" "validator_zip" {
+  type        = "zip"
+  source_file = "${path.module}/lambda/email_validator.py"
+  output_path = "${path.module}/lambda/email_validator.zip"
+}
+
+# Lambda function for validating emails (RequestResponse invocation)
+resource "aws_lambda_function" "email_validator" {
+  filename         = data.archive_file.validator_zip.output_path
+  function_name    = "ses-mail-email-validator-${var.environment}"
+  role            = aws_iam_role.lambda_validator_execution.arn
+  handler         = "email_validator.lambda_handler"
+  source_code_hash = data.archive_file.validator_zip.output_base64sha256
+  runtime         = "python3.12"
+  timeout         = 10
+  memory_size     = 128
+
+  depends_on = [
+    aws_iam_role_policy_attachment.lambda_validator_basic_execution
+  ]
+}
+
+# CloudWatch Log Group for validator Lambda function
+resource "aws_cloudwatch_log_group" "lambda_validator_logs" {
+  name              = "/aws/lambda/${aws_lambda_function.email_validator.function_name}"
+  retention_in_days = 30
+}
