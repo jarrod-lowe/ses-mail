@@ -1,4 +1,4 @@
-.PHONY: help package init plan apply plan-destroy destroy clean
+.PHONY: help package init plan apply plan-destroy destroy clean backup-tfvars restore-tfvars
 
 # Environment selection (test or prod)
 ENV ?= test

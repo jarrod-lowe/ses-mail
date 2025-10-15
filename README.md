@@ -59,7 +59,7 @@ Once you have created your Gmail OAuth token (above), you can deploy the AWS inf
 
 The infrastructure is organized into environments and a reusable module:
 
-```
+```plain
 terraform/
 ├── environments/
 │   ├── test/          # Test environment configuration
