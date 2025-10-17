@@ -266,6 +266,43 @@ SES → S3 → SNS (X-Ray tracing) → SQS Input Queue → EventBridge Pipes[rou
 
 The SNS topic is configured with Active tracing to initiate X-Ray traces for the entire email processing pipeline. This allows end-to-end visibility of email processing across all AWS services.
 
+## AWS Resource Groups
+
+The infrastructure includes an AWS Resource Group that provides a single view of all resources for each environment. All resources are automatically tagged with:
+
+* **Project**: `ses-mail`
+* **ManagedBy**: `terraform`
+* **Environment**: `test` or `prod`
+
+The Resource Group uses these tags to organize resources, making it easy to:
+
+* View all related resources in one place
+* Track costs by environment
+* Manage resources collectively
+* Monitor resource health
+
+**Accessing the Resource Group:**
+
+```bash
+# Get the Resource Group URL from Terraform output
+cd terraform/environments/test  # or prod
+terraform output resource_group_url
+
+# Or view directly in AWS Console:
+# https://console.aws.amazon.com/resource-groups/group/ses-mail-{environment}
+```
+
+The Resource Group includes all infrastructure components:
+
+* S3 buckets
+* Lambda functions
+* DynamoDB tables
+* SQS queues
+* SNS topics
+* CloudWatch alarms and log groups
+* IAM roles
+* SES resources
+
 ## Email Routing Configuration
 
 ### DynamoDB Routing Rules Table

@@ -17,3 +17,13 @@ output "s3_bucket_name" {
   description = "Name of the S3 bucket for email storage"
   value       = module.ses_mail.s3_bucket_name
 }
+
+output "resource_group_name" {
+  description = "Name of the AWS Resource Group for this environment"
+  value       = module.ses_mail.resource_group_name
+}
+
+output "resource_group_url" {
+  description = "URL to view the Resource Group in AWS Console"
+  value       = module.ses_mail.resource_group_url
+}

@@ -63,6 +63,21 @@ output "dynamodb_routing_table_arn" {
   value       = aws_dynamodb_table.email_routing.arn
 }
 
+output "resource_group_name" {
+  description = "Name of the AWS Resource Group for this environment"
+  value       = aws_resourcegroups_group.ses_mail.name
+}
+
+output "resource_group_arn" {
+  description = "ARN of the AWS Resource Group for this environment"
+  value       = aws_resourcegroups_group.ses_mail.arn
+}
+
+output "resource_group_url" {
+  description = "URL to view the Resource Group in AWS Console"
+  value       = "https://console.aws.amazon.com/resource-groups/group/${aws_resourcegroups_group.ses_mail.name}"
+}
+
 output "dns_configuration_summary" {
   description = "Summary of all DNS records to configure in Route53, grouped by domain"
   value = {

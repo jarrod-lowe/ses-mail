@@ -107,5 +107,10 @@ A task is not complete until:
   - Create runbook for handling DLQ messages and failures
   - _Requirements: 6.1, 6.4, 8.5_
 
-- [ ] 16. Add a Resource Group
+- [x] 16. Add a Resource Group
   - Create an AWS Resource Group that includes all resources for a particular environment
+  - Uses tag-based query matching on Project=ses-mail and Environment={env}
+  - Outputs include Resource Group name and AWS Console URL
+
+- [ ] 17. Add a myApplication application
+  - Create an AWS myApplication that matches via tags

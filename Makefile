@@ -1,4 +1,4 @@
-.PHONY: help package init plan apply plan-destroy destroy clean backup-tfvars restore-tfvars fmt validate
+.PHONY: help package init plan apply plan-destroy destroy clean backup-tfvars restore-tfvars fmt validate outputs
 
 # Environment selection (test or prod)
 ENV ?= test
@@ -102,6 +102,9 @@ terraform/.fmt: terraform/environments/*/*.tf terraform/modules/ses-mail/*.tf
 
 validate: $(ENV_DIR)/.terraform
 	cd $(ENV_DIR) && terraform validate
+
+outputs: $(ENV_DIR)/.terraform
+	cd $(ENV_DIR) && terraform output
 
 # Clean up Terraform files
 clean:

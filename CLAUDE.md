@@ -21,6 +21,9 @@ AWS_PROFILE=ses-mail make apply ENV=test
 
 # Validate configuration
 AWS_PROFILE=ses-mail make validate ENV=test
+
+# Get terraform outputs
+AWS_PROFILE=ses-mail make outputs ENV=test
 ```
 
 `terraform fmt` is automatically run by any of those targets if needed.
@@ -153,9 +156,6 @@ terraform/
             ├── email_validator.py   # Sync validator (to be removed)
             └── package/             # Lambda dependencies (pip install -t)
 ```
-
-
-**Important**: Read the markdown files in the above 
 
 ## Key Development Patterns
 
