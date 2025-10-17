@@ -15,13 +15,13 @@ A task is not complete until:
   - Add sample routing rules for testing
   - _Requirements: 8.1, 8.3, 8.5_
 
-- [ ] 2. Create SNS topic with X-Ray tracing configuration
+- [x] 2. Create SNS topic with X-Ray tracing configuration
   - Replace direct lambda invocation with SNS publish action in SES rule
   - Configure SNS topic with Active tracing for X-Ray
   - Set up SNS to SQS subscription for input queue
   - _Requirements: 1.1, 1.2, 10.1_
 
-- [ ] 3. Implement SQS input queue and dead letter queue infrastructure
+- [x] 3. Implement SQS input queue and dead letter queue infrastructure
   - Create input queue for EventBridge Pipes source
   - Configure dead letter queue with appropriate retention
   - Set up CloudWatch alarms for DLQ monitoring
@@ -106,3 +106,6 @@ A task is not complete until:
   - Set up log aggregation and analysis for troubleshooting
   - Create runbook for handling DLQ messages and failures
   - _Requirements: 6.1, 6.4, 8.5_
+
+- [ ] 16. Add a Resource Group
+  - Create an AWS Resource Group that includes all resources for a particular environment

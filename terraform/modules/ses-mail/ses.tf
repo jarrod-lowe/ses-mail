@@ -28,21 +28,22 @@ resource "aws_ses_receipt_rule" "main" {
   enabled       = true
   scan_enabled  = true # Enable spam and virus scanning
 
-  # Store email in S3
+  # Store email in S3 and trigger SNS notification
   s3_action {
     bucket_name       = aws_s3_bucket.email_storage.id
     object_key_prefix = "emails/"
+    topic_arn         = aws_sns_topic.email_processing.arn
     position          = 1
   }
 
-  # Validate email synchronously (RequestResponse)
+  # Validate email synchronously (RequestResponse) - TO BE REMOVED IN TASK 12
   lambda_action {
     function_arn    = aws_lambda_function.email_validator.arn
     invocation_type = "RequestResponse"
     position        = 2
   }
 
-  # Trigger email processor Lambda function
+  # Trigger email processor Lambda function - TO BE REMOVED IN TASK 12
   lambda_action {
     function_arn    = aws_lambda_function.email_processor.arn
     invocation_type = "Event"
@@ -51,6 +52,7 @@ resource "aws_ses_receipt_rule" "main" {
 
   depends_on = [
     aws_s3_bucket_policy.email_storage,
+    aws_sns_topic_policy.email_processing,
     aws_lambda_permission.allow_ses,
     aws_lambda_permission.allow_ses_validator
   ]

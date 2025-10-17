@@ -162,6 +162,7 @@ terraform/
 ### Task-Driven Development
 
 1. Read specification documents in `.kiro/specs/{project}/` (the current project is `ses-email-routing-modernization`)
+   1. Files include `requirements.md`, `design.md`, and `tasks.md`
 2. Follow tasks in order from `tasks.md`
 3. A task is not complete until:
    - The code is written

@@ -237,6 +237,35 @@ All commands now require an `ENV` parameter to specify which environment (test o
 
 For detailed instructions and configuration options, see [terraform/modules/ses-mail/README.md](terraform/modules/ses-mail/README.md).
 
+## Architecture
+
+### Email Processing Flow
+
+The system uses an event-driven architecture for processing incoming emails:
+
+```text
+SES → S3 → SNS (X-Ray tracing) → SQS Input Queue → EventBridge Pipes[router enrichment] → EventBridge Event Bus → Handler Queues → Lambda Processors
+```
+
+**Current Implementation Status:**
+
+1. **SES Receipt** - Email arrives and is scanned for spam/virus
+2. **S3 Storage + SNS Notification** - SES stores email in S3 and triggers SNS (single action)
+3. **SNS Topic** - Receives notification with X-Ray Active tracing enabled
+4. **SQS Input Queue** - Receives messages from SNS for EventBridge Pipes processing
+5. **Legacy Lambda Actions** - Direct lambda invocations (TO BE REMOVED)
+
+**Infrastructure Components:**
+
+* **SNS Topic**: `ses-email-processing-{environment}` with X-Ray Active tracing
+* **SQS Input Queue**: `ses-email-input-{environment}` with 3-retry DLQ policy
+* **Dead Letter Queue**: `ses-email-input-dlq-{environment}` with 14-day retention
+* **CloudWatch Alarms**: Monitors DLQ messages and queue age
+
+**X-Ray Distributed Tracing:**
+
+The SNS topic is configured with Active tracing to initiate X-Ray traces for the entire email processing pipeline. This allows end-to-end visibility of email processing across all AWS services.
+
 ## Email Routing Configuration
 
 ### DynamoDB Routing Rules Table
