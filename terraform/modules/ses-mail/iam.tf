@@ -89,3 +89,21 @@ resource "aws_iam_role_policy_attachment" "lambda_validator_basic_execution" {
   role       = aws_iam_role.lambda_validator_execution.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
+
+# IAM policy document for validator Lambda SES access
+data "aws_iam_policy_document" "lambda_validator_ses_access" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "ses:SendBounce"
+    ]
+    resources = ["*"]
+  }
+}
+
+# IAM policy for validator Lambda to send bounces
+resource "aws_iam_role_policy" "lambda_validator_ses_access" {
+  name   = "lambda-validator-ses-access-${var.environment}"
+  role   = aws_iam_role.lambda_validator_execution.id
+  policy = data.aws_iam_policy_document.lambda_validator_ses_access.json
+}

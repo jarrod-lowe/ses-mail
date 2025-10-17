@@ -57,8 +57,15 @@ resource "aws_lambda_function" "email_validator" {
   timeout         = 10
   memory_size     = 128
 
+  environment {
+    variables = {
+      BOUNCE_SENDER = "mailer-daemon@${var.domain[0]}"
+    }
+  }
+
   depends_on = [
-    aws_iam_role_policy_attachment.lambda_validator_basic_execution
+    aws_iam_role_policy_attachment.lambda_validator_basic_execution,
+    aws_iam_role_policy.lambda_validator_ses_access
   ]
 }
 
