@@ -58,18 +58,18 @@ resource "aws_ses_receipt_rule" "main" {
 
 # Permission for SES to invoke email processor Lambda
 resource "aws_lambda_permission" "allow_ses" {
-  statement_id  = "AllowExecutionFromSES"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.email_processor.function_name
-  principal     = "ses.amazonaws.com"
+  statement_id   = "AllowExecutionFromSES"
+  action         = "lambda:InvokeFunction"
+  function_name  = aws_lambda_function.email_processor.function_name
+  principal      = "ses.amazonaws.com"
   source_account = data.aws_caller_identity.current.account_id
 }
 
 # Permission for SES to invoke email validator Lambda
 resource "aws_lambda_permission" "allow_ses_validator" {
-  statement_id  = "AllowExecutionFromSES"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.email_validator.function_name
-  principal     = "ses.amazonaws.com"
+  statement_id   = "AllowExecutionFromSES"
+  action         = "lambda:InvokeFunction"
+  function_name  = aws_lambda_function.email_validator.function_name
+  principal      = "ses.amazonaws.com"
   source_account = data.aws_caller_identity.current.account_id
 }

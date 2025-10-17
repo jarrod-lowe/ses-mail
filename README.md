@@ -236,3 +236,73 @@ All commands now require an `ENV` parameter to specify which environment (test o
 * **make destroy ENV=test**: Applies the destroy plan (depends on plan-destroy)
 
 For detailed instructions and configuration options, see [terraform/modules/ses-mail/README.md](terraform/modules/ses-mail/README.md).
+
+## Email Routing Configuration
+
+### DynamoDB Routing Rules Table
+
+The system uses a DynamoDB table to store email routing rules. The table uses a single-table design pattern for extensibility.
+
+**Table Structure:**
+
+* **Primary Key (PK)**: `ROUTE#<email-pattern>` (e.g., `ROUTE#support@example.com`, `ROUTE#*@example.com`, `ROUTE#*`)
+* **Sort Key (SK)**: `RULE#v1` (allows versioning)
+* **Billing**: PAY_PER_REQUEST (no standing costs)
+
+**Routing Rules Attributes:**
+
+* `entity_type`: `ROUTE` (for filtering)
+* `recipient`: Email pattern (denormalized from PK)
+* `action`: `forward-to-gmail` | `bounce`
+* `target`: Gmail address for forwarding, or empty for bounces
+* `enabled`: Boolean (true/false)
+* `created_at`: ISO timestamp
+* `updated_at`: ISO timestamp
+* `description`: Human-readable description
+
+**Hierarchical Matching:**
+
+The router lambda performs lookups in this order (first match wins):
+
+1. Exact match: `ROUTE#user+tag@example.com`
+2. Normalized match: `ROUTE#user@example.com` (removes +tag)
+3. Domain wildcard: `ROUTE#*@example.com`
+4. Global wildcard: `ROUTE#*`
+
+**Managing Routing Rules:**
+
+Add rules via AWS CLI or Console:
+
+```bash
+# Example: Forward support emails to Gmail
+aws dynamodb put-item \
+  --table-name ses-email-routing-test \
+  --item '{
+    "PK": {"S": "ROUTE#support@example.com"},
+    "SK": {"S": "RULE#v1"},
+    "entity_type": {"S": "ROUTE"},
+    "recipient": {"S": "support@example.com"},
+    "action": {"S": "forward-to-gmail"},
+    "target": {"S": "your-email@gmail.com"},
+    "enabled": {"BOOL": true},
+    "created_at": {"S": "2025-01-18T10:00:00Z"},
+    "updated_at": {"S": "2025-01-18T10:00:00Z"},
+    "description": {"S": "Forward support emails to Gmail"}
+  }'
+
+# Example: Bounce all unmatched emails (default rule)
+aws dynamodb put-item \
+  --table-name ses-email-routing-test \
+  --item '{
+    "PK": {"S": "ROUTE#*"},
+    "SK": {"S": "RULE#v1"},
+    "entity_type": {"S": "ROUTE"},
+    "recipient": {"S": "*"},
+    "action": {"S": "bounce"},
+    "target": {"S": ""},
+    "enabled": {"BOOL": true},
+    "created_at": {"S": "2025-01-18T10:00:00Z"},
+    "updated_at": {"S": "2025-01-18T10:00:00Z"},
+    "description": {"S": "Default: bounce all unmatched emails"}
+  }'
+```

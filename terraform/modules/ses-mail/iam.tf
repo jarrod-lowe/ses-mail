@@ -13,7 +13,7 @@ resource "aws_ssm_parameter" "gmail_token" {
 # IAM policy document for Lambda assume role
 data "aws_iam_policy_document" "lambda_assume_role" {
   statement {
-    effect = "Allow"
+    effect  = "Allow"
     actions = ["sts:AssumeRole"]
 
     principals {
@@ -106,4 +106,50 @@ resource "aws_iam_role_policy" "lambda_validator_ses_access" {
   name   = "lambda-validator-ses-access-${var.environment}"
   role   = aws_iam_role.lambda_validator_execution.id
   policy = data.aws_iam_policy_document.lambda_validator_ses_access.json
+}
+
+# IAM role for router enrichment Lambda function (used by EventBridge Pipes)
+resource "aws_iam_role" "lambda_router_execution" {
+  name               = "ses-mail-lambda-router-${var.environment}"
+  assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
+}
+
+# Attach AWS managed policy for basic Lambda execution (CloudWatch Logs) to router
+resource "aws_iam_role_policy_attachment" "lambda_router_basic_execution" {
+  role       = aws_iam_role.lambda_router_execution.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+# IAM policy document for router Lambda DynamoDB access
+data "aws_iam_policy_document" "lambda_router_dynamodb_access" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "dynamodb:GetItem",
+      "dynamodb:Query"
+    ]
+    resources = [
+      aws_dynamodb_table.email_routing.arn
+    ]
+  }
+}
+
+# IAM policy for router Lambda to access DynamoDB routing table
+resource "aws_iam_role_policy" "lambda_router_dynamodb_access" {
+  name   = "lambda-router-dynamodb-access-${var.environment}"
+  role   = aws_iam_role.lambda_router_execution.id
+  policy = data.aws_iam_policy_document.lambda_router_dynamodb_access.json
+}
+
+# IAM policy for router Lambda to access S3 (to read email metadata)
+resource "aws_iam_role_policy" "lambda_router_s3_access" {
+  name   = "lambda-router-s3-access-${var.environment}"
+  role   = aws_iam_role.lambda_router_execution.id
+  policy = data.aws_iam_policy_document.lambda_s3_access.json
+}
+
+# Attach X-Ray write access for router Lambda (for distributed tracing)
+resource "aws_iam_role_policy_attachment" "lambda_router_xray_access" {
+  role       = aws_iam_role.lambda_router_execution.name
+  policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
 }

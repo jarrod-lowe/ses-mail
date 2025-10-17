@@ -12,17 +12,17 @@ data "archive_file" "lambda_zip" {
 resource "aws_lambda_function" "email_processor" {
   filename         = data.archive_file.lambda_zip.output_path
   function_name    = "ses-mail-email-processor-${var.environment}"
-  role            = aws_iam_role.lambda_execution.arn
-  handler         = "email_processor.lambda_handler"
+  role             = aws_iam_role.lambda_execution.arn
+  handler          = "email_processor.lambda_handler"
   source_code_hash = data.archive_file.lambda_zip.output_base64sha256
-  runtime         = "python3.12"
-  timeout         = 60
-  memory_size     = 256
+  runtime          = "python3.12"
+  timeout          = 60
+  memory_size      = 256
 
   environment {
     variables = {
       GMAIL_TOKEN_PARAMETER = aws_ssm_parameter.gmail_token.name
-      EMAIL_BUCKET         = aws_s3_bucket.email_storage.id
+      EMAIL_BUCKET          = aws_s3_bucket.email_storage.id
     }
   }
 
@@ -50,12 +50,12 @@ data "archive_file" "validator_zip" {
 resource "aws_lambda_function" "email_validator" {
   filename         = data.archive_file.validator_zip.output_path
   function_name    = "ses-mail-email-validator-${var.environment}"
-  role            = aws_iam_role.lambda_validator_execution.arn
-  handler         = "email_validator.lambda_handler"
+  role             = aws_iam_role.lambda_validator_execution.arn
+  handler          = "email_validator.lambda_handler"
   source_code_hash = data.archive_file.validator_zip.output_base64sha256
-  runtime         = "python3.12"
-  timeout         = 10
-  memory_size     = 128
+  runtime          = "python3.12"
+  timeout          = 10
+  memory_size      = 128
 
   environment {
     variables = {

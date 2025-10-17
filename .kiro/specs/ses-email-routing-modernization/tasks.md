@@ -1,6 +1,15 @@
 # Implementation Plan
 
-- [ ] 1. Set up DynamoDB routing rules table and infrastructure
+A task is not complete until:
+
+- The code has been written
+- It has been successfully deployed to test: `AWS_PROFILE=ses-mail make apply ENV=test`
+- It has been tested
+- The `README.md` has been updated
+- The task has been marked as done in this file
+- A `git commit` has been made
+
+- [x] 1. Set up DynamoDB routing rules table and infrastructure
   - Create DynamoDB table with proper schema for routing rules
   - Implement table with single-table pattern
   - Add sample routing rules for testing

@@ -53,6 +53,16 @@ output "cloudwatch_dashboard_url" {
   value       = "https://console.aws.amazon.com/cloudwatch/home?region=${var.aws_region}#dashboards:name=${aws_cloudwatch_dashboard.ses_mail.dashboard_name}"
 }
 
+output "dynamodb_routing_table_name" {
+  description = "Name of the DynamoDB routing rules table"
+  value       = aws_dynamodb_table.email_routing.name
+}
+
+output "dynamodb_routing_table_arn" {
+  description = "ARN of the DynamoDB routing rules table"
+  value       = aws_dynamodb_table.email_routing.arn
+}
+
 output "dns_configuration_summary" {
   description = "Summary of all DNS records to configure in Route53, grouped by domain"
   value = {

@@ -10,3 +10,4 @@ terraform/environments/*/terraform.plan
 terraform/environments/*/terraform.destroy.plan
 terraform/modules/ses-mail/lambda/*.zip
 terraform/modules/ses-mail/lambda/package/
+terraform/.fmt

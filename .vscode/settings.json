@@ -6,6 +6,7 @@
         "DMARC",
         "domainkey",
         "googleapiclient",
+        "kiro",
         "noncurrent",
         "resp",
         "rrod",

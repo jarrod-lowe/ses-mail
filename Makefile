@@ -1,4 +1,4 @@
-.PHONY: help package init plan apply plan-destroy destroy clean backup-tfvars restore-tfvars
+.PHONY: help package init plan apply plan-destroy destroy clean backup-tfvars restore-tfvars fmt validate
 
 # Environment selection (test or prod)
 ENV ?= test
@@ -57,7 +57,7 @@ $(MODULE_DIR)/lambda/package: requirements.txt $(MODULE_DIR)/lambda/email_proces
 package: $(MODULE_DIR)/lambda/package
 
 # Initialize Terraform (depends on state bucket existing)
-$(ENV_DIR)/.terraform: $(MODULE_DIR)/scripts/ensure-state-bucket.sh $(ENV_DIR)/terraform.tfvars
+$(ENV_DIR)/.terraform: $(MODULE_DIR)/scripts/ensure-state-bucket.sh $(ENV_DIR)/terraform.tfvars terraform/.fmt
 	@echo "Ensuring state bucket exists..."
 	@$(MODULE_DIR)/scripts/ensure-state-bucket.sh
 	@echo "Initializing Terraform for $(ENV) environment..."
@@ -93,6 +93,15 @@ destroy: $(ENV_DIR)/terraform.destroy.plan
 	@echo "Applying Terraform destroy plan for $(ENV) environment..."
 	cd $(ENV_DIR) && terraform apply terraform.destroy.plan && rm -f terraform.destroy.plan || { rm -f terraform.destroy.plan; exit 1; }
 	@echo "Destroy plan applied and removed"
+
+fmt: terraform/.fmt
+
+terraform/.fmt: terraform/environments/*/*.tf terraform/modules/ses-mail/*.tf
+	cd terraform && terraform fmt -recursive
+	touch $@
+
+validate: $(ENV_DIR)/.terraform
+	cd $(ENV_DIR) && terraform validate
 
 # Clean up Terraform files
 clean:
