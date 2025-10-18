@@ -348,3 +348,65 @@ resource "aws_iam_role_policy" "lambda_gmail_forwarder_sqs_access" {
   role   = aws_iam_role.lambda_gmail_forwarder_execution.id
   policy = data.aws_iam_policy_document.lambda_gmail_forwarder_sqs_access.json
 }
+
+# IAM role for bouncer Lambda function
+resource "aws_iam_role" "lambda_bouncer_execution" {
+  name               = "ses-mail-lambda-bouncer-${var.environment}"
+  assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
+}
+
+# Attach AWS managed policy for basic Lambda execution (CloudWatch Logs) to bouncer
+resource "aws_iam_role_policy_attachment" "lambda_bouncer_basic_execution" {
+  role       = aws_iam_role.lambda_bouncer_execution.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+# IAM policy document for bouncer Lambda SES access
+data "aws_iam_policy_document" "lambda_bouncer_ses_access" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "ses:SendEmail",
+      "ses:SendRawEmail"
+    ]
+    resources = ["*"]
+  }
+}
+
+# IAM policy for bouncer Lambda to send bounce emails via SES
+resource "aws_iam_role_policy" "lambda_bouncer_ses_access" {
+  name   = "lambda-bouncer-ses-access-${var.environment}"
+  role   = aws_iam_role.lambda_bouncer_execution.id
+  policy = data.aws_iam_policy_document.lambda_bouncer_ses_access.json
+}
+
+# Attach X-Ray write access for bouncer Lambda (for distributed tracing)
+resource "aws_iam_role_policy_attachment" "lambda_bouncer_xray_access" {
+  role       = aws_iam_role.lambda_bouncer_execution.name
+  policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
+}
+
+# IAM policy document for bouncer Lambda SQS access
+# Note: This will be used once the SQS queue is created in Task 7
+data "aws_iam_policy_document" "lambda_bouncer_sqs_access" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "sqs:ReceiveMessage",
+      "sqs:DeleteMessage",
+      "sqs:GetQueueAttributes"
+    ]
+    resources = [
+      # This resource will be created in Task 7
+      "arn:aws:sqs:*:*:ses-bouncer-${var.environment}"
+    ]
+  }
+}
+
+# IAM policy for bouncer Lambda to access SQS
+# Note: This will be attached once the SQS queue is created in Task 7
+resource "aws_iam_role_policy" "lambda_bouncer_sqs_access" {
+  name   = "lambda-bouncer-sqs-access-${var.environment}"
+  role   = aws_iam_role.lambda_bouncer_execution.id
+  policy = data.aws_iam_policy_document.lambda_bouncer_sqs_access.json
+}

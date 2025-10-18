@@ -166,3 +166,48 @@ resource "aws_cloudwatch_log_group" "lambda_gmail_forwarder_logs" {
   name              = "/aws/lambda/${aws_lambda_function.gmail_forwarder.function_name}"
   retention_in_days = 30
 }
+
+# Archive the bouncer Lambda function code with dependencies
+# Uses the same package directory as other lambdas to share dependencies
+data "archive_file" "bouncer_zip" {
+  type        = "zip"
+  source_dir  = "${path.module}/lambda/package"
+  output_path = "${path.module}/lambda/bouncer.zip"
+  excludes    = ["__pycache__", "*.pyc", ".DS_Store", "email_processor.py", "router_enrichment.py", "gmail_forwarder.py"]
+}
+
+# Lambda function for bouncing emails (triggered by SQS)
+resource "aws_lambda_function" "bouncer" {
+  filename         = data.archive_file.bouncer_zip.output_path
+  function_name    = "ses-mail-bouncer-${var.environment}"
+  role             = aws_iam_role.lambda_bouncer_execution.arn
+  handler          = "bouncer.lambda_handler"
+  source_code_hash = data.archive_file.bouncer_zip.output_base64sha256
+  runtime          = "python3.12"
+  timeout          = 30
+  memory_size      = 128
+
+  # Enable X-Ray tracing for distributed tracing
+  tracing_config {
+    mode = "Active"
+  }
+
+  environment {
+    variables = {
+      BOUNCE_SENDER = "mailer-daemon@${var.domain[0]}"
+      ENVIRONMENT   = var.environment
+    }
+  }
+
+  depends_on = [
+    aws_iam_role_policy_attachment.lambda_bouncer_basic_execution,
+    aws_iam_role_policy.lambda_bouncer_ses_access,
+    aws_iam_role_policy_attachment.lambda_bouncer_xray_access
+  ]
+}
+
+# CloudWatch Log Group for bouncer Lambda function
+resource "aws_cloudwatch_log_group" "lambda_bouncer_logs" {
+  name              = "/aws/lambda/${aws_lambda_function.bouncer.function_name}"
+  retention_in_days = 30
+}

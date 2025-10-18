@@ -565,3 +565,88 @@ AWS_PROFILE=ses-mail aws logs tail /aws/lambda/ses-mail-gmail-forwarder-test --f
 ```
 
 **Note**: The Gmail forwarder lambda will be connected to the gmail-forwarder SQS queue in Task 7 via an event source mapping.
+
+### Bouncer Lambda Function
+
+The bouncer lambda (`ses-mail-bouncer-{environment}`) processes enriched email messages from the bouncer SQS queue and sends bounce notification emails via SES.
+
+**Functionality:**
+
+* **SQS Event Processing**: Triggered by messages in the bouncer queue (to be created in Task 7)
+* **Enriched Message Handling**: Extracts routing decisions and email metadata from EventBridge-enriched messages
+* **Bounce Notification**: Sends formatted bounce emails via SES to the original sender
+* **Email Metadata**: Includes original sender, recipient, subject, timestamp, and routing rule information in bounce
+* **X-Ray Tracing**: Active tracing with custom annotations for message ID, source, action, and environment
+* **Error Handling**: Returns batch item failures for SQS retry logic
+* **Professional Formatting**: Sends both HTML and plain text bounce messages
+
+**Input Format** (from SQS/EventBridge):
+
+The lambda receives SQS messages containing enriched EventBridge messages:
+
+```json
+{
+  "Records": [{
+    "body": "{\"originalEvent\": {...}, \"routingDecisions\": [{\"recipient\": \"...\", \"action\": \"bounce\", \"target\": \"\", \"matchedRule\": \"ROUTE#*\", \"ruleDescription\": \"Default: bounce all unmatched emails\"}], \"emailMetadata\": {\"messageId\": \"...\", \"source\": \"...\", \"subject\": \"...\"}}"
+  }]
+}
+```
+
+**Processing Flow:**
+
+1. Parse SQS message body to extract enriched EventBridge message
+2. Extract message ID, routing decisions (action/target/rule), and email metadata
+3. For each recipient with action "bounce", send a bounce notification via SES
+4. Bounce email includes original message details and routing rule information
+5. Return success or batch item failure for SQS retry
+
+**Bounce Email Format:**
+
+The bounce notification includes:
+* Subject: `Mail Delivery Failed: {original subject}`
+* Original message details (from, to, subject, timestamp)
+* Reason for bounce (recipient not configured)
+* Routing rule that triggered the bounce
+* Professional HTML and plain text formatting
+
+**Configuration:**
+
+* **Runtime**: Python 3.12
+* **Memory**: 128MB
+* **Timeout**: 30 seconds (for SES API calls)
+* **Environment Variables**:
+  * `BOUNCE_SENDER`: Sender address for bounce notifications (e.g., `mailer-daemon@domain.com`)
+  * `ENVIRONMENT`: Environment name (test/prod)
+
+**Testing the Bouncer Lambda:**
+
+```bash
+# Create a test SQS message with enriched data
+cat > test_bounce_message.json <<'EOF'
+{
+  "Records": [{
+    "messageId": "test-msg-1",
+    "body": "{\"originalEvent\": {\"eventSource\": \"aws:ses\", \"ses\": {\"mail\": {\"messageId\": \"abc123\", \"source\": \"sender@example.com\", \"destination\": [\"recipient@testmail.rrod.net\"]}, \"receipt\": {\"spamVerdict\": {\"status\": \"PASS\"}, \"virusVerdict\": {\"status\": \"PASS\"}}}}, \"routingDecisions\": [{\"recipient\": \"recipient@testmail.rrod.net\", \"normalizedRecipient\": \"recipient@testmail.rrod.net\", \"action\": \"bounce\", \"target\": \"\", \"matchedRule\": \"ROUTE#*\", \"ruleDescription\": \"Default: bounce all unmatched emails\"}], \"emailMetadata\": {\"messageId\": \"abc123\", \"source\": \"sender@example.com\", \"subject\": \"Test Email\", \"timestamp\": \"2025-01-18T10:00:00Z\", \"securityVerdict\": {\"spam\": \"PASS\", \"virus\": \"PASS\"}}}"
+  }]
+}
+EOF
+
+# Test the lambda function
+AWS_PROFILE=ses-mail aws lambda invoke \
+  --function-name ses-mail-bouncer-test \
+  --cli-binary-format raw-in-base64-out \
+  --payload file://test_bounce_message.json \
+  response.json
+
+# View the response
+cat response.json
+
+# View logs
+AWS_PROFILE=ses-mail aws logs tail /aws/lambda/ses-mail-bouncer-test --follow
+```
+
+**Important Notes:**
+
+* SES sandbox mode requires sender email verification. In production with verified domain, bounces will be sent to any address.
+* The bouncer lambda will be connected to the bouncer SQS queue in Task 7 via an event source mapping.
+* Bounce sender defaults to `mailer-daemon@{domain}` using the first domain from configuration.
