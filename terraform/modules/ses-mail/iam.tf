@@ -291,3 +291,60 @@ resource "aws_iam_role_policy_attachment" "tag_sync_tag2" {
   policy_arn = "arn:aws:iam::aws:policy/ResourceGroupsandTagEditorFullAccess"
 
 }
+
+# IAM role for Gmail forwarder Lambda function
+resource "aws_iam_role" "lambda_gmail_forwarder_execution" {
+  name               = "ses-mail-lambda-gmail-forwarder-${var.environment}"
+  assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
+}
+
+# Attach AWS managed policy for basic Lambda execution (CloudWatch Logs) to Gmail forwarder
+resource "aws_iam_role_policy_attachment" "lambda_gmail_forwarder_basic_execution" {
+  role       = aws_iam_role.lambda_gmail_forwarder_execution.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+# IAM policy for Gmail forwarder Lambda to access S3
+resource "aws_iam_role_policy" "lambda_gmail_forwarder_s3_access" {
+  name   = "lambda-gmail-forwarder-s3-access-${var.environment}"
+  role   = aws_iam_role.lambda_gmail_forwarder_execution.id
+  policy = data.aws_iam_policy_document.lambda_s3_access.json
+}
+
+# IAM policy for Gmail forwarder Lambda to access SSM Parameter Store
+resource "aws_iam_role_policy" "lambda_gmail_forwarder_ssm_access" {
+  name   = "lambda-gmail-forwarder-ssm-access-${var.environment}"
+  role   = aws_iam_role.lambda_gmail_forwarder_execution.id
+  policy = data.aws_iam_policy_document.lambda_ssm_access.json
+}
+
+# Attach X-Ray write access for Gmail forwarder Lambda (for distributed tracing)
+resource "aws_iam_role_policy_attachment" "lambda_gmail_forwarder_xray_access" {
+  role       = aws_iam_role.lambda_gmail_forwarder_execution.name
+  policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
+}
+
+# IAM policy document for Gmail forwarder Lambda SQS access
+# Note: This will be used once the SQS queue is created in Task 7
+data "aws_iam_policy_document" "lambda_gmail_forwarder_sqs_access" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "sqs:ReceiveMessage",
+      "sqs:DeleteMessage",
+      "sqs:GetQueueAttributes"
+    ]
+    resources = [
+      # This resource will be created in Task 7
+      "arn:aws:sqs:*:*:ses-gmail-forwarder-${var.environment}"
+    ]
+  }
+}
+
+# IAM policy for Gmail forwarder Lambda to access SQS
+# Note: This will be attached once the SQS queue is created in Task 7
+resource "aws_iam_role_policy" "lambda_gmail_forwarder_sqs_access" {
+  name   = "lambda-gmail-forwarder-sqs-access-${var.environment}"
+  role   = aws_iam_role.lambda_gmail_forwarder_execution.id
+  policy = data.aws_iam_policy_document.lambda_gmail_forwarder_sqs_access.json
+}

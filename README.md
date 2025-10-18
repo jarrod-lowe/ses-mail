@@ -482,12 +482,86 @@ The router enrichment lambda (`ses-mail-router-enrichment-{environment}`) is use
 
 ```bash
 # Test with sample SES event
-aws lambda invoke \
+AWS_PROFILE=ses-mail aws lambda invoke \
   --function-name ses-mail-router-enrichment-test \
   --cli-binary-format raw-in-base64-out \
   --payload file://test_event.json \
   response.json
 
 # View logs
-aws logs tail /aws/lambda/ses-mail-router-enrichment-test --follow
+AWS_PROFILE=ses-mail aws logs tail /aws/lambda/ses-mail-router-enrichment-test --follow
 ```
+
+### Gmail Forwarder Lambda Function
+
+The Gmail forwarder lambda (`ses-mail-gmail-forwarder-{environment}`) processes enriched email messages from the gmail-forwarder SQS queue and imports them into Gmail via the Gmail API.
+
+**Functionality:**
+
+* **SQS Event Processing**: Triggered by messages in the gmail-forwarder queue (to be created in Task 7)
+* **Enriched Message Handling**: Extracts routing decisions and email metadata from EventBridge-enriched messages
+* **Gmail API Integration**: Imports emails into Gmail with INBOX and UNREAD labels
+* **S3 Email Management**: Fetches raw email from S3 and deletes after successful import
+* **Token Management**: Automatically refreshes OAuth tokens and updates SSM Parameter Store
+* **X-Ray Tracing**: Active tracing with custom annotations for message ID, recipient, action, and target
+* **Error Handling**: Returns batch item failures for SQS retry logic
+
+**Input Format** (from SQS/EventBridge):
+
+The lambda receives SQS messages containing enriched EventBridge messages:
+
+```json
+{
+  "Records": [{
+    "body": "{\"originalEvent\": {...}, \"routingDecisions\": [{\"recipient\": \"...\", \"action\": \"forward-to-gmail\", \"target\": \"user@gmail.com\"}], \"emailMetadata\": {\"messageId\": \"...\", \"source\": \"...\", \"subject\": \"...\"}}"
+  }]
+}
+```
+
+**Processing Flow:**
+
+1. Parse SQS message body to extract enriched EventBridge message
+2. Extract message ID, routing decision (action/target), and email metadata
+3. Fetch raw email from S3 (`emails/{messageId}`)
+4. Import email into Gmail via Gmail API
+5. Delete email from S3 after successful import
+6. Return success or batch item failure for SQS retry
+
+**Configuration:**
+
+* **Runtime**: Python 3.12
+* **Memory**: 128MB
+* **Timeout**: 3 seconds (default)
+* **Environment Variables**:
+  * `GMAIL_TOKEN_PARAMETER`: SSM parameter path for Gmail OAuth token
+  * `EMAIL_BUCKET`: S3 bucket containing email files
+
+**Testing the Gmail Forwarder Lambda:**
+
+```bash
+# Create a test SQS message with enriched data
+cat > test_enriched_message.json <<'EOF'
+{
+  "Records": [{
+    "messageId": "test-msg-1",
+    "receiptHandle": "test-receipt-handle",
+    "body": "{\"originalEvent\": {\"eventSource\": \"aws:ses\", \"ses\": {\"mail\": {\"messageId\": \"abc123\", \"source\": \"sender@example.com\", \"destination\": [\"recipient@example.com\"]}}}, \"routingDecisions\": [{\"recipient\": \"recipient@example.com\", \"normalizedRecipient\": \"recipient@example.com\", \"action\": \"forward-to-gmail\", \"target\": \"your-email@gmail.com\", \"matchedRule\": \"ROUTE#recipient@example.com\"}], \"emailMetadata\": {\"messageId\": \"abc123\", \"source\": \"sender@example.com\", \"subject\": \"Test Email\", \"timestamp\": \"2025-01-18T10:00:00Z\"}}"
+  }]
+}
+EOF
+
+# Test the lambda function
+AWS_PROFILE=ses-mail aws lambda invoke \
+  --function-name ses-mail-gmail-forwarder-test \
+  --cli-binary-format raw-in-base64-out \
+  --payload file://test_enriched_message.json \
+  response.json
+
+# View the response
+cat response.json
+
+# View logs
+AWS_PROFILE=ses-mail aws logs tail /aws/lambda/ses-mail-gmail-forwarder-test --follow
+```
+
+**Note**: The Gmail forwarder lambda will be connected to the gmail-forwarder SQS queue in Task 7 via an event source mapping.

@@ -120,3 +120,49 @@ resource "aws_cloudwatch_log_group" "lambda_router_logs" {
   name              = "/aws/lambda/${aws_lambda_function.router_enrichment.function_name}"
   retention_in_days = 30
 }
+
+# Archive the Gmail forwarder Lambda function code with dependencies
+# Uses the same package directory as email_processor to share dependencies
+data "archive_file" "gmail_forwarder_zip" {
+  type        = "zip"
+  source_dir  = "${path.module}/lambda/package"
+  output_path = "${path.module}/lambda/gmail_forwarder.zip"
+  excludes    = ["__pycache__", "*.pyc", ".DS_Store", "email_processor.py", "router_enrichment.py"]
+}
+
+# Lambda function for Gmail forwarding (triggered by SQS)
+resource "aws_lambda_function" "gmail_forwarder" {
+  filename         = data.archive_file.gmail_forwarder_zip.output_path
+  function_name    = "ses-mail-gmail-forwarder-${var.environment}"
+  role             = aws_iam_role.lambda_gmail_forwarder_execution.arn
+  handler          = "gmail_forwarder.lambda_handler"
+  source_code_hash = data.archive_file.gmail_forwarder_zip.output_base64sha256
+  runtime          = "python3.12"
+  timeout          = 3
+  memory_size      = 128
+
+  # Enable X-Ray tracing for distributed tracing
+  tracing_config {
+    mode = "Active"
+  }
+
+  environment {
+    variables = {
+      GMAIL_TOKEN_PARAMETER = aws_ssm_parameter.gmail_token.name
+      EMAIL_BUCKET          = aws_s3_bucket.email_storage.id
+    }
+  }
+
+  depends_on = [
+    aws_iam_role_policy_attachment.lambda_gmail_forwarder_basic_execution,
+    aws_iam_role_policy.lambda_gmail_forwarder_s3_access,
+    aws_iam_role_policy.lambda_gmail_forwarder_ssm_access,
+    aws_iam_role_policy_attachment.lambda_gmail_forwarder_xray_access
+  ]
+}
+
+# CloudWatch Log Group for Gmail forwarder Lambda function
+resource "aws_cloudwatch_log_group" "lambda_gmail_forwarder_logs" {
+  name              = "/aws/lambda/${aws_lambda_function.gmail_forwarder.function_name}"
+  retention_in_days = 30
+}
