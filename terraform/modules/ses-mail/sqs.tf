@@ -33,8 +33,9 @@ resource "aws_sqs_queue" "input_queue" {
     maxReceiveCount     = 3
   })
 
-  # Enable X-Ray tracing by adding the trace header to message attributes
-  # Note: X-Ray tracing for SQS is handled by the Lambda function and EventBridge Pipes
+  # X-Ray tracing for SQS is automatic when using AWS SDK
+  # Trace context is propagated via message attributes by SNS and consumed by EventBridge Pipes
+  # No additional configuration needed - tracing is handled by the integrated services
 
   tags = {
     Name        = "ses-email-input-${var.environment}"
