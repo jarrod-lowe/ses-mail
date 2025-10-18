@@ -28,6 +28,7 @@ ENVIRONMENT = os.environ.get('ENVIRONMENT', 'unknown')
 
 # Initialize AWS clients
 dynamodb = boto3.client('dynamodb')
+cloudwatch = boto3.client('cloudwatch')
 
 from aws_xray_sdk.core import xray_recorder
 from aws_xray_sdk.core import patch_all
@@ -57,18 +58,25 @@ def lambda_handler(event, context):
     # EventBridge Pipes sends events as a list
     # Each item is a record from SQS
     enriched_results = []
+    success_count = 0
+    failure_count = 0
 
     for record in event:
         try:
             enriched = enrich_ses_event(record)
             enriched_results.append(enriched)
+            success_count += 1
         except Exception as e:
             logger.error(f"Error enriching record: {str(e)}", exc_info=True)
             # On enrichment failure, create a fallback enrichment with bounce action
             fallback = create_fallback_enrichment(record, str(e))
             enriched_results.append(fallback)
+            failure_count += 1
 
-    logger.info(f"Returning {len(enriched_results)} enriched records")
+    # Publish custom metrics for success/failure rates
+    publish_metrics(success_count, failure_count)
+
+    logger.info(f"Returning {len(enriched_results)} enriched records (success: {success_count}, failures: {failure_count})")
     return enriched_results
 
 
@@ -398,3 +406,42 @@ def create_fallback_enrichment(record: Dict[str, Any], error_message: str) -> Di
                 'enrichmentError': error_message
             }
         }
+
+
+def publish_metrics(success_count: int, failure_count: int) -> None:
+    """
+    Publish custom CloudWatch metrics for router enrichment success/failure rates.
+
+    Args:
+        success_count: Number of successfully enriched messages
+        failure_count: Number of failed enrichments (using fallback)
+    """
+    try:
+        metric_data = []
+
+        if success_count > 0:
+            metric_data.append({
+                'MetricName': 'RouterEnrichmentSuccess',
+                'Value': success_count,
+                'Unit': 'Count',
+                'StorageResolution': 60
+            })
+
+        if failure_count > 0:
+            metric_data.append({
+                'MetricName': 'RouterEnrichmentFailure',
+                'Value': failure_count,
+                'Unit': 'Count',
+                'StorageResolution': 60
+            })
+
+        if metric_data:
+            cloudwatch.put_metric_data(
+                Namespace=f'SESMail/{ENVIRONMENT}',
+                MetricData=metric_data
+            )
+            logger.info(f"Published metrics: success={success_count}, failure={failure_count}")
+
+    except Exception as e:
+        # Don't fail the lambda if metrics publishing fails
+        logger.error(f"Error publishing metrics: {str(e)}", exc_info=True)

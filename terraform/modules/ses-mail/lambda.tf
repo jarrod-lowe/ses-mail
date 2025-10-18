@@ -114,6 +114,7 @@ resource "aws_lambda_function" "gmail_forwarder" {
     variables = {
       GMAIL_TOKEN_PARAMETER = aws_ssm_parameter.gmail_token.name
       EMAIL_BUCKET          = aws_s3_bucket.email_storage.id
+      ENVIRONMENT           = var.environment
     }
   }
 

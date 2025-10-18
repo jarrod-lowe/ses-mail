@@ -817,3 +817,205 @@ AWS_PROFILE=ses-mail aws logs tail /aws/lambda/ses-mail-bouncer-test --follow
 
 * SES sandbox mode requires sender email verification. In production with verified domain, bounces will be sent to any address.
 * Bounce sender defaults to `mailer-daemon@{domain}` using the first domain from configuration.
+
+## Monitoring and Alerting
+
+The system includes comprehensive monitoring and alerting infrastructure built on CloudWatch to track email processing, lambda performance, and system health.
+
+### CloudWatch Dashboard
+
+A comprehensive CloudWatch dashboard (`ses-mail-dashboard-{environment}`) provides real-time visibility into system operations:
+
+**Accessing the Dashboard:**
+
+```bash
+# Via AWS Console:
+# CloudWatch → Dashboards → ses-mail-dashboard-test (or prod)
+
+# Or get the direct URL via:
+echo "https://console.aws.amazon.com/cloudwatch/home?region=ap-southeast-2#dashboards:name=ses-mail-dashboard-test"
+```
+
+**Dashboard Widgets:**
+
+1. **Email Processing Overview** - Total emails accepted, spam detected, virus detected
+2. **Handler Success/Failure Rates** - Custom metrics showing success/failure counts for:
+   * Router enrichment operations
+   * Gmail forwarding operations
+   * Bounce sending operations
+3. **Lambda Function Errors** - Error counts for all lambda functions (processor, router, gmail forwarder, bouncer)
+4. **Lambda Function Invocations** - Invocation counts for all lambda functions
+5. **SQS Queue Depths** - Current message counts in input, gmail-forwarder, and bouncer queues
+6. **Dead Letter Queue Messages** - DLQ message counts (should normally be 0)
+7. **Lambda Duration** - Average execution times for router, gmail forwarder, and bouncer lambdas
+8. **Recent Email Logs** - CloudWatch Logs Insights query showing recent processed emails
+
+### Custom Metrics
+
+The lambda functions publish custom CloudWatch metrics to the `SESMail/{environment}` namespace for tracking operation success/failure rates:
+
+**Router Enrichment Metrics:**
+* `RouterEnrichmentSuccess` - Count of successfully enriched messages
+* `RouterEnrichmentFailure` - Count of failed enrichments (using fallback routing)
+
+**Gmail Forwarder Metrics:**
+* `GmailForwardSuccess` - Count of successful Gmail imports
+* `GmailForwardFailure` - Count of failed Gmail imports
+
+**Bouncer Metrics:**
+* `BounceSendSuccess` - Count of successful bounce notifications sent
+* `BounceSendFailure` - Count of failed bounce notifications
+
+**Querying Custom Metrics:**
+
+```bash
+# Get router enrichment success count for last hour
+AWS_PROFILE=ses-mail aws cloudwatch get-metric-statistics \
+  --namespace "SESMail/test" \
+  --metric-name RouterEnrichmentSuccess \
+  --start-time $(date -u -v-1H +%Y-%m-%dT%H:%M:%S) \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+  --period 300 \
+  --statistics Sum
+
+# Get Gmail forwarding failure count
+AWS_PROFILE=ses-mail aws cloudwatch get-metric-statistics \
+  --namespace "SESMail/test" \
+  --metric-name GmailForwardFailure \
+  --start-time $(date -u -v-1H +%Y-%m-%dT%H:%M:%S) \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+  --period 300 \
+  --statistics Sum
+```
+
+### CloudWatch Alarms
+
+The system includes CloudWatch alarms that trigger when operational thresholds are exceeded. All alarms publish to the SNS topic specified in `terraform.tfvars` for notifications.
+
+**Dead Letter Queue Alarms:**
+* `ses-email-input-dlq-messages-{environment}` - Input queue DLQ has messages
+* `ses-gmail-forwarder-dlq-messages-{environment}` - Gmail forwarder DLQ has messages
+* `ses-bouncer-dlq-messages-{environment}` - Bouncer DLQ has messages
+
+**Queue Age Alarms:**
+* `ses-email-input-queue-age-{environment}` - Messages aging >5 minutes in input queue
+* `ses-gmail-forwarder-queue-age-{environment}` - Messages aging >5 minutes in Gmail queue
+* `ses-bouncer-queue-age-{environment}` - Messages aging >5 minutes in bouncer queue
+
+**Lambda Error Alarms:**
+* `ses-mail-lambda-errors-{environment}` - Email processor lambda has >5 errors in 5 minutes
+* `ses-mail-lambda-router-errors-{environment}` - Router enrichment lambda has >5 errors in 5 minutes
+* `ses-mail-lambda-gmail-forwarder-errors-{environment}` - Gmail forwarder lambda has >5 errors in 5 minutes
+* `ses-mail-lambda-bouncer-errors-{environment}` - Bouncer lambda has >5 errors in 5 minutes
+
+**Email Processing Alarms:**
+* `ses-mail-high-email-volume-{environment}` - More than 100 emails in 5 minutes
+* `ses-mail-high-spam-rate-{environment}` - Spam rate >10% in 5 minutes
+
+**EventBridge Alarms:**
+* `eventbridge-pipes-failures-{environment}` - EventBridge Pipes enrichment failures
+* `eventbridge-gmail-failures-{environment}` - EventBridge failed to deliver to Gmail queue
+* `eventbridge-bouncer-failures-{environment}` - EventBridge failed to deliver to bouncer queue
+
+**Viewing Alarm Status:**
+
+```bash
+# List all alarms for the test environment
+AWS_PROFILE=ses-mail aws cloudwatch describe-alarms \
+  --alarm-name-prefix ses- \
+  --region ap-southeast-2
+
+# Get specific alarm details
+AWS_PROFILE=ses-mail aws cloudwatch describe-alarms \
+  --alarm-names ses-gmail-forwarder-dlq-messages-test
+```
+
+### X-Ray Distributed Tracing
+
+The entire email processing pipeline is instrumented with AWS X-Ray for end-to-end request tracing:
+
+**Trace Components:**
+* SNS topic initiates traces with Active tracing mode
+* SQS queues propagate trace context through the pipeline
+* EventBridge Pipes maintains trace context during enrichment
+* Router lambda adds custom annotations (messageId, source, recipient, action)
+* Handler lambdas (Gmail forwarder, bouncer) continue the trace with operation-specific annotations
+
+**Viewing Traces:**
+
+```bash
+# Via AWS Console:
+# X-Ray → Traces → Filter by service "ses-mail-router-enrichment-test"
+
+# Or view service map:
+# X-Ray → Service map → Select time range
+```
+
+**X-Ray Annotations:**
+
+Router enrichment lambda annotations:
+* `messageId` - SES message ID
+* `source` - Email sender address
+* `recipient` - Email recipient address
+* `action` - Routing action (forward-to-gmail or bounce)
+
+Gmail forwarder lambda annotations:
+* `action` - forward-to-gmail
+* `recipient` - Original recipient address
+* `target` - Gmail target address
+* `gmail_message_id` - Gmail message ID after import
+* `import_status` - success or error
+
+Bouncer lambda annotations:
+* `messageId` - SES message ID
+* `source` - Email sender address
+* `environment` - Environment name (test/prod)
+* `action` - bounce
+
+### CloudWatch Logs
+
+All lambda functions log to CloudWatch Logs with 30-day retention:
+
+**Log Groups:**
+* `/aws/lambda/ses-mail-email-processor-{environment}` - Email processor logs
+* `/aws/lambda/ses-mail-router-enrichment-{environment}` - Router enrichment logs
+* `/aws/lambda/ses-mail-gmail-forwarder-{environment}` - Gmail forwarder logs
+* `/aws/lambda/ses-mail-bouncer-{environment}` - Bouncer logs
+* `/aws/events/ses-email-routing-{environment}` - EventBridge Event Bus logs
+* `/aws/vendedlogs/pipes/{environment}/ses-email-router` - EventBridge Pipes logs
+
+**Viewing Logs:**
+
+```bash
+# Tail router enrichment logs
+AWS_PROFILE=ses-mail aws logs tail /aws/lambda/ses-mail-router-enrichment-test --follow
+
+# Tail Gmail forwarder logs
+AWS_PROFILE=ses-mail aws logs tail /aws/lambda/ses-mail-gmail-forwarder-test --follow
+
+# Tail bouncer logs
+AWS_PROFILE=ses-mail aws logs tail /aws/lambda/ses-mail-bouncer-test --follow
+
+# Query logs with CloudWatch Logs Insights
+AWS_PROFILE=ses-mail aws logs start-query \
+  --log-group-name /aws/lambda/ses-mail-router-enrichment-test \
+  --start-time $(date -u -v-1H +%s) \
+  --end-time $(date -u +%s) \
+  --query-string 'fields @timestamp, @message | filter @message like /ERROR/ | sort @timestamp desc'
+```
+
+### Monitoring Best Practices
+
+1. **Set up SNS notifications**: Configure the `alarm_sns_topic_arn` in `terraform.tfvars` to receive alarm notifications via email or SMS
+
+2. **Monitor DLQ alarms**: Dead letter queue messages indicate persistent failures that require investigation
+
+3. **Track custom metrics**: Review handler success/failure rates daily to identify trends
+
+4. **Use X-Ray for debugging**: When issues occur, use X-Ray traces to identify bottlenecks and failures across the pipeline
+
+5. **Review CloudWatch dashboard**: Check the dashboard regularly to ensure healthy operation
+
+6. **Set up log metric filters**: Create additional custom metric filters for application-specific error patterns
+
+7. **Enable detailed monitoring**: For production environments, consider enabling detailed (1-minute) CloudWatch metrics for faster alerting

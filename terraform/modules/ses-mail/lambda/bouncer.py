@@ -26,6 +26,7 @@ ENVIRONMENT = os.environ.get('ENVIRONMENT', 'unknown')
 
 # Initialize AWS clients
 ses_client = boto3.client('ses')
+cloudwatch = boto3.client('cloudwatch')
 
 from aws_xray_sdk.core import xray_recorder
 from aws_xray_sdk.core import patch_all
@@ -51,6 +52,8 @@ def lambda_handler(event, context):
 
     # Track failed messages for SQS partial batch response
     batch_item_failures = []
+    success_count = 0
+    failure_count = 0
 
     # Process each SQS record
     for record in event.get('Records', []):
@@ -64,6 +67,7 @@ def lambda_handler(event, context):
             process_bounce_request(body, message_id)
 
             logger.info(f"Successfully processed bounce request: {message_id}")
+            success_count += 1
 
         except Exception as e:
             logger.error(f"Error processing bounce request {message_id}: {str(e)}", exc_info=True)
@@ -72,6 +76,12 @@ def lambda_handler(event, context):
             batch_item_failures.append({
                 'itemIdentifier': message_id
             })
+            failure_count += 1
+
+    # Publish custom metrics
+    publish_metrics(success_count, failure_count)
+
+    logger.info(f"Processed {len(event.get('Records', []))} bounce requests (success: {success_count}, failures: {failure_count})")
 
     # Return partial batch response for SQS
     # Messages not in failures list will be deleted from queue
@@ -258,3 +268,42 @@ This is an automated message. Please do not reply to this email.
         error_message = e.response.get('Error', {}).get('Message')
         logger.error(f"SES error sending bounce: {error_code} - {error_message}")
         raise RuntimeError(f"Failed to send bounce notification: {error_message}")
+
+
+def publish_metrics(success_count: int, failure_count: int) -> None:
+    """
+    Publish custom CloudWatch metrics for bounce processing success/failure rates.
+
+    Args:
+        success_count: Number of successfully sent bounce notifications
+        failure_count: Number of failed bounce notifications
+    """
+    try:
+        metric_data = []
+
+        if success_count > 0:
+            metric_data.append({
+                'MetricName': 'BounceSendSuccess',
+                'Value': success_count,
+                'Unit': 'Count',
+                'StorageResolution': 60
+            })
+
+        if failure_count > 0:
+            metric_data.append({
+                'MetricName': 'BounceSendFailure',
+                'Value': failure_count,
+                'Unit': 'Count',
+                'StorageResolution': 60
+            })
+
+        if metric_data:
+            cloudwatch.put_metric_data(
+                Namespace=f'SESMail/{ENVIRONMENT}',
+                MetricData=metric_data
+            )
+            logger.info(f"Published metrics: success={success_count}, failure={failure_count}")
+
+    except Exception as e:
+        # Don't fail the lambda if metrics publishing fails
+        logger.error(f"Error publishing metrics: {str(e)}", exc_info=True)

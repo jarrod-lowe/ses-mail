@@ -66,7 +66,7 @@ A task is not complete until:
   - Add X-Ray tracing support
   - _Requirements: 5.1, 5.2, 5.3, 10.4_
 
-- [ ] 10. Configure comprehensive monitoring and alerting
+- [x] 10. Configure comprehensive monitoring and alerting
   - Set up CloudWatch alarms for all lambda function failures
   - Create alarms for SQS queue age and DLQ messages
   - Configure SNS topic for alert notifications
@@ -86,7 +86,7 @@ A task is not complete until:
   - Clean up validator lambda IAM permissions and resources
   - _Requirements: 1.1, 1.2, 1.3_
 
-- [ ] 13. Create IAM roles and policies for new architecture
+- [x] 13. Create IAM roles and policies for new architecture
   - Create IAM role for EventBridge Pipes execution
   - Set up IAM policies for router lambda DynamoDB access
   - Configure IAM permissions for Event Bus and SQS access

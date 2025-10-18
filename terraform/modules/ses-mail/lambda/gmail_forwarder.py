@@ -30,6 +30,7 @@ logger.setLevel(logging.INFO)
 # Environment configuration
 GMAIL_TOKEN_PARAMETER = os.environ.get('GMAIL_TOKEN_PARAMETER', '/ses-mail/gmail-token')
 EMAIL_BUCKET = os.environ.get('EMAIL_BUCKET')
+ENVIRONMENT = os.environ.get('ENVIRONMENT', 'unknown')
 S3_PREFIX = 'emails'  # Hardcoded to match ses.tf configuration
 GMAIL_USER_ID = 'me'
 DEFAULT_LABEL_IDS = ['INBOX', 'UNREAD']
@@ -37,6 +38,7 @@ DEFAULT_LABEL_IDS = ['INBOX', 'UNREAD']
 # Initialize AWS clients
 s3_client = boto3.client('s3')
 ssm_client = boto3.client('ssm')
+cloudwatch = boto3.client('cloudwatch')
 
 
 def lambda_handler(event, context):
@@ -58,6 +60,8 @@ def lambda_handler(event, context):
     token_info = None
     service = None
     creds = None
+    success_count = 0
+    failure_count = 0
 
     try:
         # Load Gmail token once for all records
@@ -70,9 +74,20 @@ def lambda_handler(event, context):
             result = process_sqs_record(record, service)
             results.append(result)
 
+            # Track success/failure counts
+            if result.get('status') == 'ok':
+                success_count += 1
+            else:
+                failure_count += 1
+
         # Update token if refreshed
         if creds and token_info:
             maybe_update_token(creds, token_info)
+
+        # Publish custom metrics
+        publish_metrics(success_count, failure_count)
+
+        logger.info(f"Processed {len(results)} messages (success: {success_count}, failures: {failure_count})")
 
         return {
             'statusCode': 200,
@@ -337,3 +352,42 @@ def gmail_import(service, raw_bytes: bytes, label_ids: List[str]) -> Dict[str, A
         ).execute()
     except HttpError as e:
         raise RuntimeError(f"Gmail API error: {e}")
+
+
+def publish_metrics(success_count: int, failure_count: int) -> None:
+    """
+    Publish custom CloudWatch metrics for Gmail forwarding success/failure rates.
+
+    Args:
+        success_count: Number of successfully forwarded emails
+        failure_count: Number of failed forwards
+    """
+    try:
+        metric_data = []
+
+        if success_count > 0:
+            metric_data.append({
+                'MetricName': 'GmailForwardSuccess',
+                'Value': success_count,
+                'Unit': 'Count',
+                'StorageResolution': 60
+            })
+
+        if failure_count > 0:
+            metric_data.append({
+                'MetricName': 'GmailForwardFailure',
+                'Value': failure_count,
+                'Unit': 'Count',
+                'StorageResolution': 60
+            })
+
+        if metric_data:
+            cloudwatch.put_metric_data(
+                Namespace=f'SESMail/{ENVIRONMENT}',
+                MetricData=metric_data
+            )
+            logger.info(f"Published metrics: success={success_count}, failure={failure_count}")
+
+    except Exception as e:
+        # Don't fail the lambda if metrics publishing fails
+        logger.error(f"Error publishing metrics: {str(e)}", exc_info=True)
