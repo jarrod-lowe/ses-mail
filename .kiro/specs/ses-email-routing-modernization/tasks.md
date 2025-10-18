@@ -27,7 +27,7 @@ A task is not complete until:
   - Set up CloudWatch alarms for DLQ monitoring
   - _Requirements: 3.4, 3.6, 6.2_
 
-- [ ] 4. Create EventBridge Pipes configuration
+- [x] 4. Create EventBridge Pipes configuration
   - Set up EventBridge Pipes with SQS source and Event Bus target
   - Configure pipes to use router lambda for enrichment
   - Enable logging and monitoring for pipes

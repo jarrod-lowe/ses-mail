@@ -262,18 +262,52 @@ SES → S3 → SNS (X-Ray tracing) → SQS Input Queue → EventBridge Pipes[rou
 2. **S3 Storage + SNS Notification** - SES stores email in S3 and triggers SNS (single action)
 3. **SNS Topic** - Receives notification with X-Ray Active tracing enabled
 4. **SQS Input Queue** - Receives messages from SNS for EventBridge Pipes processing
-5. **Legacy Lambda Actions** - Direct lambda invocations (TO BE REMOVED)
+5. **EventBridge Pipes** - Enriches messages with routing decisions via router lambda
+6. **EventBridge Event Bus** - Routes enriched messages to appropriate handler queues
+7. **Handler SQS Queues** - Separate queues for Gmail forwarding and bouncing
+8. **Handler Lambdas** - Process messages from handler queues
+9. **Legacy Lambda Actions** - Direct lambda invocations (TO BE REMOVED)
 
 **Infrastructure Components:**
 
 * **SNS Topic**: `ses-email-processing-{environment}` with X-Ray Active tracing
 * **SQS Input Queue**: `ses-email-input-{environment}` with 3-retry DLQ policy
-* **Dead Letter Queue**: `ses-email-input-dlq-{environment}` with 14-day retention
-* **CloudWatch Alarms**: Monitors DLQ messages and queue age
+* **EventBridge Pipe**: `ses-email-router-{environment}` with router lambda enrichment
+  * Source: SQS input queue
+  * Enrichment: Router lambda function (DynamoDB routing rules lookup)
+  * Target: EventBridge Event Bus
+  * Logging: CloudWatch Logs at INFO level with execution data
+* **Router Lambda**: `ses-mail-router-enrichment-{environment}` with X-Ray Active tracing
+  * Queries DynamoDB for routing rules with hierarchical address matching
+  * Enriches messages with routing decisions and email metadata
+  * Timeout: 30 seconds, Memory: 128 MB
+* **EventBridge Event Bus**: `ses-email-routing-{environment}` with routing rules
+  * Routes messages to Gmail forwarder queue (action: `forward-to-gmail`)
+  * Routes messages to bouncer queue (action: `bounce`)
+* **Handler Queues**:
+  * `ses-gmail-forwarder-{environment}` - Triggers Gmail forwarder lambda
+  * `ses-bouncer-{environment}` - Triggers bouncer lambda
+  * Both with 3-retry DLQ policies and CloudWatch alarms
+* **Dead Letter Queues**: All queues have corresponding DLQs with 14-day retention
+* **CloudWatch Alarms**: Monitors DLQ messages, queue age, and Pipes failures
 
 **X-Ray Distributed Tracing:**
 
-The SNS topic is configured with Active tracing to initiate X-Ray traces for the entire email processing pipeline. This allows end-to-end visibility of email processing across all AWS services.
+The entire email processing pipeline is instrumented with X-Ray tracing:
+* SNS topic initiates traces with Active tracing
+* SQS queues propagate trace context
+* EventBridge Pipes maintains trace context through enrichment
+* Router lambda adds custom annotations for email metadata
+* Handler lambdas continue the trace for end-to-end visibility
+
+**EventBridge Pipes Integration:**
+
+EventBridge Pipes provides serverless message enrichment and routing:
+* Automatically polls SQS input queue and invokes router lambda
+* Manages retries and error handling with built-in DLQ support
+* Logs all executions to CloudWatch for debugging and monitoring
+* Transforms enriched output into EventBridge events with proper source and detail-type
+* No custom polling or dispatch logic required - fully managed by AWS
 
 ## AWS myApplications Integration
 
