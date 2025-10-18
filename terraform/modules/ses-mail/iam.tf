@@ -78,36 +78,6 @@ resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
-# IAM role for email validator Lambda function
-resource "aws_iam_role" "lambda_validator_execution" {
-  name               = "ses-mail-lambda-validator-${var.environment}"
-  assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
-}
-
-# Attach AWS managed policy for basic Lambda execution (CloudWatch Logs) to validator
-resource "aws_iam_role_policy_attachment" "lambda_validator_basic_execution" {
-  role       = aws_iam_role.lambda_validator_execution.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-}
-
-# IAM policy document for validator Lambda SES access
-data "aws_iam_policy_document" "lambda_validator_ses_access" {
-  statement {
-    effect = "Allow"
-    actions = [
-      "ses:SendBounce"
-    ]
-    resources = ["*"]
-  }
-}
-
-# IAM policy for validator Lambda to send bounces
-resource "aws_iam_role_policy" "lambda_validator_ses_access" {
-  name   = "lambda-validator-ses-access-${var.environment}"
-  role   = aws_iam_role.lambda_validator_execution.id
-  policy = data.aws_iam_policy_document.lambda_validator_ses_access.json
-}
-
 # IAM role for router enrichment Lambda function (used by EventBridge Pipes)
 resource "aws_iam_role" "lambda_router_execution" {
   name               = "ses-mail-lambda-router-${var.environment}"

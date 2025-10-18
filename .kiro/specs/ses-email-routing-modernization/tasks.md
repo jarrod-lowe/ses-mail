@@ -80,9 +80,9 @@ A task is not complete until:
   - Implement custom annotations for email metadata tracking
   - _Requirements: 10.2, 10.3, 10.4, 10.5, 10.6_
 
-- [ ] 12. Update SES receipt rule configuration
+- [x] 12. Update SES receipt rule configuration
   - Remove synchronous validator lambda action from SES rule
-  - Update SES rule to only include S3 storage and SNS publish actions
+  - Update SES rule to only include S3 storage with SNS publish
   - Clean up validator lambda IAM permissions and resources
   - _Requirements: 1.1, 1.2, 1.3_
 

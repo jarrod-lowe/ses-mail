@@ -256,7 +256,7 @@ The system uses an event-driven architecture for processing incoming emails:
 SES → S3 → SNS (X-Ray tracing) → SQS Input Queue → EventBridge Pipes[router enrichment] → EventBridge Event Bus → Handler Queues → Lambda Processors
 ```
 
-**Current Implementation Status:**
+**Implementation Flow:**
 
 1. **SES Receipt** - Email arrives and is scanned for spam/virus
 2. **S3 Storage + SNS Notification** - SES stores email in S3 and triggers SNS (single action)
@@ -266,7 +266,6 @@ SES → S3 → SNS (X-Ray tracing) → SQS Input Queue → EventBridge Pipes[rou
 6. **EventBridge Event Bus** - Routes enriched messages to appropriate handler queues
 7. **Handler SQS Queues** - Separate queues for Gmail forwarding and bouncing
 8. **Handler Lambdas** - Process messages from handler queues
-9. **Legacy Lambda Actions** - Direct lambda invocations (TO BE REMOVED)
 
 **Infrastructure Components:**
 
