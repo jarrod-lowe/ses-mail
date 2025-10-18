@@ -98,6 +98,36 @@ output "myapplications_url" {
   value       = "https://console.aws.amazon.com/systems-manager/appmanager/application/AWS_AppRegistry_Application-${aws_servicecatalogappregistry_application.ses_mail.id}"
 }
 
+output "eventbridge_event_bus_name" {
+  description = "Name of the EventBridge Event Bus for email routing"
+  value       = aws_cloudwatch_event_bus.email_routing.name
+}
+
+output "eventbridge_event_bus_arn" {
+  description = "ARN of the EventBridge Event Bus for email routing"
+  value       = aws_cloudwatch_event_bus.email_routing.arn
+}
+
+output "eventbridge_gmail_rule_name" {
+  description = "Name of the EventBridge rule for Gmail forwarding"
+  value       = aws_cloudwatch_event_rule.gmail_forwarder.name
+}
+
+output "eventbridge_gmail_rule_arn" {
+  description = "ARN of the EventBridge rule for Gmail forwarding"
+  value       = aws_cloudwatch_event_rule.gmail_forwarder.arn
+}
+
+output "eventbridge_bouncer_rule_name" {
+  description = "Name of the EventBridge rule for bouncer"
+  value       = aws_cloudwatch_event_rule.bouncer.name
+}
+
+output "eventbridge_bouncer_rule_arn" {
+  description = "ARN of the EventBridge rule for bouncer"
+  value       = aws_cloudwatch_event_rule.bouncer.arn
+}
+
 output "dns_configuration_summary" {
   description = "Summary of all DNS records to configure in Route53, grouped by domain"
   value = {

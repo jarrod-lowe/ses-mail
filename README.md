@@ -492,6 +492,125 @@ AWS_PROFILE=ses-mail aws lambda invoke \
 AWS_PROFILE=ses-mail aws logs tail /aws/lambda/ses-mail-router-enrichment-test --follow
 ```
 
+### EventBridge Event Bus and Routing Rules
+
+The system uses an EventBridge Event Bus (`ses-email-routing-{environment}`) to route enriched email messages to appropriate handler queues based on routing decisions from the router enrichment lambda.
+
+**EventBridge Event Bus:**
+
+* **Name**: `ses-email-routing-{environment}`
+* **Type**: Custom event bus (not default)
+* **Purpose**: Routes enriched messages from EventBridge Pipes to handler SQS queues
+* **Logging**: CloudWatch log group `/aws/events/ses-email-routing-{environment}` (30-day retention)
+
+**EventBridge Rules:**
+
+The Event Bus has two rules that match on routing decisions:
+
+1. **Gmail Forwarder Rule** (`route-to-gmail-{environment}`):
+   * **Event Pattern**: Matches `action: "forward-to-gmail"` in routing decisions
+   * **Source**: `ses.email.router`
+   * **Target**: `ses-gmail-forwarder-{environment}` SQS queue
+   * **Retry Policy**: Max 2 retries, 1 hour max event age
+   * **Dead Letter Queue**: `ses-gmail-forwarder-dlq-{environment}`
+
+2. **Bouncer Rule** (`route-to-bouncer-{environment}`):
+   * **Event Pattern**: Matches `action: "bounce"` in routing decisions
+   * **Source**: `ses.email.router`
+   * **Target**: `ses-bouncer-{environment}` SQS queue
+   * **Retry Policy**: Max 2 retries, 1 hour max event age
+   * **Dead Letter Queue**: `ses-bouncer-dlq-{environment}`
+
+**Event Flow:**
+
+```text
+EventBridge Pipes → EventBridge Event Bus
+                           ↓
+        Event Pattern Matching (on routingDecisions.action)
+                           ↓
+        ┌──────────────────┴──────────────────┐
+        ↓                                     ↓
+Gmail Forwarder Queue              Bouncer Queue
+(action: forward-to-gmail)          (action: bounce)
+        ↓                                     ↓
+Gmail Forwarder Lambda              Bouncer Lambda
+```
+
+**CloudWatch Monitoring:**
+
+* **Metric Filters**: Track EventBridge rule failures for both Gmail and bouncer rules
+* **Alarms**: Trigger when EventBridge fails to deliver events to target queues
+* **Namespace**: `SESMail/{environment}`
+* **Metrics**: `EventBridgeGmailRuleFailures`, `EventBridgeBouncerRuleFailures`
+
+**IAM Permissions:**
+
+The EventBridge Event Bus uses an IAM role (`ses-mail-eventbridge-sqs-{environment}`) with permissions to:
+
+* Send messages to Gmail forwarder SQS queue
+* Send messages to bouncer SQS queue
+* Send failed events to dead letter queues
+
+**Testing EventBridge Rules:**
+
+```bash
+# List event buses
+AWS_PROFILE=ses-mail aws events list-event-buses --region ap-southeast-2
+
+# List rules on the event bus
+AWS_PROFILE=ses-mail aws events list-rules \
+  --event-bus-name ses-email-routing-test \
+  --region ap-southeast-2
+
+# List targets for a specific rule
+AWS_PROFILE=ses-mail aws events list-targets-by-rule \
+  --rule route-to-gmail-test \
+  --event-bus-name ses-email-routing-test \
+  --region ap-southeast-2
+
+# Manually send a test event to the event bus
+cat > test_event.json <<'EOF'
+{
+  "Source": "ses.email.router",
+  "DetailType": "Email Routing Decision",
+  "Detail": "{\"originalEvent\": {\"eventSource\": \"aws:ses\", \"ses\": {\"mail\": {\"messageId\": \"test123\"}}}, \"routingDecisions\": [{\"action\": \"forward-to-gmail\", \"recipient\": \"test@example.com\", \"target\": \"user@gmail.com\"}], \"emailMetadata\": {\"messageId\": \"test123\", \"source\": \"sender@example.com\"}}"
+}
+EOF
+
+AWS_PROFILE=ses-mail aws events put-events \
+  --entries file://test_event.json \
+  --event-bus-name ses-email-routing-test \
+  --region ap-southeast-2
+```
+
+**Event Pattern Examples:**
+
+The EventBridge rules use event patterns to match routing decisions. Here are the patterns used:
+
+Gmail Forwarder Rule:
+```json
+{
+  "source": ["ses.email.router"],
+  "detail": {
+    "routingDecisions": {
+      "action": ["forward-to-gmail"]
+    }
+  }
+}
+```
+
+Bouncer Rule:
+```json
+{
+  "source": ["ses.email.router"],
+  "detail": {
+    "routingDecisions": {
+      "action": ["bounce"]
+    }
+  }
+}
+```
+
 ### Gmail Forwarder Lambda Function
 
 The Gmail forwarder lambda (`ses-mail-gmail-forwarder-{environment}`) processes enriched email messages from the gmail-forwarder SQS queue and imports them into Gmail via the Gmail API.

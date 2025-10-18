@@ -40,7 +40,7 @@ A task is not complete until:
   - Include DMARC and security header analysis
   - _Requirements: 2.3, 2.4, 8.1, 8.2, 8.7_
 
-- [ ] 6. Create EventBridge Event Bus and routing rules
+- [x] 6. Create EventBridge Event Bus and routing rules
   - Set up custom Event Bus for email routing
   - Create EventBridge rules for different routing actions (Gmail, bouncer)
   - Configure rules to match enriched message routing decisions
