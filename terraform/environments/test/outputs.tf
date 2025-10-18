@@ -27,3 +27,13 @@ output "resource_group_url" {
   description = "URL to view the Resource Group in AWS Console"
   value       = module.ses_mail.resource_group_url
 }
+
+output "appregistry_application_id" {
+  description = "ID of the AWS Service Catalog AppRegistry application"
+  value       = module.ses_mail.appregistry_application_id
+}
+
+output "myapplications_url" {
+  description = "URL to view this application in AWS Console myApplications"
+  value       = module.ses_mail.myapplications_url
+}

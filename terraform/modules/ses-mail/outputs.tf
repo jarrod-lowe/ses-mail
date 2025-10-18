@@ -78,6 +78,26 @@ output "resource_group_url" {
   value       = "https://console.aws.amazon.com/resource-groups/group/${aws_resourcegroups_group.ses_mail.name}"
 }
 
+output "appregistry_application_id" {
+  description = "ID of the AWS Service Catalog AppRegistry application"
+  value       = aws_servicecatalogappregistry_application.ses_mail.id
+}
+
+output "appregistry_application_arn" {
+  description = "ARN of the AWS Service Catalog AppRegistry application"
+  value       = aws_servicecatalogappregistry_application.ses_mail.arn
+}
+
+output "appregistry_application_tag" {
+  description = "Application tag that can be used to associate resources with this application"
+  value       = aws_servicecatalogappregistry_application.ses_mail.application_tag
+}
+
+output "myapplications_url" {
+  description = "URL to view this application in AWS Console myApplications"
+  value       = "https://console.aws.amazon.com/systems-manager/appmanager/application/AWS_AppRegistry_Application-${aws_servicecatalogappregistry_application.ses_mail.id}"
+}
+
 output "dns_configuration_summary" {
   description = "Summary of all DNS records to configure in Route53, grouped by domain"
   value = {

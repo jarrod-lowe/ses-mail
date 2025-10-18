@@ -11,7 +11,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.0"
+      version = "~> 6.0"
     }
     archive = {
       source  = "hashicorp/archive"
@@ -28,7 +28,12 @@ provider "aws" {
       Project     = "ses-mail"
       ManagedBy   = "terraform"
       Environment = var.environment
+      Application = "ses-mail-${var.environment}" # Combined tag for AppRegistry tag-sync
     }
+  }
+
+  ignore_tags {
+    keys = ["awsApplication"]
   }
 }
 
@@ -41,7 +46,12 @@ provider "aws" {
       Project     = "ses-mail"
       ManagedBy   = "terraform"
       Environment = var.environment
+      Application = "ses-mail-${var.environment}" # Combined tag for AppRegistry tag-sync
     }
+  }
+
+  ignore_tags {
+    keys = ["awsApplication"]
   }
 }
 

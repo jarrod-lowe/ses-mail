@@ -1,6 +1,3 @@
-# Get current AWS account ID
-data "aws_caller_identity" "current" {}
-
 # Local variables for resource naming
 locals {
   email_bucket_name = "ses-mail-storage-${data.aws_caller_identity.current.account_id}-${var.environment}"

@@ -112,5 +112,10 @@ A task is not complete until:
   - Uses tag-based query matching on Project=ses-mail and Environment={env}
   - Outputs include Resource Group name and AWS Console URL
 
-- [ ] 17. Add a myApplication application
-  - Create an AWS myApplication that matches via tags
+- [x] 17. Add a myApplication application
+  - Create an AWS Service Catalog AppRegistry application for myApplications
+  - Resources automatically discovered via Application=ses-mail-{env} tag (set in provider default_tags)
+  - Optional tag-sync automation configured (requires GLE enabled at account level)
+  - Provides application-level view in AWS Console Systems Manager AppManager
+  - Outputs include application ID and myApplications Console URL
+  - Tag-sync Lambda and IAM role created for automated resource discovery

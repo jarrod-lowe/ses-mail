@@ -153,3 +153,141 @@ resource "aws_iam_role_policy_attachment" "lambda_router_xray_access" {
   role       = aws_iam_role.lambda_router_execution.name
   policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
 }
+
+# IAM role for tag-sync starter Lambda function
+resource "aws_iam_role" "lambda_tag_sync_execution" {
+  name               = "ses-mail-lambda-tag-sync-${var.environment}"
+  assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
+}
+
+# Attach basic Lambda execution role for tag-sync Lambda (CloudWatch Logs)
+resource "aws_iam_role_policy_attachment" "lambda_tag_sync_basic_execution" {
+  role       = aws_iam_role.lambda_tag_sync_execution.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+# IAM policy document for tag-sync Lambda to access AppRegistry and Resource Groups
+data "aws_iam_policy_document" "lambda_tag_sync_access" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "servicecatalog:GetApplication"
+    ]
+    resources = ["*"]
+  }
+
+  statement {
+    effect = "Allow"
+    actions = [
+      "resource-groups:StartTagSyncTask",
+      "resource-groups:GetGroup",
+      "resource-groups:CreateGroup",
+      "resource-groups:Tag",
+      "resource-groups:UpdateAccountSettings",
+      "resource-groups:GetAccountSettings",
+      "cloudformation:ListStackResources",
+      "cloudformation:DescribeStacks",
+      "iam:CreateServiceLinkedRole",
+      "events:PutRule",
+      "events:PutTargets",
+      "events:DescribeRule",
+      "events:ListTargetsByRule",
+      "tag:GetResources",
+      "tag:TagResources",
+      "tag:UntagResources",
+    ]
+    resources = ["*"]
+  }
+
+  statement {
+    effect = "Allow"
+    actions = [
+      "iam:PassRole"
+    ]
+    resources = [
+      "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/ses-mail-tag-sync-role-${var.environment}"
+    ]
+    condition {
+      test     = "StringEquals"
+      variable = "iam:PassedToService"
+      values   = ["resource-groups.amazonaws.com"]
+    }
+  }
+}
+
+# IAM policy for tag-sync Lambda
+resource "aws_iam_role_policy" "lambda_tag_sync_access" {
+  name   = "lambda-tag-sync-access-${var.environment}"
+  role   = aws_iam_role.lambda_tag_sync_execution.id
+  policy = data.aws_iam_policy_document.lambda_tag_sync_access.json
+}
+
+# Note: The service-linked role AWSServiceRoleForAWSServiceCatalogAppRegistry
+# is automatically created by AWS when you first use AppRegistry.
+# We don't manage it with Terraform to avoid conflicts.
+
+# IAM role for tag-sync (separate from service-linked role)
+# This role allows Resource Groups to discover and tag resources
+data "aws_iam_policy_document" "tag_sync_assume_role" {
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRole"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["resource-groups.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "tag_sync" {
+  name               = "ses-mail-tag-sync-role-${var.environment}"
+  assume_role_policy = data.aws_iam_policy_document.tag_sync_assume_role.json
+  description        = "Role for AppRegistry tag-sync to discover and tag resources"
+}
+
+# IAM policy document for tag-sync role permissions
+data "aws_iam_policy_document" "tag_sync_permissions" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "tag:GetResources",
+      "tag:TagResources",
+      "tag:UntagResources",
+      "resource-groups:*",
+      "cloudformation:ListStackResources",
+      "cloudformation:DescribeStacks",
+      "iam:CreateServiceLinkedRole",
+      "events:PutRule",
+      "events:PutTargets",
+      "events:DescribeRule",
+      "events:ListTargetsByRule",
+      "servicecatalog:TagResource",
+      "ssm:AddTagsToResource",
+      "ssm:GetParameters",
+    ]
+    resources = ["*"]
+  }
+}
+
+# Attach permissions to tag-sync role
+resource "aws_iam_policy" "tag_sync_permissions" {
+  name   = "tag-sync-permissions-${var.environment}"
+  policy = data.aws_iam_policy_document.tag_sync_permissions.json
+}
+
+resource "aws_iam_role_policy_attachment" "tag_sync_custom" {
+  role       = aws_iam_role.tag_sync.name
+  policy_arn = aws_iam_policy.tag_sync_permissions.arn
+}
+
+resource "aws_iam_role_policy_attachment" "tag_sync_tag1" {
+  role       = aws_iam_role.tag_sync.name
+  policy_arn = "arn:aws:iam::aws:policy/ResourceGroupsTaggingAPITagUntagSupportedResources"
+}
+
+resource "aws_iam_role_policy_attachment" "tag_sync_tag2" {
+  role       = aws_iam_role.tag_sync.name
+  policy_arn = "arn:aws:iam::aws:policy/ResourceGroupsandTagEditorFullAccess"
+
+}

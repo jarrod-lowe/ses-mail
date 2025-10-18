@@ -225,6 +225,15 @@ terraform/
      --overwrite
    ```
 
+7. Enable GLE
+
+The auto-enablement of the GLE does not work yet. Run it manually with:
+
+```bash
+aws resource-groups update-account-settings \
+--group-lifecycle-events-desired-status ACTIVE
+```
+
 ### Workflow
 
 All commands now require an `ENV` parameter to specify which environment (test or prod):
@@ -266,6 +275,36 @@ SES → S3 → SNS (X-Ray tracing) → SQS Input Queue → EventBridge Pipes[rou
 
 The SNS topic is configured with Active tracing to initiate X-Ray traces for the entire email processing pipeline. This allows end-to-end visibility of email processing across all AWS services.
 
+## AWS myApplications Integration
+
+The infrastructure is registered with AWS myApplications through AWS Service Catalog AppRegistry, providing application-level visibility and management capabilities in the AWS Console.
+
+### What is myApplications?
+
+AWS myApplications provides a centralized view to manage your applications and their resources. It integrates with AppRegistry to:
+
+* View application health and status
+* Track costs at the application level
+* Monitor operational metrics
+* Manage application metadata and documentation
+* Access application resources in one place
+
+**Accessing myApplications:**
+
+```bash
+# Get the myApplications URL from Terraform output
+cd terraform/environments/test  # or prod
+terraform output myapplications_url
+
+# Or navigate in AWS Console:
+# AWS Console → Systems Manager → AppManager → Applications
+# Select "ses-mail-{environment}"
+```
+
+The AppRegistry application automatically discovers and includes all resources tagged with `Application=ses-mail-{environment}`. All infrastructure resources are tagged via Terraform provider `default_tags`, ensuring they automatically appear in the myApplications view.
+
+**Note**: Optional tag-sync automation requires AWS Group Lifecycle Events (GLE) to be enabled at the account level. However, resources will still appear in myApplications based on the `Application` tag alone.
+
 ## AWS Resource Groups
 
 The infrastructure includes an AWS Resource Group that provides a single view of all resources for each environment. All resources are automatically tagged with:
@@ -273,6 +312,7 @@ The infrastructure includes an AWS Resource Group that provides a single view of
 * **Project**: `ses-mail`
 * **ManagedBy**: `terraform`
 * **Environment**: `test` or `prod`
+* **Application**: `ses-mail-{environment}` (combined tag for myApplications integration)
 
 The Resource Group uses these tags to organize resources, making it easy to:
 
