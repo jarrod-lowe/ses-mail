@@ -74,3 +74,47 @@ resource "aws_cloudwatch_log_group" "lambda_validator_logs" {
   name              = "/aws/lambda/${aws_lambda_function.email_validator.function_name}"
   retention_in_days = 30
 }
+
+# Archive the router enrichment Lambda function code (single file, no dependencies)
+data "archive_file" "router_zip" {
+  type        = "zip"
+  source_file = "${path.module}/lambda/router_enrichment.py"
+  output_path = "${path.module}/lambda/router_enrichment.zip"
+}
+
+# Lambda function for router enrichment (used by EventBridge Pipes)
+resource "aws_lambda_function" "router_enrichment" {
+  filename         = data.archive_file.router_zip.output_path
+  function_name    = "ses-mail-router-enrichment-${var.environment}"
+  role             = aws_iam_role.lambda_router_execution.arn
+  handler          = "router_enrichment.lambda_handler"
+  source_code_hash = data.archive_file.router_zip.output_base64sha256
+  runtime          = "python3.12"
+  timeout          = 30
+  memory_size      = 256
+
+  # Enable X-Ray tracing for distributed tracing
+  tracing_config {
+    mode = "Active"
+  }
+
+  environment {
+    variables = {
+      DYNAMODB_TABLE_NAME = aws_dynamodb_table.email_routing.name
+      ENVIRONMENT         = var.environment
+    }
+  }
+
+  depends_on = [
+    aws_iam_role_policy_attachment.lambda_router_basic_execution,
+    aws_iam_role_policy.lambda_router_dynamodb_access,
+    aws_iam_role_policy.lambda_router_s3_access,
+    aws_iam_role_policy_attachment.lambda_router_xray_access
+  ]
+}
+
+# CloudWatch Log Group for router Lambda function
+resource "aws_cloudwatch_log_group" "lambda_router_logs" {
+  name              = "/aws/lambda/${aws_lambda_function.router_enrichment.function_name}"
+  retention_in_days = 30
+}

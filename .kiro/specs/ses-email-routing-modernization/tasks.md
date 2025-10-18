@@ -33,7 +33,7 @@ A task is not complete until:
   - Enable logging and monitoring for pipes
   - _Requirements: 2.1, 2.2, 2.7_
 
-- [ ] 5. Implement router enrichment lambda function
+- [x] 5. Implement router enrichment lambda function
   - Create lambda function that enriches SES messages with routing decisions
   - Implement DynamoDB lookup logic with hierarchical address matching
   - Add email address normalization for plus addressing support

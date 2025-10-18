@@ -412,3 +412,82 @@ aws dynamodb put-item \
     "description": {"S": "Default: bounce all unmatched emails"}
   }'
 ```
+
+### Router Enrichment Lambda Function
+
+The router enrichment lambda (`ses-mail-router-enrichment-{environment}`) is used by EventBridge Pipes to enrich SES email events with routing decisions based on DynamoDB routing rules.
+
+**Functionality:**
+
+* **Hierarchical DynamoDB Lookup**: Performs lookups in order of specificity (exact → normalized → domain wildcard → global wildcard)
+* **Email Address Normalization**: Removes +tag from addresses (e.g., `user+newsletter@example.com` → `user@example.com`) for plus addressing support
+* **Security Analysis**: Extracts and analyzes DMARC, SPF, DKIM, spam, and virus verdicts from SES receipt
+* **Fallback Behavior**: Defaults to "bounce" action when DynamoDB is unavailable or no rule matches
+* **X-Ray Tracing**: Active tracing enabled with custom annotations for message ID, source, and routing action
+
+**Input Format** (from EventBridge Pipes):
+
+```json
+[{
+  "eventSource": "aws:ses",
+  "ses": {
+    "mail": {
+      "messageId": "...",
+      "source": "sender@example.com",
+      "destination": ["recipient@domain.com"],
+      "commonHeaders": {...}
+    },
+    "receipt": {
+      "spamVerdict": {"status": "PASS"},
+      "virusVerdict": {"status": "PASS"},
+      "dkimVerdict": {"status": "PASS"},
+      "spfVerdict": {"status": "PASS"},
+      "dmarcVerdict": {"status": "PASS"}
+    }
+  }
+}]
+```
+
+**Output Format** (to EventBridge Event Bus):
+
+```json
+[{
+  "originalEvent": {...},
+  "routingDecisions": [{
+    "recipient": "recipient@domain.com",
+    "normalizedRecipient": "recipient@domain.com",
+    "action": "forward-to-gmail",
+    "target": "user@gmail.com",
+    "matchedRule": "ROUTE#recipient@domain.com",
+    "ruleDescription": "Forward support emails to Gmail",
+    "securityVerdict": {
+      "spam": "PASS",
+      "virus": "PASS",
+      "dkim": "PASS",
+      "spf": "PASS",
+      "dmarc": "PASS"
+    }
+  }],
+  "emailMetadata": {
+    "messageId": "...",
+    "source": "sender@example.com",
+    "subject": "Email subject",
+    "timestamp": "2025-01-18T10:00:00Z",
+    "securityVerdict": {...}
+  }
+}]
+```
+
+**Testing the Router Lambda:**
+
+```bash
+# Test with sample SES event
+aws lambda invoke \
+  --function-name ses-mail-router-enrichment-test \
+  --cli-binary-format raw-in-base64-out \
+  --payload file://test_event.json \
+  response.json
+
+# View logs
+aws logs tail /aws/lambda/ses-mail-router-enrichment-test --follow
+```
