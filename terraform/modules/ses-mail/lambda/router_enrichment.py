@@ -29,15 +29,9 @@ ENVIRONMENT = os.environ.get('ENVIRONMENT', 'unknown')
 # Initialize AWS clients
 dynamodb = boto3.client('dynamodb')
 
-# Import AWS X-Ray SDK for tracing
-try:
-    from aws_xray_sdk.core import xray_recorder
-    from aws_xray_sdk.core import patch_all
-    patch_all()
-    XRAY_ENABLED = True
-except ImportError:
-    XRAY_ENABLED = False
-    logger.warning("X-Ray SDK not available, tracing disabled")
+from aws_xray_sdk.core import xray_recorder
+from aws_xray_sdk.core import patch_all
+patch_all()
 
 
 def lambda_handler(event, context):
@@ -88,77 +82,80 @@ def enrich_ses_event(record: Dict[str, Any]) -> Dict[str, Any]:
     Returns:
         dict: Enriched message with routing decisions
     """
-    # Extract SES event from record
-    # The record structure depends on how EventBridge Pipes passes it
-    # It could be wrapped in Records array or be the direct SES event
-    ses_event = record
+    # Create a subsegment for the enrichment process
+    # This allows us to add annotations without the "FacadeSegments cannot be mutated" error
+    subsegment = xray_recorder.begin_subsegment('email_enrichment')
 
-    # If this is wrapped in a Records array, unwrap it
-    if 'Records' in record and isinstance(record['Records'], list) and len(record['Records']) > 0:
-        ses_event = record['Records'][0]
+    try:
+        # Extract SES event from record
+        # The record structure depends on how EventBridge Pipes passes it
+        # It could be wrapped in Records array or be the direct SES event
+        ses_event = record
 
-    # Extract SES mail and receipt data
-    ses = ses_event.get('ses', {})
-    mail = ses.get('mail', {})
-    receipt = ses.get('receipt', {})
+        # If this is wrapped in a Records array, unwrap it
+        if 'Records' in record and isinstance(record['Records'], list) and len(record['Records']) > 0:
+            ses_event = record['Records'][0]
 
-    message_id = mail.get('messageId')
-    source = mail.get('source')
-    destinations = mail.get('destination', [])
-    common_headers = mail.get('commonHeaders', {})
-    timestamp = mail.get('timestamp')
+        # Extract SES mail and receipt data
+        ses = ses_event.get('ses', {})
+        mail = ses.get('mail', {})
+        receipt = ses.get('receipt', {})
 
-    logger.info(f"Enriching email - Message ID: {message_id}, From: {source}, To: {destinations}")
+        message_id = mail.get('messageId')
+        source = mail.get('source')
+        destinations = mail.get('destination', [])
+        common_headers = mail.get('commonHeaders', {})
+        timestamp = mail.get('timestamp')
 
-    # Add X-Ray annotations for tracing
-    if XRAY_ENABLED:
-        try:
-            xray_recorder.put_annotation('messageId', message_id)
-            xray_recorder.put_annotation('source', source)
-            xray_recorder.put_annotation('environment', ENVIRONMENT)
-        except Exception as e:
-            logger.warning(f"Failed to add X-Ray annotations: {e}")
+        logger.info(f"Enriching email - Message ID: {message_id}, From: {source}, To: {destinations}")
 
-    # Extract security verdicts
-    security_verdict = {
-        'spam': receipt.get('spamVerdict', {}).get('status', 'UNKNOWN'),
-        'virus': receipt.get('virusVerdict', {}).get('status', 'UNKNOWN'),
-        'dkim': receipt.get('dkimVerdict', {}).get('status', 'UNKNOWN'),
-        'spf': receipt.get('spfVerdict', {}).get('status', 'UNKNOWN'),
-        'dmarc': receipt.get('dmarcVerdict', {}).get('status', 'UNKNOWN')
-    }
+        # Add X-Ray annotations to subsegment (not facade segment)
+        subsegment.put_annotation('messageId', message_id)
+        subsegment.put_annotation('source', source)
+        subsegment.put_annotation('environment', ENVIRONMENT)
 
-    logger.info(f"Security verdicts: {security_verdict}")
-
-    # Perform routing decision for each destination
-    routing_decisions = []
-    for recipient in destinations:
-        routing_decision = get_routing_decision(recipient, security_verdict)
-        routing_decisions.append(routing_decision)
-
-        # Add X-Ray annotation for action taken
-        if XRAY_ENABLED:
-            try:
-                xray_recorder.put_annotation(f'action_{recipient}', routing_decision['action'])
-            except Exception as e:
-                logger.warning(f"Failed to add X-Ray annotation for recipient: {e}")
-
-    # Build enriched message
-    enriched = {
-        'originalEvent': record,
-        'routingDecisions': routing_decisions,
-        'emailMetadata': {
-            'messageId': message_id,
-            'source': source,
-            'subject': common_headers.get('subject', ''),
-            'timestamp': timestamp,
-            'securityVerdict': security_verdict
+        # Extract security verdicts
+        security_verdict = {
+            'spam': receipt.get('spamVerdict', {}).get('status', 'UNKNOWN'),
+            'virus': receipt.get('virusVerdict', {}).get('status', 'UNKNOWN'),
+            'dkim': receipt.get('dkimVerdict', {}).get('status', 'UNKNOWN'),
+            'spf': receipt.get('spfVerdict', {}).get('status', 'UNKNOWN'),
+            'dmarc': receipt.get('dmarcVerdict', {}).get('status', 'UNKNOWN')
         }
-    }
 
-    logger.info(f"Enrichment complete - Routing decisions: {json.dumps(routing_decisions)}")
+        logger.info(f"Security verdicts: {security_verdict}")
 
-    return enriched
+        # Perform routing decision for each destination
+        routing_decisions = []
+        for recipient in destinations:
+            routing_decision = get_routing_decision(recipient, security_verdict)
+            routing_decisions.append(routing_decision)
+
+        # Add X-Ray annotations for searchability (use generic keys, not email addresses)
+        if routing_decisions:
+            subsegment.put_annotation('routing_action', routing_decisions[0]['action'])
+            subsegment.put_annotation('recipient_count', len(routing_decisions))
+
+        # Build enriched message
+        enriched = {
+            'originalEvent': record,
+            'routingDecisions': routing_decisions,
+            'emailMetadata': {
+                'messageId': message_id,
+                'source': source,
+                'subject': common_headers.get('subject', ''),
+                'timestamp': timestamp,
+                'securityVerdict': security_verdict
+            }
+        }
+
+        logger.info(f"Enrichment complete - Routing decisions: {json.dumps(routing_decisions)}")
+
+        return enriched
+
+    finally:
+        # Always end the subsegment, even if an exception occurs
+        xray_recorder.end_subsegment()
 
 
 def get_routing_decision(recipient: str, security_verdict: Dict[str, str]) -> Dict[str, Any]:

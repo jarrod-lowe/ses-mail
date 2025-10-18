@@ -75,11 +75,13 @@ resource "aws_cloudwatch_log_group" "lambda_validator_logs" {
   retention_in_days = 30
 }
 
-# Archive the router enrichment Lambda function code (single file, no dependencies)
+# Archive the router enrichment Lambda function code with dependencies
+# Uses the same package directory as email_processor to share dependencies (aws_xray_sdk, boto3)
 data "archive_file" "router_zip" {
   type        = "zip"
-  source_file = "${path.module}/lambda/router_enrichment.py"
+  source_dir  = "${path.module}/lambda/package"
   output_path = "${path.module}/lambda/router_enrichment.zip"
+  excludes    = ["__pycache__", "*.pyc", ".DS_Store", "email_processor.py"]
 }
 
 # Lambda function for router enrichment (used by EventBridge Pipes)

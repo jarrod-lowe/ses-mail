@@ -45,14 +45,15 @@ help:
 	@echo "  make plan ENV=prod"
 	@echo ""
 
-# Package email processor Lambda function with dependencies
-$(MODULE_DIR)/lambda/package: requirements.txt $(MODULE_DIR)/lambda/email_processor.py
-	@echo "Packaging email processor Lambda function with dependencies..."
+# Package Lambda functions with dependencies
+$(MODULE_DIR)/lambda/package: requirements.txt $(MODULE_DIR)/lambda/email_processor.py $(MODULE_DIR)/lambda/router_enrichment.py
+	@echo "Packaging Lambda functions with dependencies..."
 	@rm -rf $(MODULE_DIR)/lambda/package
 	@mkdir -p $(MODULE_DIR)/lambda/package
 	@pip3 install -q -r requirements.txt -t $(MODULE_DIR)/lambda/package
 	@cp $(MODULE_DIR)/lambda/email_processor.py $(MODULE_DIR)/lambda/package/
-	@echo "Email processor Lambda package created"
+	@cp $(MODULE_DIR)/lambda/router_enrichment.py $(MODULE_DIR)/lambda/package/
+	@echo "Lambda package created"
 
 package: $(MODULE_DIR)/lambda/package
 
