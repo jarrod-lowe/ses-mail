@@ -46,7 +46,7 @@ A task is not complete until:
   - Configure rules to match enriched message routing decisions
   - _Requirements: 2.5, 2.6, 3.1, 3.2, 3.4_
 
-- [ ] 7. Set up handler SQS queues with dead letter queues
+- [x] 7. Set up handler SQS queues with dead letter queues
   - Create Gmail forwarder SQS queue with DLQ and CloudWatch alarms
   - Create bouncer SQS queue with DLQ and CloudWatch alarms
   - Configure retry policies and message retention

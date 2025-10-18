@@ -498,7 +498,7 @@ The Gmail forwarder lambda (`ses-mail-gmail-forwarder-{environment}`) processes 
 
 **Functionality:**
 
-* **SQS Event Processing**: Triggered by messages in the gmail-forwarder queue (to be created in Task 7)
+* **SQS Event Processing**: Triggered by messages in the gmail-forwarder queue
 * **Enriched Message Handling**: Extracts routing decisions and email metadata from EventBridge-enriched messages
 * **Gmail API Integration**: Imports emails into Gmail with INBOX and UNREAD labels
 * **S3 Email Management**: Fetches raw email from S3 and deletes after successful import
@@ -564,7 +564,14 @@ cat response.json
 AWS_PROFILE=ses-mail aws logs tail /aws/lambda/ses-mail-gmail-forwarder-test --follow
 ```
 
-**Note**: The Gmail forwarder lambda will be connected to the gmail-forwarder SQS queue in Task 7 via an event source mapping.
+**SQS Queue Configuration:**
+
+* **Queue Name**: `ses-gmail-forwarder-{environment}`
+* **Dead Letter Queue**: `ses-gmail-forwarder-dlq-{environment}` (14 day retention)
+* **Visibility Timeout**: 30 seconds (10x lambda timeout)
+* **Max Retries**: 3 (before moving to DLQ)
+* **Event Source Mapping**: Batch size 1, max concurrency 10
+* **CloudWatch Alarms**: DLQ messages >0, queue age >5 minutes
 
 ### Bouncer Lambda Function
 
@@ -572,7 +579,7 @@ The bouncer lambda (`ses-mail-bouncer-{environment}`) processes enriched email m
 
 **Functionality:**
 
-* **SQS Event Processing**: Triggered by messages in the bouncer queue (to be created in Task 7)
+* **SQS Event Processing**: Triggered by messages in the bouncer queue
 * **Enriched Message Handling**: Extracts routing decisions and email metadata from EventBridge-enriched messages
 * **Bounce Notification**: Sends formatted bounce emails via SES to the original sender
 * **Email Metadata**: Includes original sender, recipient, subject, timestamp, and routing rule information in bounce
@@ -645,8 +652,16 @@ cat response.json
 AWS_PROFILE=ses-mail aws logs tail /aws/lambda/ses-mail-bouncer-test --follow
 ```
 
+**SQS Queue Configuration:**
+
+* **Queue Name**: `ses-bouncer-{environment}`
+* **Dead Letter Queue**: `ses-bouncer-dlq-{environment}` (14 day retention)
+* **Visibility Timeout**: 180 seconds (6x lambda timeout)
+* **Max Retries**: 3 (before moving to DLQ)
+* **Event Source Mapping**: Batch size 1, max concurrency 5
+* **CloudWatch Alarms**: DLQ messages >0, queue age >5 minutes
+
 **Important Notes:**
 
 * SES sandbox mode requires sender email verification. In production with verified domain, bounces will be sent to any address.
-* The bouncer lambda will be connected to the bouncer SQS queue in Task 7 via an event source mapping.
 * Bounce sender defaults to `mailer-daemon@{domain}` using the first domain from configuration.

@@ -211,3 +211,51 @@ resource "aws_cloudwatch_log_group" "lambda_bouncer_logs" {
   name              = "/aws/lambda/${aws_lambda_function.bouncer.function_name}"
   retention_in_days = 30
 }
+
+# ===========================
+# SQS Event Source Mappings
+# ===========================
+
+# Event source mapping for Gmail forwarder lambda
+resource "aws_lambda_event_source_mapping" "gmail_forwarder" {
+  event_source_arn = aws_sqs_queue.gmail_forwarder.arn
+  function_name    = aws_lambda_function.gmail_forwarder.arn
+
+  # Process one message at a time to ensure proper error handling
+  batch_size = 1
+
+  # Maximum concurrent lambda invocations
+  scaling_config {
+    maximum_concurrency = 10
+  }
+
+  # Enable function response types for partial batch failures
+  function_response_types = ["ReportBatchItemFailures"]
+
+  depends_on = [
+    aws_iam_role_policy_attachment.lambda_gmail_forwarder_basic_execution,
+    aws_sqs_queue.gmail_forwarder
+  ]
+}
+
+# Event source mapping for bouncer lambda
+resource "aws_lambda_event_source_mapping" "bouncer" {
+  event_source_arn = aws_sqs_queue.bouncer.arn
+  function_name    = aws_lambda_function.bouncer.arn
+
+  # Process one message at a time to ensure proper error handling
+  batch_size = 1
+
+  # Maximum concurrent lambda invocations
+  scaling_config {
+    maximum_concurrency = 5
+  }
+
+  # Enable function response types for partial batch failures
+  function_response_types = ["ReportBatchItemFailures"]
+
+  depends_on = [
+    aws_iam_role_policy_attachment.lambda_bouncer_basic_execution,
+    aws_sqs_queue.bouncer
+  ]
+}
