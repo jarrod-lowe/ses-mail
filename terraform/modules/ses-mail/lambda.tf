@@ -91,7 +91,7 @@ resource "aws_lambda_function" "router_enrichment" {
   source_code_hash = data.archive_file.router_zip.output_base64sha256
   runtime          = "python3.12"
   timeout          = 30
-  memory_size      = 256
+  memory_size      = 128
 
   # Enable X-Ray tracing for distributed tracing
   tracing_config {
