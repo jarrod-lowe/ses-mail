@@ -2,8 +2,8 @@
   "description": "Configuration file for SES Mail integration tests",
   "environments": {
     "test": {
-      "from_address": "sender@testmail.rrod.net",
-      "test_domain": "testmail.rrod.net",
+      "from_address": "sender@testmail.domain.com",
+      "test_domain": "testmail.domain.com",
       "gmail_target": "your-gmail@gmail.com",
       "timeout_settings": {
         "queue_wait": 60,
@@ -11,10 +11,10 @@
         "pipeline_processing": 30
       },
       "test_recipients": {
-        "forward_test": "test-forward@testmail.rrod.net",
-        "bounce_test": "test-bounce@testmail.rrod.net",
-        "plus_addressing_test": "test+tag@testmail.rrod.net",
-        "wildcard_test": "wildcard@testmail.rrod.net"
+        "forward_test": "test-forward@testmail.domain.com",
+        "bounce_test": "test-bounce@testmail.domain.com",
+        "plus_addressing_test": "test+tag@testmail.domain.com",
+        "wildcard_test": "wildcard@testmail.domain.com"
       }
     },
     "prod": {
@@ -64,7 +64,7 @@
     "domain_wildcard": {
       "description": "Test domain wildcard matching (*@domain.com)",
       "routing_action": "forward-to-gmail",
-      "wildcard_pattern": "*@testmail.rrod.net"
+      "wildcard_pattern": "*@testmail.domain.com"
     },
     "global_wildcard": {
       "description": "Test global wildcard matching (*)",

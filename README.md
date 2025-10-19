@@ -785,7 +785,7 @@ cat > test_bounce_message.json <<'EOF'
 {
   "Records": [{
     "messageId": "test-msg-1",
-    "body": "{\"originalEvent\": {\"eventSource\": \"aws:ses\", \"ses\": {\"mail\": {\"messageId\": \"abc123\", \"source\": \"sender@example.com\", \"destination\": [\"recipient@testmail.rrod.net\"]}, \"receipt\": {\"spamVerdict\": {\"status\": \"PASS\"}, \"virusVerdict\": {\"status\": \"PASS\"}}}}, \"routingDecisions\": [{\"recipient\": \"recipient@testmail.rrod.net\", \"normalizedRecipient\": \"recipient@testmail.rrod.net\", \"action\": \"bounce\", \"target\": \"\", \"matchedRule\": \"ROUTE#*\", \"ruleDescription\": \"Default: bounce all unmatched emails\"}], \"emailMetadata\": {\"messageId\": \"abc123\", \"source\": \"sender@example.com\", \"subject\": \"Test Email\", \"timestamp\": \"2025-01-18T10:00:00Z\", \"securityVerdict\": {\"spam\": \"PASS\", \"virus\": \"PASS\"}}}"
+    "body": "{\"originalEvent\": {\"eventSource\": \"aws:ses\", \"ses\": {\"mail\": {\"messageId\": \"abc123\", \"source\": \"sender@example.com\", \"destination\": [\"recipient@testmail.domain.com\"]}, \"receipt\": {\"spamVerdict\": {\"status\": \"PASS\"}, \"virusVerdict\": {\"status\": \"PASS\"}}}}, \"routingDecisions\": [{\"recipient\": \"recipient@testmail.domain.com\", \"normalizedRecipient\": \"recipient@testmail.domain.com\", \"action\": \"bounce\", \"target\": \"\", \"matchedRule\": \"ROUTE#*\", \"ruleDescription\": \"Default: bounce all unmatched emails\"}], \"emailMetadata\": {\"messageId\": \"abc123\", \"source\": \"sender@example.com\", \"subject\": \"Test Email\", \"timestamp\": \"2025-01-18T10:00:00Z\", \"securityVerdict\": {\"spam\": \"PASS\", \"virus\": \"PASS\"}}}"
   }]
 }
 EOF
@@ -1100,23 +1100,23 @@ The integration test script (`scripts/integration_test.py`) sends test emails th
 # Run all integration tests for test environment
 AWS_PROFILE=ses-mail ./scripts/integration_test.py \
   --env test \
-  --from sender@testmail.rrod.net \
-  --test-domain testmail.rrod.net \
+  --from sender@testmail.domain.com \
+  --test-domain testmail.domain.com \
   --gmail-target your-email@gmail.com
 
 # Run with verbose logging
 AWS_PROFILE=ses-mail ./scripts/integration_test.py \
   --env test \
-  --from sender@testmail.rrod.net \
-  --test-domain testmail.rrod.net \
+  --from sender@testmail.domain.com \
+  --test-domain testmail.domain.com \
   --gmail-target your-email@gmail.com \
   --verbose
 
 # Skip cleanup of test routing rules (for debugging)
 AWS_PROFILE=ses-mail ./scripts/integration_test.py \
   --env test \
-  --from sender@testmail.rrod.net \
-  --test-domain testmail.rrod.net \
+  --from sender@testmail.domain.com \
+  --test-domain testmail.domain.com \
   --gmail-target your-email@gmail.com \
   --skip-cleanup
 ```
@@ -1227,8 +1227,8 @@ Example test configuration file (`scripts/test_config.json`):
 {
   "environments": {
     "test": {
-      "from_address": "sender@testmail.rrod.net",
-      "test_domain": "testmail.rrod.net",
+      "from_address": "sender@testmail.domain.com",
+      "test_domain": "testmail.domain.com",
       "gmail_target": "your-gmail@gmail.com",
       "timeout_settings": {
         "queue_wait": 60,
@@ -1294,10 +1294,10 @@ For additional test scenarios not covered by the basic integration tests:
 AWS_PROFILE=ses-mail aws dynamodb put-item \
   --table-name ses-email-routing-test \
   --item '{
-    "PK": {"S": "ROUTE#test@testmail.rrod.net"},
+    "PK": {"S": "ROUTE#test@testmail.domain.com"},
     "SK": {"S": "RULE#v1"},
     "entity_type": {"S": "ROUTE"},
-    "recipient": {"S": "test@testmail.rrod.net"},
+    "recipient": {"S": "test@testmail.domain.com"},
     "action": {"S": "forward-to-gmail"},
     "target": {"S": "your-gmail@gmail.com"},
     "enabled": {"BOOL": true},
@@ -1306,8 +1306,8 @@ AWS_PROFILE=ses-mail aws dynamodb put-item \
     "description": {"S": "Test plus addressing normalization"}
   }'
 
-# Send email to test+tag@testmail.rrod.net
-# Router should normalize to test@testmail.rrod.net and match rule
+# Send email to test+tag@testmail.domain.com
+# Router should normalize to test@testmail.domain.com and match rule
 ```
 
 **Domain Wildcard Matching:**
@@ -1316,10 +1316,10 @@ AWS_PROFILE=ses-mail aws dynamodb put-item \
 AWS_PROFILE=ses-mail aws dynamodb put-item \
   --table-name ses-email-routing-test \
   --item '{
-    "PK": {"S": "ROUTE#*@testmail.rrod.net"},
+    "PK": {"S": "ROUTE#*@testmail.domain.com"},
     "SK": {"S": "RULE#v1"},
     "entity_type": {"S": "ROUTE"},
-    "recipient": {"S": "*@testmail.rrod.net"},
+    "recipient": {"S": "*@testmail.domain.com"},
     "action": {"S": "forward-to-gmail"},
     "target": {"S": "your-gmail@gmail.com"},
     "enabled": {"BOOL": true},
@@ -1328,7 +1328,7 @@ AWS_PROFILE=ses-mail aws dynamodb put-item \
     "description": {"S": "Catch-all for domain"}
   }'
 
-# Send email to any-address@testmail.rrod.net
+# Send email to any-address@testmail.domain.com
 # Should match wildcard rule
 ```
 

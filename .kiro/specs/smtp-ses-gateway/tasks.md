@@ -119,7 +119,7 @@ A task is not complete until:
     - _Requirements: 4.1, 4.4_
 
   - [ ] 8.3 Test error handling and DLQ processing
-    - Simulate Lambda failures and verify DLQ behavior
+    - Simulate Lambda failures and verify DLQ behaviour
     - Test DLQ processor retry logic
     - Verify proper error logging and status updates
     - _Requirements: 7.4_

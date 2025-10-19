@@ -6,6 +6,7 @@
         "creds",
         "DMARC",
         "domainkey",
+        "eventbridge",
         "googleapiclient",
         "Groupsand",
         "jsonencode",
