@@ -17,10 +17,10 @@ When writing terraform, never use `jsonencode` where an
 
 ```bash
 # Plan changes for test environment
-AWS_PROFILE=ses-mail make plan ENV=test
+AWS_PROFILE=ses-mail make plan ENV=test >/dev/null
 
 # Apply changes for test environment
-AWS_PROFILE=ses-mail make apply ENV=test
+AWS_PROFILE=ses-mail make apply ENV=test >/dev/null
 
 # Validate configuration
 AWS_PROFILE=ses-mail make validate ENV=test
@@ -170,8 +170,8 @@ terraform/
 3. A task is not complete until:
    - The code is written
    - Updated `README.md` with user-facing documentation
-   - Ran `AWS_PROFILE=ses-mail make plan ENV=test`
-   - Deployed with `AWS_PROFILE=ses-mail make apply ENV=test`
+   - Ran `AWS_PROFILE=ses-mail make plan ENV=test >/dev/null`
+   - Deployed with `AWS_PROFILE=ses-mail make apply ENV=test >/dev/null`
    - It is tested
    - Marked task as `[x]` in `tasks.md`
    - A git commit has been made
@@ -192,7 +192,7 @@ Lambda functions are in `terraform/modules/ses-mail/lambda/`:
 
 - Source files committed to git
 - Dependencies installed to `lambda/package/` via Makefile
-- Archive created automatically during `AWS_PROFILE=ses-mail make plan ENV=test` or `AWS_PROFILE=ses-mail make apply ENV=test`
+- Archive created automatically during `AWS_PROFILE=ses-mail make plan ENV=test >/dev/null` or `AWS_PROFILE=ses-mail make apply ENV=test >/dev/null`
 - Gmail API integration uses OAuth token from SSM Parameter Store
 
 **Lambda handlers**:

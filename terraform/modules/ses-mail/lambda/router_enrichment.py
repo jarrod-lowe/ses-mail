@@ -93,6 +93,8 @@ def enrich_ses_event(record: Dict[str, Any]) -> Dict[str, Any]:
     # Create a subsegment for the enrichment process
     # This allows us to add annotations without the "FacadeSegments cannot be mutated" error
     subsegment = xray_recorder.begin_subsegment('email_enrichment')
+    if subsegment is None:
+        raise RuntimeError("Failed to create X-Ray subsegment for enrichment")
 
     try:
         # Extract SES event from record
