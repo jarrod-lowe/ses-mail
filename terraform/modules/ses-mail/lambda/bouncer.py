@@ -103,15 +103,34 @@ def process_bounce_request(message: Dict[str, Any], sqs_message_id: str):
     subsegment = xray_recorder.begin_subsegment('send_bounce')
 
     try:
-        # Extract email metadata from enriched message
-        email_metadata = message.get('emailMetadata', {})
-        routing_decisions = message.get('routingDecisions', [])
-        original_event = message.get('originalEvent', {})
+        # EventBridge wraps the router output in 'detail'
+        detail = message.get('detail', message)  # Fallback to message if not wrapped
 
-        message_id = email_metadata.get('messageId', 'unknown')
-        source = email_metadata.get('source', 'unknown@unknown.com')
-        subject = email_metadata.get('subject', 'No Subject')
-        timestamp = email_metadata.get('timestamp', '')
+        # Extract message ID
+        message_id = detail.get('originalMessageId', 'unknown')
+
+        # Extract actions and targets from new router structure
+        actions = detail.get('actions', {})
+        bounce_action = actions.get('bounce', {})
+        targets = bounce_action.get('targets', [])
+
+        if not targets:
+            logger.warning(f"No bounce targets found in message {sqs_message_id}")
+            return
+
+        # Parse the original SES event from the body field to get email metadata
+        ses_event_body = json.loads(detail.get('body', '{}'))
+        ses_message = ses_event_body.get('Message')
+        if ses_message:
+            ses_event = json.loads(ses_message)
+        else:
+            ses_event = ses_event_body
+
+        # Extract SES mail metadata
+        ses_mail = ses_event.get('mail', {})
+        source = ses_mail.get('source', 'unknown@unknown.com')
+        subject = ses_mail.get('commonHeaders', {}).get('subject', 'No Subject')
+        timestamp = ses_mail.get('timestamp', '')
 
         logger.info(f"Processing bounce - Message ID: {message_id}, From: {source}")
 
@@ -121,34 +140,22 @@ def process_bounce_request(message: Dict[str, Any], sqs_message_id: str):
         subsegment.put_annotation('environment', ENVIRONMENT)
         subsegment.put_annotation('action', 'bounce')
 
-        # Extract original SES event for recipient information
-        ses_event = original_event
-        if 'Records' in original_event and isinstance(original_event['Records'], list) and len(original_event['Records']) > 0:
-            ses_event = original_event['Records'][0]
+        # Send bounce notification for each target recipient
+        for target_info in targets:
+            recipient = target_info.get('target')
 
-        ses = ses_event.get('ses', {})
-        mail = ses.get('mail', {})
-        destinations = mail.get('destination', [])
+            logger.info(f"Sending bounce for recipient: {recipient}")
 
-        # Send bounce notification for each recipient
-        for routing_decision in routing_decisions:
-            recipient = routing_decision.get('recipient')
-            matched_rule = routing_decision.get('matchedRule', 'UNKNOWN')
-            rule_description = routing_decision.get('ruleDescription', 'No rule description')
+            send_bounce_notification(
+                recipient=recipient,
+                original_sender=source,
+                original_subject=subject,
+                original_timestamp=timestamp,
+                matched_rule='ROUTE#*',  # Rule info not in simplified structure
+                rule_description='Email bounced by routing system'
+            )
 
-            if routing_decision.get('action') == 'bounce':
-                logger.info(f"Sending bounce for recipient: {recipient} (matched rule: {matched_rule})")
-
-                send_bounce_notification(
-                    recipient=recipient,
-                    original_sender=source,
-                    original_subject=subject,
-                    original_timestamp=timestamp,
-                    matched_rule=matched_rule,
-                    rule_description=rule_description
-                )
-
-                logger.info(f"Bounce sent successfully for recipient: {recipient}")
+            logger.info(f"Bounce sent successfully for recipient: {recipient}")
 
         logger.info(f"Bounce processing complete for message: {message_id}")
 

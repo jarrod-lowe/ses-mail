@@ -68,6 +68,34 @@ resource "aws_iam_role_policy" "eventbridge_sqs_access" {
 # EventBridge Rules and Targets
 # ===========================
 
+# Debug rule: Catch all events from router to CloudWatch Logs for debugging
+resource "aws_cloudwatch_event_rule" "debug_catch_all" {
+  name           = "debug-catch-all-${var.environment}"
+  description    = "Debug: Catch all events from router to verify they arrive at Event Bus"
+  event_bus_name = aws_cloudwatch_event_bus.email_routing.name
+  state          = "ENABLED" # Temporarily disabled to test if it's interfering
+
+  # Match ALL events from router regardless of detail content
+  event_pattern = jsonencode({
+    source = ["ses.email.router"]
+  })
+
+  tags = {
+    Name        = "debug-catch-all-${var.environment}"
+    Environment = var.environment
+    Service     = "ses-mail"
+    Purpose     = "Debug rule to verify events arrive at Event Bus"
+  }
+}
+
+# Target for debug rule: send to CloudWatch Logs
+resource "aws_cloudwatch_event_target" "debug_catch_all" {
+  rule           = aws_cloudwatch_event_rule.debug_catch_all.name
+  event_bus_name = aws_cloudwatch_event_bus.email_routing.name
+  target_id      = "debug-logs"
+  arn            = aws_cloudwatch_log_group.eventbridge_logs.arn
+}
+
 # EventBridge rule for routing to Gmail forwarder
 resource "aws_cloudwatch_event_rule" "gmail_forwarder" {
   name           = "route-to-gmail-${var.environment}"
@@ -75,11 +103,15 @@ resource "aws_cloudwatch_event_rule" "gmail_forwarder" {
   event_bus_name = aws_cloudwatch_event_bus.email_routing.name
 
   # Match events from router enrichment with forward-to-gmail action
+  # Router returns actions object with counts and targets arrays
   event_pattern = jsonencode({
-    source = ["ses.email.router"]
+    source      = ["ses.email.router"]
+    detail-type = ["Email Routing Decision"]
     detail = {
-      routingDecisions = {
-        action = ["forward-to-gmail"]
+      actions = {
+        forward-to-gmail = {
+          count = [{ numeric = [">", 0] }]
+        }
       }
     }
   })
@@ -119,11 +151,15 @@ resource "aws_cloudwatch_event_rule" "bouncer" {
   event_bus_name = aws_cloudwatch_event_bus.email_routing.name
 
   # Match events from router enrichment with bounce action
+  # Router returns actions object with counts and targets arrays
   event_pattern = jsonencode({
-    source = ["ses.email.router"]
+    source      = ["ses.email.router"]
+    detail-type = ["Email Routing Decision"]
     detail = {
-      routingDecisions = {
-        action = ["bounce"]
+      actions = {
+        bounce = {
+          count = [{ numeric = [">", 0] }]
+        }
       }
     }
   })
@@ -241,6 +277,26 @@ resource "aws_cloudwatch_log_group" "eventbridge_logs" {
     Environment = var.environment
     Service     = "ses-mail"
   }
+}
+
+# Resource policy to allow EventBridge to write to CloudWatch Logs
+resource "aws_cloudwatch_log_resource_policy" "eventbridge_logs" {
+  policy_name = "eventbridge-logs-${var.environment}"
+
+  policy_document = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Principal = {
+        Service = "events.amazonaws.com"
+      }
+      Action = [
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+      ]
+      Resource = "${aws_cloudwatch_log_group.eventbridge_logs.arn}:*"
+    }]
+  })
 }
 
 # CloudWatch metric filter for EventBridge rule failures (Gmail forwarder)

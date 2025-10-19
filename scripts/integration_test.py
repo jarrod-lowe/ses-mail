@@ -325,9 +325,24 @@ class IntegrationTest:
 
     def _extract_message_id(self, message_body: Dict[str, Any]) -> Optional[str]:
         """Extract SES message ID from various message body formats."""
-        # EventBridge format (enriched message)
+        # New EventBridge format (simplified router structure)
+        # EventBridge wraps router output in 'detail'
+        if 'detail' in message_body:
+            detail = message_body['detail']
+            # Try originalMessageId from new router structure
+            if 'originalMessageId' in detail:
+                return detail.get('originalMessageId')
+            # Try old emailMetadata format for backward compatibility
+            if 'emailMetadata' in detail:
+                return detail['emailMetadata'].get('messageId')
+
+        # Old EventBridge format (enriched message) - for backward compatibility
         if 'emailMetadata' in message_body:
             return message_body['emailMetadata'].get('messageId')
+
+        # Try originalMessageId at top level (new router output before EventBridge wrapping)
+        if 'originalMessageId' in message_body:
+            return message_body.get('originalMessageId')
 
         # SNS format
         if 'Message' in message_body:

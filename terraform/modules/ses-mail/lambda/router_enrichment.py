@@ -10,10 +10,11 @@ This Lambda function enriches SES email events with routing decisions by:
 Used by EventBridge Pipes as an enrichment function.
 """
 
+from functools import lru_cache
 import json
 import logging
 import os
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 
 import boto3
 from botocore.exceptions import ClientError
@@ -62,16 +63,43 @@ def lambda_handler(event, context):
     failure_count = 0
 
     for record in event:
+        # EventBridge Pipes expects just the Detail payload
+        # Pipes will add Source and DetailType based on target configuration
+        enriched_result = {
+            **record,
+            **{
+                "originalMessageId": record["messageId"],
+                "actions": {
+                    "store": {
+                        "count": 0,
+                        "targets": [],
+                    },
+                    "forward-to-gmail": {
+                        "count": 0,
+                        "targets": [],
+                    },
+                    "bounce": {
+                        "count": 0,
+                        "targets": [],
+                    },
+                },
+            },
+        }
+        del(enriched_result["messageId"])
+        action = "store"
         try:
-            enriched = enrich_ses_event(record)
-            enriched_results.append(enriched)
+            results = decide_action(record)
+            for action, dest in results:
+                enriched_result["actions"][action]["count"] += 1
+                if dest:
+                    enriched_result["actions"][action]["targets"].append(dest)
             success_count += 1
         except Exception as e:
             logger.error(f"Error enriching record: {str(e)}", exc_info=True)
-            # On enrichment failure, create a fallback enrichment with bounce action
-            fallback = create_fallback_enrichment(record, str(e))
-            enriched_results.append(fallback)
+            # On enrichment failure, create a fallback enrichment with store action
+            enriched_result["actions"]["store"]["count"] += 1
             failure_count += 1
+        enriched_results.append(enriched_result)
 
     # Publish custom metrics for success/failure rates
     publish_metrics(success_count, failure_count)
@@ -80,110 +108,56 @@ def lambda_handler(event, context):
     return enriched_results
 
 
-def enrich_ses_event(record: Dict[str, Any]) -> Dict[str, Any]:
+def decide_action(record: Dict[str, Any]) -> List[Tuple[str, Optional[Any]]]:
     """
-    Enrich a single SES event record with routing decisions.
+    Decide routing action for a single SES event record.
 
     Args:
         record: SES event record
-
     Returns:
-        dict: Enriched message with routing decisions
+        str: Routing action (e.g., 'deliver', 'store', 'bounce')
     """
-    # Create a subsegment for the enrichment process
-    # This allows us to add annotations without the "FacadeSegments cannot be mutated" error
     subsegment = xray_recorder.begin_subsegment('email_enrichment')
     if subsegment is None:
         raise RuntimeError("Failed to create X-Ray subsegment for enrichment")
 
-    try:
-        # Extract SES event from record
-        # The record structure depends on how EventBridge Pipes passes it
-        # It could be wrapped in Records array or be the direct SES event
-        ses_event = record
+    body = json.loads(record['body'])
+    bounce = check_spam(body)
+    results = []
+    counts = {
+        "forward-to-gmail": 0,
+        "store": 0,
+        "bounce": 0,
+    }
 
-        # If this is wrapped in a Records array, unwrap it
-        if 'Records' in record and isinstance(record['Records'], list) and len(record['Records']) > 0:
-            ses_event = record['Records'][0]
+    for target in body["receipt"]["recipients"]:
+        if bounce:
+            results.append(('bounce', {"target": target}))
+        else:
+            routing_decision, destination = get_routing_decision(target)
+            results.append((routing_decision, {"target": target, "destination": destination}))
+        counts[results[-1][0]] += 1
 
-        # Extract SES mail and receipt data
-        ses = ses_event.get('ses', {})
-        mail = ses.get('mail', {})
-        receipt = ses.get('receipt', {})
-
-        message_id = mail.get('messageId')
-        source = mail.get('source')
-        destinations = mail.get('destination', [])
-        common_headers = mail.get('commonHeaders', {})
-        timestamp = mail.get('timestamp')
-
-        logger.info(f"Enriching email - Message ID: {message_id}, From: {source}, To: {destinations}")
-
-        # Add X-Ray annotations to subsegment (not facade segment)
-        subsegment.put_annotation('messageId', message_id)
-        subsegment.put_annotation('source', source)
-        subsegment.put_annotation('environment', ENVIRONMENT)
-
-        # Extract security verdicts
-        security_verdict = {
-            'spam': receipt.get('spamVerdict', {}).get('status', 'UNKNOWN'),
-            'virus': receipt.get('virusVerdict', {}).get('status', 'UNKNOWN'),
-            'dkim': receipt.get('dkimVerdict', {}).get('status', 'UNKNOWN'),
-            'spf': receipt.get('spfVerdict', {}).get('status', 'UNKNOWN'),
-            'dmarc': receipt.get('dmarcVerdict', {}).get('status', 'UNKNOWN')
-        }
-
-        logger.info(f"Security verdicts: {security_verdict}")
-
-        # Perform routing decision for each destination
-        routing_decisions = []
-        for recipient in destinations:
-            routing_decision = get_routing_decision(recipient, security_verdict)
-            routing_decisions.append(routing_decision)
-
-        # Add X-Ray annotations for searchability (use generic keys, not email addresses)
-        if routing_decisions:
-            subsegment.put_annotation('routing_action', routing_decisions[0]['action'])
-            subsegment.put_annotation('recipient_count', len(routing_decisions))
-
-        # Build enriched message
-        enriched = {
-            'originalEvent': record,
-            'routingDecisions': routing_decisions,
-            'emailMetadata': {
-                'messageId': message_id,
-                'source': source,
-                'subject': common_headers.get('subject', ''),
-                'timestamp': timestamp,
-                'securityVerdict': security_verdict
-            }
-        }
-
-        logger.info(f"Enrichment complete - Routing decisions: {json.dumps(routing_decisions)}")
-
-        return enriched
-
-    finally:
-        # Always end the subsegment, even if an exception occurs
-        xray_recorder.end_subsegment()
+    subsegment.put_annotation('recipient_count', len(results))
+    for key, value in counts.items():
+        subsegment.put_annotation(key, value)
+    xray_recorder.end_subsegment()
+    return results
 
 
-def get_routing_decision(recipient: str, security_verdict: Dict[str, str]) -> Dict[str, Any]:
+def get_routing_decision(recipient: str) -> Tuple[str, Optional[str]]:
     """
     Determine routing decision for a recipient using hierarchical DynamoDB lookup.
 
     Lookup order:
     1. Exact match (e.g., user+tag@example.com)
-    2. Normalized match (e.g., user@example.com without +tag)
+    2. Normalized match (e.g., user@example.com)
     3. Domain wildcard (e.g., *@example.com)
     4. Global wildcard (e.g., *)
-
     Args:
         recipient: Email address to look up
-        security_verdict: Security analysis results
-
     Returns:
-        dict: Routing decision with action, target, and metadata
+        tuple: (routing action, target destination)
     """
     logger.info(f"Looking up routing rule for recipient: {recipient}")
 
@@ -201,31 +175,36 @@ def get_routing_decision(recipient: str, security_verdict: Dict[str, str]) -> Di
                 logger.info(f"Rule {lookup_key} is disabled, continuing search")
                 continue
 
-            # Build routing decision from rule
-            decision = {
-                'recipient': recipient,
-                'normalizedRecipient': normalize_email_address(recipient),
-                'action': rule.get('action', 'bounce'),
-                'target': rule.get('target', ''),
-                'matchedRule': lookup_key,
-                'ruleDescription': rule.get('description', ''),
-                'securityVerdict': security_verdict
-            }
+            logger.info(f"Routing decision: {rule.get('action', 'bounce')} (matched rule: {lookup_key})")
+            return rule.get('action', 'bounce'), rule.get('target', None)
 
-            logger.info(f"Routing decision: {decision['action']} (matched rule: {lookup_key})")
-            return decision
+    # No rule found - default to store
+    logger.warning(f"No routing rule found for {recipient}, defaulting to store")
+    return 'store', None
 
-    # No rule found - default to bounce
-    logger.warning(f"No routing rule found for {recipient}, defaulting to bounce")
-    return {
-        'recipient': recipient,
-        'normalizedRecipient': normalize_email_address(recipient),
-        'action': 'bounce',
-        'target': '',
-        'matchedRule': 'DEFAULT',
-        'ruleDescription': 'No matching rule found - default bounce',
-        'securityVerdict': security_verdict
-    }
+def check_spam(body: Dict[str, Any]) -> bool:
+    """
+    Check if the email is marked as spam based on SES receipt verdicts.
+
+    Args:
+        body: SES event body
+    Returns:
+        bool: True if email is spam, False otherwise
+    """
+    receipt = body['receipt']
+    if receipt["spamVerdict"]["status"].lower() == "fail":
+        return True
+    if receipt["virusVerdict"]["status"].lower() == "fail":
+        return True
+    if receipt["dkimVerdict"]["status"].lower() == "fail":
+        return True
+    if receipt["spfVerdict"]["status"].lower() == "fail":
+        return True
+    if receipt["dmarcVerdict"]["status"].lower() == "fail" and receipt["dmarcPolicy"] == "reject":
+        return True
+
+    return False
+
 
 
 def generate_lookup_keys(email_address: str) -> List[str]:
@@ -283,6 +262,8 @@ def normalize_email_address(email_address: str) -> str:
     return f"{local_part}@{domain}"
 
 
+# Cached result
+@lru_cache(maxsize=32)
 def lookup_routing_rule(route_key: str) -> Optional[Dict[str, Any]]:
     """
     Look up a routing rule in DynamoDB.
@@ -332,82 +313,6 @@ def lookup_routing_rule(route_key: str) -> Optional[Dict[str, Any]]:
     except Exception as e:
         logger.error(f"Unexpected error looking up {route_key}: {str(e)}")
         return None
-
-
-def create_fallback_enrichment(record: Dict[str, Any], error_message: str) -> Dict[str, Any]:
-    """
-    Create a fallback enrichment when normal enrichment fails.
-
-    This ensures EventBridge Pipes always receives a valid enriched message,
-    even when DynamoDB is unavailable or other errors occur.
-
-    Args:
-        record: Original SES record
-        error_message: Error that caused enrichment to fail
-
-    Returns:
-        dict: Fallback enriched message with bounce action
-    """
-    logger.warning(f"Creating fallback enrichment due to error: {error_message}")
-
-    # Try to extract basic email metadata from record
-    try:
-        ses_event = record
-        if 'Records' in record and isinstance(record['Records'], list) and len(record['Records']) > 0:
-            ses_event = record['Records'][0]
-
-        ses = ses_event.get('ses', {})
-        mail = ses.get('mail', {})
-        destinations = mail.get('destination', ['unknown@unknown.com'])
-
-        routing_decisions = [
-            {
-                'recipient': dest,
-                'normalizedRecipient': normalize_email_address(dest),
-                'action': 'bounce',
-                'target': '',
-                'matchedRule': 'FALLBACK',
-                'ruleDescription': f'Fallback due to enrichment error: {error_message}',
-                'securityVerdict': {}
-            }
-            for dest in destinations
-        ]
-
-        return {
-            'originalEvent': record,
-            'routingDecisions': routing_decisions,
-            'emailMetadata': {
-                'messageId': mail.get('messageId', 'unknown'),
-                'source': mail.get('source', 'unknown'),
-                'subject': mail.get('commonHeaders', {}).get('subject', ''),
-                'timestamp': mail.get('timestamp', ''),
-                'securityVerdict': {},
-                'enrichmentError': error_message
-            }
-        }
-    except Exception as e:
-        logger.error(f"Error creating fallback enrichment: {str(e)}")
-        # Return minimal fallback
-        return {
-            'originalEvent': record,
-            'routingDecisions': [{
-                'recipient': 'unknown@unknown.com',
-                'normalizedRecipient': 'unknown@unknown.com',
-                'action': 'bounce',
-                'target': '',
-                'matchedRule': 'FALLBACK',
-                'ruleDescription': f'Critical error: {error_message}',
-                'securityVerdict': {}
-            }],
-            'emailMetadata': {
-                'messageId': 'unknown',
-                'source': 'unknown',
-                'subject': '',
-                'timestamp': '',
-                'securityVerdict': {},
-                'enrichmentError': error_message
-            }
-        }
 
 
 def publish_metrics(success_count: int, failure_count: int) -> None:

@@ -120,73 +120,91 @@ def process_sqs_record(record, service):
     subsegment = xray_recorder.begin_subsegment('process_gmail_forward')  # type: ignore[attr-defined]
 
     try:
-        # Parse SQS message body (enriched EventBridge message)
+        # Parse SQS message body (enriched EventBridge message from EventBridge Event Bus)
+        # The message is the EventBridge event detail
         body = json.loads(record.get('body', '{}'))
 
-        # Extract enriched message data
-        routing_decisions = body.get('routingDecisions', [])
-        email_metadata = body.get('emailMetadata', {})
+        # EventBridge wraps the router output in 'detail'
+        detail = body.get('detail', body)  # Fallback to body if not wrapped
 
-        message_id = email_metadata.get('messageId')
-        source = email_metadata.get('source')
-        subject = email_metadata.get('subject', '(no subject)')
+        # Extract message ID from detail
+        message_id = detail.get('originalMessageId')
 
-        # Get the first routing decision (should be forward-to-gmail)
-        if not routing_decisions:
-            raise ValueError("No routing decisions found in enriched message")
+        # Extract actions and targets from new router structure
+        actions = detail.get('actions', {})
+        forward_to_gmail = actions.get('forward-to-gmail', {})
+        targets = forward_to_gmail.get('targets', [])
 
-        routing_decision = routing_decisions[0]
-        action = routing_decision.get('action')
-        target = routing_decision.get('target')
-        recipient = routing_decision.get('recipient')
+        if not targets:
+            raise ValueError("No forward-to-gmail targets found in enriched message")
 
-        # Add X-Ray annotations using subsegment to avoid "FacadeSegments cannot be mutated" error
-        if subsegment:
-            subsegment.put_annotation('action', action)
-            subsegment.put_annotation('recipient', recipient)
-            subsegment.put_annotation('target', target)
+        # Parse the original SES event from the body field to get email metadata
+        ses_event_body = json.loads(detail.get('body', '{}'))
+        ses_message = ses_event_body.get('Message')
+        if ses_message:
+            ses_event = json.loads(ses_message)
+        else:
+            ses_event = ses_event_body
 
-        # Validate action type
-        if action != 'forward-to-gmail':
-            raise ValueError(f"Unexpected action type: {action}")
-
-        # Log email metadata
-        logger.info(f"Processing email forward to Gmail:")
-        logger.info(f"  Message ID: {message_id}")
-        logger.info(f"  From: {source}")
-        logger.info(f"  To: {recipient}")
-        logger.info(f"  Subject: {subject}")
-        logger.info(f"  Target Gmail: {target}")
-        logger.info(f"  Security verdict: {email_metadata.get('securityVerdict', {})}")
+        # Extract SES mail metadata
+        ses_mail = ses_event.get('mail', {})
+        source = ses_mail.get('source', 'unknown@unknown.com')
+        subject = ses_mail.get('commonHeaders', {}).get('subject', '(no subject)')
 
         if not message_id:
-            raise ValueError("Missing messageId in enriched message")
+            raise ValueError("Missing originalMessageId in enriched message")
 
-        # Fetch raw email from S3
-        raw_eml = fetch_raw_email_from_s3(message_id)
-        logger.info(f"  Fetched {len(raw_eml)} bytes from S3")
+        # Process each target (typically one, but could be multiple)
+        results = []
+        for target_info in targets:
+            recipient = target_info.get('target')  # Original recipient email
+            destination = target_info.get('destination')  # Gmail destination address
 
-        # Import into Gmail with INBOX and UNREAD labels
-        gmail_response = gmail_import(service, raw_eml, DEFAULT_LABEL_IDS)
+            # Add X-Ray annotations
+            if subsegment:
+                subsegment.put_annotation('action', 'forward-to-gmail')
+                subsegment.put_annotation('recipient', recipient)
+                subsegment.put_annotation('target', destination)
 
-        logger.info(f"  Successfully imported to Gmail: {gmail_response.get('id')}")
+            # Log email metadata
+            logger.info(f"Processing email forward to Gmail:")
+            logger.info(f"  Message ID: {message_id}")
+            logger.info(f"  From: {source}")
+            logger.info(f"  To: {recipient}")
+            logger.info(f"  Subject: {subject}")
+            logger.info(f"  Target Gmail: {destination}")
 
-        # Add Gmail response details to X-Ray subsegment
-        if subsegment:
-            subsegment.put_annotation('gmail_message_id', gmail_response.get('id', 'unknown'))
-            subsegment.put_annotation('gmail_thread_id', gmail_response.get('threadId', 'unknown'))
-            subsegment.put_annotation('import_status', 'success')
+            # Fetch raw email from S3 (only once, reuse for all targets)
+            if not results:  # First target
+                raw_eml = fetch_raw_email_from_s3(message_id)
+                logger.info(f"  Fetched {len(raw_eml)} bytes from S3")
 
-        # Delete email from S3 after successful import
+            # Import into Gmail with INBOX and UNREAD labels
+            gmail_response = gmail_import(service, raw_eml, DEFAULT_LABEL_IDS)
+
+            logger.info(f"  Successfully imported to Gmail: {gmail_response.get('id')}")
+
+            # Add Gmail response details to X-Ray subsegment
+            if subsegment:
+                subsegment.put_annotation('gmail_message_id', gmail_response.get('id', 'unknown'))
+                subsegment.put_annotation('gmail_thread_id', gmail_response.get('threadId', 'unknown'))
+                subsegment.put_annotation('import_status', 'success')
+
+            results.append({
+                'recipient': recipient,
+                'destination': destination,
+                'gmail_id': gmail_response.get('id'),
+                'threadId': gmail_response.get('threadId'),
+                'labelIds': gmail_response.get('labelIds')
+            })
+
+        # Delete email from S3 after successful import of all targets
         delete_email_from_s3(message_id)
         logger.info(f"  Deleted email from S3")
 
         return {
             'messageId': message_id,
-            'gmail_id': gmail_response.get('id'),
-            'threadId': gmail_response.get('threadId'),
-            'labelIds': gmail_response.get('labelIds'),
-            'target': target,
+            'results': results,
             'status': 'ok',
             'receiptHandle': receipt_handle
         }

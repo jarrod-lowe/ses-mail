@@ -124,6 +124,29 @@ resource "aws_iam_role_policy_attachment" "lambda_router_xray_access" {
   policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
 }
 
+# IAM policy document for router Lambda CloudWatch metrics access
+data "aws_iam_policy_document" "lambda_router_cloudwatch_metrics" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "cloudwatch:PutMetricData"
+    ]
+    resources = ["*"]
+    condition {
+      test     = "StringEquals"
+      variable = "cloudwatch:namespace"
+      values   = ["SESMail/${var.environment}"]
+    }
+  }
+}
+
+# IAM policy for router Lambda to publish CloudWatch metrics
+resource "aws_iam_role_policy" "lambda_router_cloudwatch_metrics" {
+  name   = "lambda-router-cloudwatch-metrics-${var.environment}"
+  role   = aws_iam_role.lambda_router_execution.id
+  policy = data.aws_iam_policy_document.lambda_router_cloudwatch_metrics.json
+}
+
 # IAM role for tag-sync starter Lambda function
 resource "aws_iam_role" "lambda_tag_sync_execution" {
   name               = "ses-mail-lambda-tag-sync-${var.environment}"

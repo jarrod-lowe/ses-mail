@@ -485,31 +485,34 @@ The router enrichment lambda (`ses-mail-router-enrichment-{environment}`) is use
 
 ```json
 [{
-  "originalEvent": {...},
-  "routingDecisions": [{
-    "recipient": "recipient@domain.com",
-    "normalizedRecipient": "recipient@domain.com",
-    "action": "forward-to-gmail",
-    "target": "user@gmail.com",
-    "matchedRule": "ROUTE#recipient@domain.com",
-    "ruleDescription": "Forward support emails to Gmail",
-    "securityVerdict": {
-      "spam": "PASS",
-      "virus": "PASS",
-      "dkim": "PASS",
-      "spf": "PASS",
-      "dmarc": "PASS"
-    }
-  }],
-  "emailMetadata": {
+  "Source": "ses.email.router",
+  "DetailType": "Email Routing Decision",
+  "Detail": {
     "messageId": "...",
-    "source": "sender@example.com",
-    "subject": "Email subject",
-    "timestamp": "2025-01-18T10:00:00Z",
-    "securityVerdict": {...}
+    "eventSource": "aws:sqs",
+    "body": "{...original SES event as JSON string...}",
+    "originalMessageId": "abc123...",
+    "actions": {
+      "store": {
+        "count": 0,
+        "targets": []
+      },
+      "forward-to-gmail": {
+        "count": 1,
+        "targets": [
+          {"target": "recipient@domain.com", "destination": "user@gmail.com"}
+        ]
+      },
+      "bounce": {
+        "count": 0,
+        "targets": []
+      }
+    }
   }
 }]
 ```
+
+The router performs hierarchical DynamoDB lookups for each recipient and increments the appropriate action count. For `forward-to-gmail` actions, the `targets` array contains objects with both the original recipient (`target`) and the Gmail destination (`destination`). For `bounce` and `store` actions, targets only contain the recipient address.
 
 **Testing the Router Lambda:**
 
@@ -618,31 +621,41 @@ AWS_PROFILE=ses-mail aws events put-events \
 
 **Event Pattern Examples:**
 
-The EventBridge rules use event patterns to match routing decisions. Here are the patterns used:
+The EventBridge rules use event patterns to match routing decisions based on action counts. Here are the patterns used:
 
 Gmail Forwarder Rule:
 ```json
 {
   "source": ["ses.email.router"],
+  "detail-type": ["Email Routing Decision"],
   "detail": {
-    "routingDecisions": {
-      "action": ["forward-to-gmail"]
+    "actions": {
+      "forward-to-gmail": {
+        "count": [{ "numeric": [">", 0] }]
+      }
     }
   }
 }
 ```
 
+This matches any event where at least one recipient has a `forward-to-gmail` action.
+
 Bouncer Rule:
 ```json
 {
   "source": ["ses.email.router"],
+  "detail-type": ["Email Routing Decision"],
   "detail": {
-    "routingDecisions": {
-      "action": ["bounce"]
+    "actions": {
+      "bounce": {
+        "count": [{ "numeric": [">", 0] }]
+      }
     }
   }
 }
 ```
+
+This matches any event where at least one recipient has a `bounce` action.
 
 ### Gmail Forwarder Lambda Function
 
@@ -660,24 +673,25 @@ The Gmail forwarder lambda (`ses-mail-gmail-forwarder-{environment}`) processes 
 
 **Input Format** (from SQS/EventBridge):
 
-The lambda receives SQS messages containing enriched EventBridge messages:
+The lambda receives SQS messages containing EventBridge events with the router's enriched data:
 
 ```json
 {
   "Records": [{
-    "body": "{\"originalEvent\": {...}, \"routingDecisions\": [{\"recipient\": \"...\", \"action\": \"forward-to-gmail\", \"target\": \"user@gmail.com\"}], \"emailMetadata\": {\"messageId\": \"...\", \"source\": \"...\", \"subject\": \"...\"}}"
+    "body": "{\"detail\": {\"originalMessageId\": \"abc123\", \"body\": \"{...SES event JSON...}\", \"actions\": {\"forward-to-gmail\": {\"count\": 1, \"targets\": [{\"target\": \"recipient@domain.com\", \"destination\": \"user@gmail.com\"}]}}}}"
   }]
 }
 ```
 
 **Processing Flow:**
 
-1. Parse SQS message body to extract enriched EventBridge message
-2. Extract message ID, routing decision (action/target), and email metadata
-3. Fetch raw email from S3 (`emails/{messageId}`)
-4. Import email into Gmail via Gmail API
-5. Delete email from S3 after successful import
-6. Return success or batch item failure for SQS retry
+1. Parse SQS message body to extract EventBridge event detail
+2. Extract `originalMessageId` and `actions.forward-to-gmail.targets` array
+3. Parse SES event from `body` field to get email metadata (subject, source)
+4. Fetch raw email from S3 (`emails/{originalMessageId}`)
+5. For each target in targets array, import email into Gmail via Gmail API
+6. Delete email from S3 after successful import of all targets
+7. Return success or batch item failure for SQS retry
 
 **Configuration:**
 
@@ -741,23 +755,24 @@ The bouncer lambda (`ses-mail-bouncer-{environment}`) processes enriched email m
 
 **Input Format** (from SQS/EventBridge):
 
-The lambda receives SQS messages containing enriched EventBridge messages:
+The lambda receives SQS messages containing EventBridge events with the router's enriched data:
 
 ```json
 {
   "Records": [{
-    "body": "{\"originalEvent\": {...}, \"routingDecisions\": [{\"recipient\": \"...\", \"action\": \"bounce\", \"target\": \"\", \"matchedRule\": \"ROUTE#*\", \"ruleDescription\": \"Default: bounce all unmatched emails\"}], \"emailMetadata\": {\"messageId\": \"...\", \"source\": \"...\", \"subject\": \"...\"}}"
+    "body": "{\"detail\": {\"originalMessageId\": \"abc123\", \"body\": \"{...SES event JSON...}\", \"actions\": {\"bounce\": {\"count\": 1, \"targets\": [{\"target\": \"recipient@domain.com\"}]}}}}"
   }]
 }
 ```
 
 **Processing Flow:**
 
-1. Parse SQS message body to extract enriched EventBridge message
-2. Extract message ID, routing decisions (action/target/rule), and email metadata
-3. For each recipient with action "bounce", send a bounce notification via SES
-4. Bounce email includes original message details and routing rule information
-5. Return success or batch item failure for SQS retry
+1. Parse SQS message body to extract EventBridge event detail
+2. Extract `originalMessageId` and `actions.bounce.targets` array
+3. Parse SES event from `body` field to get email metadata (subject, source, timestamp)
+4. For each target in targets array, send a bounce notification via SES
+5. Bounce email includes original message details
+6. Return success or batch item failure for SQS retry
 
 **Bounce Email Format:**
 
