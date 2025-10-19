@@ -1,7 +1,7 @@
 client_secret.json
 token.json
 
-# Terraform - keep tfvars since they're environment-specific and tracked
+terraform/environments/*/terraform.tfvars
 terraform/environments/*/.terraform/
 terraform/environments/*/.terraform.lock.hcl
 terraform/environments/*/*.tfstate
