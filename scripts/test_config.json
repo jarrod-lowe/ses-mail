@@ -1,0 +1,83 @@
+{
+  "description": "Configuration file for SES Mail integration tests",
+  "environments": {
+    "test": {
+      "from_address": "sender@testmail.rrod.net",
+      "test_domain": "testmail.rrod.net",
+      "gmail_target": "your-gmail@gmail.com",
+      "timeout_settings": {
+        "queue_wait": 60,
+        "xray_trace": 120,
+        "pipeline_processing": 30
+      },
+      "test_recipients": {
+        "forward_test": "test-forward@testmail.rrod.net",
+        "bounce_test": "test-bounce@testmail.rrod.net",
+        "plus_addressing_test": "test+tag@testmail.rrod.net",
+        "wildcard_test": "wildcard@testmail.rrod.net"
+      }
+    },
+    "prod": {
+      "from_address": "sender@example.com",
+      "test_domain": "example.com",
+      "gmail_target": "your-gmail@gmail.com",
+      "timeout_settings": {
+        "queue_wait": 60,
+        "xray_trace": 120,
+        "pipeline_processing": 30
+      },
+      "test_recipients": {
+        "forward_test": "test-forward@example.com",
+        "bounce_test": "test-bounce@example.com",
+        "plus_addressing_test": "test+tag@example.com",
+        "wildcard_test": "wildcard@example.com"
+      }
+    }
+  },
+  "expected_trace_segments": [
+    "SNS",
+    "SQS",
+    "EventBridge Pipes",
+    "Router Lambda",
+    "Event Bus",
+    "Handler Queue",
+    "Handler Lambda"
+  ],
+  "test_scenarios": {
+    "forward_to_gmail": {
+      "description": "Test email forwarding to Gmail",
+      "routing_action": "forward-to-gmail",
+      "expected_queue": "ses-gmail-forwarder",
+      "expected_dlq": "ses-gmail-forwarder-dlq"
+    },
+    "bounce": {
+      "description": "Test email bouncing",
+      "routing_action": "bounce",
+      "expected_queue": "ses-bouncer",
+      "expected_dlq": "ses-bouncer-dlq"
+    },
+    "plus_addressing": {
+      "description": "Test plus addressing normalization (user+tag@domain.com → user@domain.com)",
+      "routing_action": "forward-to-gmail",
+      "expected_normalization": true
+    },
+    "domain_wildcard": {
+      "description": "Test domain wildcard matching (*@domain.com)",
+      "routing_action": "forward-to-gmail",
+      "wildcard_pattern": "*@testmail.rrod.net"
+    },
+    "global_wildcard": {
+      "description": "Test global wildcard matching (*)",
+      "routing_action": "bounce",
+      "wildcard_pattern": "*"
+    }
+  },
+  "notes": [
+    "Before running tests, ensure:",
+    "1. AWS_PROFILE environment variable is set to 'ses-mail'",
+    "2. Sender email address is verified in SES (for test environment)",
+    "3. Test domain is configured in SES receipt rules",
+    "4. Gmail OAuth token is configured in SSM Parameter Store",
+    "5. All infrastructure is deployed and healthy"
+  ]
+}

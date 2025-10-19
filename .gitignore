@@ -11,3 +11,12 @@ terraform/environments/*/terraform.destroy.plan
 terraform/modules/ses-mail/lambda/*.zip
 terraform/modules/ses-mail/lambda/package/
 terraform/.fmt
+
+# Integration test reports
+integration_test_report_*.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/

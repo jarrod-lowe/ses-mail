@@ -1076,3 +1076,289 @@ AWS_PROFILE=ses-mail aws ssm start-automation-execution \
 7. **Run health checks**: Use the Systems Manager queue health check runbook for regular health monitoring
 
 8. **Enable detailed monitoring**: For production environments, consider enabling detailed (1-minute) CloudWatch metrics for faster alerting
+
+## Integration Testing
+
+The system includes comprehensive integration tests that validate the entire email processing pipeline end-to-end, from SES receipt through to final handler processing (Gmail forwarding or bouncing).
+
+### Prerequisites
+
+Before running integration tests, ensure:
+
+1. **AWS Profile**: `AWS_PROFILE` environment variable is set to `ses-mail`
+2. **SES Verification**: Sender email address is verified in SES (for test environment sandbox)
+3. **Test Domain**: Test domain is configured in SES receipt rules
+4. **Gmail Token**: Gmail OAuth token is configured in SSM Parameter Store
+5. **Infrastructure**: All infrastructure is deployed and healthy
+6. **DynamoDB Rules**: Test routing rules will be created automatically (and cleaned up after tests)
+
+### Running Integration Tests
+
+The integration test script (`scripts/integration_test.py`) sends test emails through the complete pipeline and verifies each stage:
+
+```bash
+# Run all integration tests for test environment
+AWS_PROFILE=ses-mail ./scripts/integration_test.py \
+  --env test \
+  --from sender@testmail.rrod.net \
+  --test-domain testmail.rrod.net \
+  --gmail-target your-email@gmail.com
+
+# Run with verbose logging
+AWS_PROFILE=ses-mail ./scripts/integration_test.py \
+  --env test \
+  --from sender@testmail.rrod.net \
+  --test-domain testmail.rrod.net \
+  --gmail-target your-email@gmail.com \
+  --verbose
+
+# Skip cleanup of test routing rules (for debugging)
+AWS_PROFILE=ses-mail ./scripts/integration_test.py \
+  --env test \
+  --from sender@testmail.rrod.net \
+  --test-domain testmail.rrod.net \
+  --gmail-target your-email@gmail.com \
+  --skip-cleanup
+```
+
+### Test Coverage
+
+The integration tests validate:
+
+1. **Forward to Gmail Test**:
+   - Creates routing rule: `test-forward@domain → forward-to-gmail → gmail-target`
+   - Sends test email through SES
+   - Verifies message progression through pipeline stages:
+     - SES → S3 → SNS → SQS Input Queue
+     - EventBridge Pipes → Router Lambda (DynamoDB lookup)
+     - EventBridge Event Bus → Gmail Forwarder Queue
+     - Gmail Forwarder Lambda → Gmail API
+   - Validates X-Ray trace spans across all components
+   - Checks no messages in dead letter queues
+
+2. **Bounce Test**:
+   - Creates routing rule: `test-bounce@domain → bounce`
+   - Sends test email through SES
+   - Verifies message routing to bouncer queue
+   - Validates bounce notification sent via SES
+   - Confirms X-Ray tracing
+
+3. **X-Ray Trace Verification**:
+   - Waits for X-Ray trace to become available (30-60 second delay)
+   - Verifies trace contains expected segments:
+     - SNS topic (trace initiation)
+     - SQS queues (trace propagation)
+     - EventBridge Pipes (enrichment)
+     - Router Lambda (routing decisions)
+     - EventBridge Event Bus (routing)
+     - Handler Queues (SQS)
+     - Handler Lambdas (processing)
+   - Validates custom annotations (messageId, source, action)
+
+4. **Pipeline Monitoring**:
+   - Monitors CloudWatch Logs for router enrichment decisions
+   - Checks SQS queue depths at each stage
+   - Verifies no errors in lambda function logs
+   - Validates dead letter queue remains empty
+
+### Test Output
+
+The integration test script provides detailed output during execution:
+
+```
+==============================================================
+Test: Forward to Gmail
+==============================================================
+Step 1: Creating test routing rule...
+Step 2: Sending test email...
+Step 3: Checking input queue...
+Step 4: Waiting for router enrichment...
+Step 5: Checking Gmail forwarder queue...
+Step 6: Checking dead letter queues...
+Step 7: Retrieving X-Ray trace...
+
+==============================================================
+INTEGRATION TEST REPORT
+==============================================================
+Environment: test
+Timestamp: 2025-01-19T10:30:00Z
+Total Tests: 2
+Passed: 2
+Failed: 0
+==============================================================
+
+Test: Forward to Gmail
+Status: PASS
+Details:
+  - routing_rule_created: True
+  - message_id: abc123def456
+  - email_sent: True
+  - input_queue_received: True
+  - router_processed: True
+  - routing_decision: forward-to-gmail
+  - gmail_queue_received: True
+  - dlq_messages: 0
+  - xray_trace_found: True
+  - trace_id: 1-507f191e810c19729de860ea-1a2b3c4d
+  - trace_segments: {...}
+
+Test: Bounce Email
+Status: PASS
+Details:
+  - routing_rule_created: True
+  - message_id: xyz789uvw012
+  - email_sent: True
+  - router_processed: True
+  - routing_decision: bounce
+  - bouncer_queue_received: True
+  - dlq_messages: 0
+  - xray_trace_found: True
+  - trace_id: 1-507f191e810c19729de860ea-5e6f7g8h
+
+==============================================================
+Detailed report saved to: integration_test_report_test_1705660200.json
+```
+
+### Test Configuration
+
+Example test configuration file (`scripts/test_config.json`):
+
+```json
+{
+  "environments": {
+    "test": {
+      "from_address": "sender@testmail.rrod.net",
+      "test_domain": "testmail.rrod.net",
+      "gmail_target": "your-gmail@gmail.com",
+      "timeout_settings": {
+        "queue_wait": 60,
+        "xray_trace": 120,
+        "pipeline_processing": 30
+      }
+    }
+  }
+}
+```
+
+### Troubleshooting Test Failures
+
+**Test fails with "Message not found in input queue":**
+- Check SES receipt rule is active and publishing to SNS
+- Verify SNS topic subscription to SQS input queue
+- Check CloudWatch Logs for SES receipt errors
+- Verify sender email is verified in SES (sandbox mode)
+
+**Test fails with "Router logs not found":**
+- Check EventBridge Pipes is active and invoking router lambda
+- Verify router lambda has permissions to read DynamoDB
+- Check router lambda CloudWatch Logs for errors
+- Verify DynamoDB routing table exists and is accessible
+
+**Test fails with "Message not found in handler queue":**
+- Check EventBridge Event Bus rules are active
+- Verify event pattern matching in EventBridge rules
+- Check router enrichment added correct routing decision
+- Verify EventBridge has permissions to send to SQS queues
+
+**Test fails with "X-Ray trace not found":**
+- Wait longer (X-Ray traces can take 60-90 seconds)
+- Check SNS topic has Active tracing enabled
+- Verify all lambda functions have X-Ray tracing enabled
+- Check SQS queues have X-Ray tracing enabled
+- Verify EventBridge Pipes propagates trace context
+
+**Messages found in dead letter queues:**
+- Check handler lambda CloudWatch Logs for errors
+- Verify Gmail OAuth token is valid and not expired
+- For bouncer: verify SES sending permissions and bounce sender email
+- Review DLQ messages to identify root cause
+- Use Systems Manager runbook to redrive messages after fixing issue
+
+### Best Practices
+
+1. **Run tests after deployments**: Always run integration tests after infrastructure changes
+2. **Monitor test results**: Track test execution times to identify performance regressions
+3. **Check X-Ray traces**: Review X-Ray service map to visualize complete pipeline
+4. **Clean up test data**: Tests automatically clean up routing rules unless `--skip-cleanup` is used
+5. **Use test environment**: Never run integration tests in production without careful planning
+6. **Verify Gmail import**: For forward tests, check Gmail account to confirm email was imported
+7. **Review bounce emails**: For bounce tests, check sender's inbox for bounce notification
+
+### Advanced Testing Scenarios
+
+For additional test scenarios not covered by the basic integration tests:
+
+**Plus Addressing Normalization:**
+```bash
+# Manually create routing rule for normalized address
+AWS_PROFILE=ses-mail aws dynamodb put-item \
+  --table-name ses-email-routing-test \
+  --item '{
+    "PK": {"S": "ROUTE#test@testmail.rrod.net"},
+    "SK": {"S": "RULE#v1"},
+    "entity_type": {"S": "ROUTE"},
+    "recipient": {"S": "test@testmail.rrod.net"},
+    "action": {"S": "forward-to-gmail"},
+    "target": {"S": "your-gmail@gmail.com"},
+    "enabled": {"BOOL": true},
+    "created_at": {"S": "2025-01-19T10:00:00Z"},
+    "updated_at": {"S": "2025-01-19T10:00:00Z"},
+    "description": {"S": "Test plus addressing normalization"}
+  }'
+
+# Send email to test+tag@testmail.rrod.net
+# Router should normalize to test@testmail.rrod.net and match rule
+```
+
+**Domain Wildcard Matching:**
+```bash
+# Create domain wildcard rule
+AWS_PROFILE=ses-mail aws dynamodb put-item \
+  --table-name ses-email-routing-test \
+  --item '{
+    "PK": {"S": "ROUTE#*@testmail.rrod.net"},
+    "SK": {"S": "RULE#v1"},
+    "entity_type": {"S": "ROUTE"},
+    "recipient": {"S": "*@testmail.rrod.net"},
+    "action": {"S": "forward-to-gmail"},
+    "target": {"S": "your-gmail@gmail.com"},
+    "enabled": {"BOOL": true},
+    "created_at": {"S": "2025-01-19T10:00:00Z"},
+    "updated_at": {"S": "2025-01-19T10:00:00Z"},
+    "description": {"S": "Catch-all for domain"}
+  }'
+
+# Send email to any-address@testmail.rrod.net
+# Should match wildcard rule
+```
+
+**Global Wildcard (Default Rule):**
+```bash
+# Create global wildcard rule
+AWS_PROFILE=ses-mail aws dynamodb put-item \
+  --table-name ses-email-routing-test \
+  --item '{
+    "PK": {"S": "ROUTE#*"},
+    "SK": {"S": "RULE#v1"},
+    "entity_type": {"S": "ROUTE"},
+    "recipient": {"S": "*"},
+    "action": {"S": "bounce"},
+    "target": {"S": ""},
+    "enabled": {"BOOL": true},
+    "created_at": {"S": "2025-01-19T10:00:00Z"},
+    "updated_at": {"S": "2025-01-19T10:00:00Z"},
+    "description": {"S": "Default: bounce all unmatched emails"}
+  }'
+```
+
+**Error Scenario Testing:**
+```bash
+# Test DynamoDB unavailable (temporarily remove permissions)
+# Expected: Router should use fallback routing (bounce)
+
+# Test Gmail API failure (use invalid OAuth token)
+# Expected: Message should retry and eventually go to DLQ
+
+# Test Bouncer SES failure (use unverified sender)
+# Expected: Message should retry and eventually go to DLQ
+```
