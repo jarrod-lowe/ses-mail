@@ -10,6 +10,9 @@ SES Mail is an AWS-based email receiving system that processes emails through SE
 
 ### Terraform Workflow
 
+When writing terraform, never use `jsonencode` where an
+`aws_iam_policy_document` can be used.
+
 **IMPORTANT**: Always use the Makefile for Terraform operations. Never run `terraform` commands directly. Always specify `ENV=test` and use `AWS_PROFILE=ses-mail`.
 
 ```bash

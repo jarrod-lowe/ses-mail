@@ -1004,11 +1004,66 @@ AWS_PROFILE=ses-mail aws logs start-query \
   --query-string 'fields @timestamp, @message | filter @message like /ERROR/ | sort @timestamp desc'
 ```
 
+### CloudWatch Logs Insights Saved Queries
+
+The system includes pre-configured CloudWatch Logs Insights queries for common troubleshooting scenarios. Access them via:
+
+```bash
+# Navigate to: CloudWatch → Logs → Logs Insights
+# Select "Saved queries" and filter by "ses-mail/{environment}/"
+```
+
+**Available Saved Queries**:
+
+1. **router-enrichment-errors** - Find router lambda errors with message details
+2. **gmail-forwarder-failures** - Investigate Gmail forwarding failures
+3. **bouncer-failures** - Debug bounce sending issues
+4. **routing-decision-analysis** - Analyze routing decisions by action and matched rule
+5. **email-end-to-end-trace** - Trace a specific email through the entire pipeline
+6. **dlq-message-investigation** - Find failed messages and retry attempts
+7. **performance-analysis** - Analyze lambda execution times across all functions
+
+These queries are automatically created by Terraform and available immediately after deployment.
+
+### Systems Manager Automation Runbooks
+
+The system includes AWS Systems Manager automation runbooks for operational tasks:
+
+#### SESMail-DLQ-Redrive-{environment}
+
+Automatically redrive messages from dead letter queues back to source queues with velocity control:
+
+```bash
+# Via AWS Console:
+# Systems Manager → Automation → Execute automation
+# Select: SESMail-DLQ-Redrive-{environment}
+
+# Via CLI:
+AWS_PROFILE=ses-mail aws ssm start-automation-execution \
+  --document-name "SESMail-DLQ-Redrive-test" \
+  --parameters \
+    "DLQUrl=https://sqs.ap-southeast-2.amazonaws.com/{account}/ses-gmail-forwarder-dlq-test,\
+     SourceQueueUrl=https://sqs.ap-southeast-2.amazonaws.com/{account}/ses-gmail-forwarder-test,\
+     MaxMessages=0,\
+     VelocityPerSecond=10"
+```
+
+#### SESMail-Queue-HealthCheck-{environment}
+
+Check the health of all queues and DLQs:
+
+```bash
+AWS_PROFILE=ses-mail aws ssm start-automation-execution \
+  --document-name "SESMail-Queue-HealthCheck-test"
+```
+
+**For detailed operational procedures, incident response, and troubleshooting, see [OPERATIONS.md](OPERATIONS.md).**
+
 ### Monitoring Best Practices
 
 1. **Set up SNS notifications**: Configure the `alarm_sns_topic_arn` in `terraform.tfvars` to receive alarm notifications via email or SMS
 
-2. **Monitor DLQ alarms**: Dead letter queue messages indicate persistent failures that require investigation
+2. **Monitor DLQ alarms**: Dead letter queue messages indicate persistent failures that require investigation - see [OPERATIONS.md](OPERATIONS.md) for DLQ handling procedures
 
 3. **Track custom metrics**: Review handler success/failure rates daily to identify trends
 
@@ -1016,6 +1071,8 @@ AWS_PROFILE=ses-mail aws logs start-query \
 
 5. **Review CloudWatch dashboard**: Check the dashboard regularly to ensure healthy operation
 
-6. **Set up log metric filters**: Create additional custom metric filters for application-specific error patterns
+6. **Use saved queries**: Leverage CloudWatch Logs Insights saved queries for faster troubleshooting
 
-7. **Enable detailed monitoring**: For production environments, consider enabling detailed (1-minute) CloudWatch metrics for faster alerting
+7. **Run health checks**: Use the Systems Manager queue health check runbook for regular health monitoring
+
+8. **Enable detailed monitoring**: For production environments, consider enabling detailed (1-minute) CloudWatch metrics for faster alerting
