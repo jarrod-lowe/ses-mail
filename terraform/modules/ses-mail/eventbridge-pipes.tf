@@ -167,10 +167,10 @@ resource "aws_pipes_pipe" "email_router" {
   # ===========================
   # Enrichment Configuration (Lambda)
   # ===========================
+  # Pass the entire SQS event (Records array) to the enrichment lambda.
+  # The router lambda expects the full SQS message structure and will parse it internally.
   enrichment_parameters {
-    # Input transformation: Pass the entire SQS message to the enrichment lambda
-    # For SQS sources, the message body is available as the root object
-    input_template = "$.body"
+    input_template = "<aws.pipes.event>"
   }
 
   # ===========================

@@ -120,14 +120,13 @@ A task is not complete until:
   - Outputs include application ID and myApplications Console URL
   - Tag-sync Lambda and IAM role created for automated resource discovery
 
-- [ ] 18. Fix EventBridge Pipes input transformation configuration
+- [x] 18. Fix EventBridge Pipes input transformation configuration
   - **Issue**: EventBridge Pipes is sending literal string `[$.body]` to router lambda instead of evaluating JSONPath expression
   - **Symptom**: Router lambda enrichment fails with error: "Could not parse payload into json: Unrecognized token '$'"
-  - **Root Cause**: Pipes input transformer is configured incorrectly - JSONPath expression not being evaluated
-  - **Fix Required**: Update EventBridge Pipes resource in `terraform/modules/ses-mail/eventbridge-pipes.tf`
-  - Remove or fix the input transformer configuration (current payload: `WyQuYm9keV0=` which base64 decodes to `[$.body]`)
-  - The router lambda expects the full SQS message body (SNS notification with SES receipt), not a JSONPath expression
-  - Test fix by running integration tests: `AWS_PROFILE=ses-mail ./scripts/integration_test.py --env test`
-  - Verify EventBridge Pipes logs show successful enrichment without JSON parsing errors
+  - **Root Cause**: Pipes input transformer used incorrect syntax - `$.body` instead of `<aws.pipes.event>`
+  - **Fix Applied**: Updated `input_template` in `terraform/modules/ses-mail/eventbridge-pipes.tf` to use `<aws.pipes.event>`
+  - The angle bracket syntax `<aws.pipes.event>` evaluates the reserved variable and passes the full SQS event to the router lambda
+  - The router lambda successfully parses the SQS message structure and enriches with routing decisions
+  - Verified in EventBridge Pipes logs: ExecutionSucceeded, TargetStageSucceeded with no JSON parsing errors
   - **Discovered by**: Integration tests (Task 14)
   - _Requirements: 2.1, 2.2, 2.3_
