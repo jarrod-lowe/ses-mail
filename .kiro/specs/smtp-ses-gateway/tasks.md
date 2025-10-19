@@ -1,5 +1,14 @@
 # Implementation Plan
 
+A task is not complete until:
+
+- The code has been written
+- It has been successfully deployed to test: `AWS_PROFILE=ses-mail make apply ENV=test`
+- It has been tested
+- The `README.md` has been updated
+- The task has been marked as done in this file
+- A `git commit` has been made
+
 - [ ] 1. Set up SES domain configuration and outputs
   - Create Terraform configuration for SES domain identity
   - Configure SES DKIM signing for domains
