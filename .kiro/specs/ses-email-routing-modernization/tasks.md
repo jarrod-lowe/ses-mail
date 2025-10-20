@@ -130,3 +130,18 @@ A task is not complete until:
   - Verified in EventBridge Pipes logs: ExecutionSucceeded, TargetStageSucceeded with no JSON parsing errors
   - **Discovered by**: Integration tests (Task 14)
   - _Requirements: 2.1, 2.2, 2.3_
+
+- [ ] 19. Implement DynamoDB message history tracking for audit trail
+  - Create DynamoDB table `ses-email-history-{env}` with single-table design pattern
+  - Schema: `PK=MESSAGE#{messageId}`, `SK=STAGE#{stage}` (stages: ROUTER, GMAIL_FORWARD, BOUNCE)
+  - Enable TTL attribute for automatic 30-day cleanup (configurable via variable)
+  - Use PAY_PER_REQUEST billing mode for zero standing costs
+  - Update router, gmail_forwarder, and bouncer lambdas to write history records
+  - Record details: timestamp, messageId, sender, recipient(s), action, outcome, error details, routing metadata
+  - Add IAM permissions for `dynamodb:PutItem` to all handler lambda roles
+  - Create Python CLI query tool in `scripts/query_message_history.py` for troubleshooting
+  - Support query filters: time range, recipient, outcome (success/failure), action type
+  - Update README with message history querying instructions and use cases
+  - Document DynamoDB table schema and query patterns in operational runbook
+  - Update integration tests to verify history records are written correctly
+  - _Requirements: 6.4, 8.5_ (extends monitoring and operational capabilities)
