@@ -431,13 +431,14 @@ The stream captures INSERT and MODIFY events for records with `PK="SMTP_USER"`. 
 3. Log all operations with correlation IDs for traceability
 4. Track success/failure metrics in CloudWatch
 
-**Current Implementation Status (Task 3.1 Complete):**
+**Current Implementation Status (Tasks 3.1-3.2 Complete):**
 
 - ✅ Core credential creation logic with X-Ray tracing
 - ✅ Structured JSON logging with correlation IDs
 - ✅ IAM user creation with programmatic-only access
 - ✅ Access key generation
-- ⏳ Email restriction policy generation (Task 3.2)
+- ✅ Email restriction policy generation with StringLike conditions
+- ✅ Automatic policy attachment to IAM users
 - ⏳ SMTP password conversion and encryption (Task 3.3)
 - ⏳ Credential storage in DynamoDB (Task 3.3)
 - ⏳ Error handling and DLQ processing (Task 4)

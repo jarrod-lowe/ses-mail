@@ -428,6 +428,48 @@ def create_iam_user_and_credentials(
                 "correlation_id": correlation_id
             }
 
+        # Attach SES policy to restrict email sending
+        policy_result = attach_ses_policy_to_user(
+            iam_user_name=iam_user_name,
+            allowed_from_addresses=allowed_from_addresses,
+            username=username,
+            correlation_id=correlation_id
+        )
+
+        if not policy_result['success']:
+            logger.error(json.dumps({
+                "message": "Failed to attach SES policy, rolling back",
+                "correlation_id": correlation_id,
+                "iam_user_name": iam_user_name,
+                "error": policy_result.get('error')
+            }))
+
+            # Clean up: delete access key and IAM user
+            try:
+                iam.delete_access_key(UserName=iam_user_name, AccessKeyId=access_key_id)
+                iam.delete_user(UserName=iam_user_name)
+                logger.info(json.dumps({
+                    "message": "Cleaned up IAM user and access key after policy attachment failure",
+                    "correlation_id": correlation_id,
+                    "iam_user_name": iam_user_name
+                }))
+            except Exception as cleanup_error:
+                logger.error(json.dumps({
+                    "message": "Failed to clean up IAM user after policy attachment failure",
+                    "correlation_id": correlation_id,
+                    "iam_user_name": iam_user_name,
+                    "error": str(cleanup_error)
+                }))
+
+            subsegment.put_annotation('error', True)
+            xray_recorder.end_subsegment()
+            return {
+                "success": False,
+                "error": f"Policy attachment failed: {policy_result.get('error')}",
+                "correlation_id": correlation_id
+            }
+
+        subsegment.put_annotation('policy_attached', True)
         xray_recorder.end_subsegment()
 
         return {
@@ -438,13 +480,167 @@ def create_iam_user_and_credentials(
             "iam_user_arn": iam_user_arn,
             "access_key_id": access_key_id,
             "secret_access_key": secret_access_key,  # Will be encrypted in task 3.3
-            "allowed_from_addresses": allowed_from_addresses
+            "allowed_from_addresses": allowed_from_addresses,
+            "policy_name": policy_result.get('policy_name'),
+            "policy_attached": True
         }
 
     except Exception as e:
         subsegment.put_annotation('error', True)
         logger.error(json.dumps({
             "message": "Unexpected error in create_iam_user_and_credentials",
+            "correlation_id": correlation_id,
+            "error": str(e),
+            "error_type": type(e).__name__
+        }), exc_info=True)
+        xray_recorder.end_subsegment()
+        return {
+            "success": False,
+            "error": str(e),
+            "correlation_id": correlation_id
+        }
+
+
+def generate_ses_policy(allowed_from_addresses: List[str], username: str) -> Dict[str, Any]:
+    """
+    Generate an IAM policy document that restricts SES sending to specific email addresses.
+
+    Args:
+        allowed_from_addresses: List of email address patterns (supports wildcards like *@domain.com)
+        username: Username for logging purposes
+
+    Returns:
+        dict: IAM policy document with SES restrictions
+    """
+    # Handle empty or missing allowed_from_addresses
+    if not allowed_from_addresses:
+        logger.warning(f"No allowed_from_addresses specified for user {username}, policy will deny all")
+        # Create a policy that denies all SES sending
+        return {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Effect": "Deny",
+                    "Action": [
+                        "ses:SendEmail",
+                        "ses:SendRawEmail"
+                    ],
+                    "Resource": "*"
+                }
+            ]
+        }
+
+    # Create policy with StringLike condition for allowed addresses
+    policy = {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Effect": "Allow",
+                "Action": [
+                    "ses:SendEmail",
+                    "ses:SendRawEmail"
+                ],
+                "Resource": "*",
+                "Condition": {
+                    "StringLike": {
+                        "ses:FromAddress": allowed_from_addresses
+                    }
+                }
+            }
+        ]
+    }
+
+    return policy
+
+
+def attach_ses_policy_to_user(
+    iam_user_name: str,
+    allowed_from_addresses: List[str],
+    username: str,
+    correlation_id: str
+) -> Dict[str, Any]:
+    """
+    Generate and attach an inline SES policy to an IAM user.
+
+    Args:
+        iam_user_name: IAM user name to attach policy to
+        allowed_from_addresses: List of email addresses this user can send from
+        username: Original username for policy naming
+        correlation_id: Correlation ID for tracing
+
+    Returns:
+        dict: Result containing success status and policy details
+    """
+    subsegment = xray_recorder.begin_subsegment('attach_ses_policy')
+    if subsegment is None:
+        raise RuntimeError("Failed to create X-Ray subsegment for policy attachment")
+
+    try:
+        subsegment.put_annotation('iam_user_name', iam_user_name)
+        subsegment.put_annotation('correlation_id', correlation_id)
+
+        # Generate policy document
+        policy_document = generate_ses_policy(allowed_from_addresses, username)
+        policy_name = f"ses-smtp-policy-{username}"
+
+        logger.info(json.dumps({
+            "message": "Generated SES policy",
+            "correlation_id": correlation_id,
+            "iam_user_name": iam_user_name,
+            "policy_name": policy_name,
+            "allowed_from_addresses": allowed_from_addresses,
+            "policy_statement_count": len(policy_document.get('Statement', []))
+        }))
+
+        # Attach inline policy to user
+        try:
+            iam.put_user_policy(
+                UserName=iam_user_name,
+                PolicyName=policy_name,
+                PolicyDocument=json.dumps(policy_document)
+            )
+
+            logger.info(json.dumps({
+                "message": "Successfully attached SES policy to IAM user",
+                "correlation_id": correlation_id,
+                "iam_user_name": iam_user_name,
+                "policy_name": policy_name
+            }))
+
+            subsegment.put_annotation('policy_attached', True)
+            xray_recorder.end_subsegment()
+
+            return {
+                "success": True,
+                "policy_name": policy_name,
+                "policy_document": policy_document,
+                "correlation_id": correlation_id
+            }
+
+        except ClientError as e:
+            error_code = e.response.get('Error', {}).get('Code')
+            logger.error(json.dumps({
+                "message": "Failed to attach policy to IAM user",
+                "correlation_id": correlation_id,
+                "iam_user_name": iam_user_name,
+                "policy_name": policy_name,
+                "error": str(e),
+                "error_code": error_code
+            }))
+
+            subsegment.put_annotation('error', True)
+            xray_recorder.end_subsegment()
+
+            return {
+                "success": False,
+                "error": f"Policy attachment failed: {error_code} - {str(e)}",
+                "correlation_id": correlation_id
+            }
+
+    except Exception as e:
+        subsegment.put_annotation('error', True)
+        logger.error(json.dumps({
+            "message": "Unexpected error in attach_ses_policy_to_user",
             "correlation_id": correlation_id,
             "error": str(e),
             "error_type": type(e).__name__

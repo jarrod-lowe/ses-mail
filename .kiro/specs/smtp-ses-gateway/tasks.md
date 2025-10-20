@@ -31,7 +31,7 @@ A task is not complete until:
     - Generate IAM access keys for SMTP authentication
     - _Requirements: 4.1, 4.3, 9.1, 9.2_
 
-  - [ ] 3.2 Implement email restriction policy generation
+  - [x] 3.2 Implement email restriction policy generation
     - Create dynamic IAM policy based on allowed_from_addresses field
     - Apply StringLike condition for ses:FromAddress in policy
     - Attach inline policy to created IAM user
@@ -44,6 +44,8 @@ A task is not complete until:
     - Update record status to "active" upon successful completion
     - Log all operations with correlation IDs for traceability
     - _Requirements: 4.2, 4.5, 9.1, 9.3, 9.4_
+
+  - [ ] 3.4 Remove IAM user and credentials when the record is deleted
 
 - [ ] 4. Implement error handling and DLQ processing
   - [ ] 4.1 Configure SQS Dead Letter Queue for credential manager
