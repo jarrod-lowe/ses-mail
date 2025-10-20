@@ -431,7 +431,7 @@ The stream captures INSERT and MODIFY events for records with `PK="SMTP_USER"`. 
 3. Log all operations with correlation IDs for traceability
 4. Track success/failure metrics in CloudWatch
 
-**Current Implementation Status (Tasks 3.1-3.2 Complete):**
+**Current Implementation Status (Tasks 3.1-3.3 Complete):**
 
 - ✅ Core credential creation logic with X-Ray tracing
 - ✅ Structured JSON logging with correlation IDs
@@ -439,11 +439,30 @@ The stream captures INSERT and MODIFY events for records with `PK="SMTP_USER"`. 
 - ✅ Access key generation
 - ✅ Email restriction policy generation with StringLike conditions
 - ✅ Automatic policy attachment to IAM users
-- ⏳ SMTP password conversion and encryption (Task 3.3)
-- ⏳ Credential storage in DynamoDB (Task 3.3)
+- ✅ SMTP password conversion using AWS algorithm (Version 4)
+- ✅ KMS encryption of credentials with customer managed key
+- ✅ Credential storage in DynamoDB with status="active"
 - ⏳ Error handling and DLQ processing (Task 4)
 
 This event-driven approach eliminates the need for manual credential creation and ensures secure, automated provisioning of SMTP access.
+
+**SMTP Password Conversion Algorithm:**
+
+The system converts IAM secret access keys to SES SMTP passwords using AWS's Version 4 signing algorithm:
+
+1. Chain of HMAC-SHA256 operations: date → region → service (ses) → terminal (aws4_request) → message (SendRawEmail)
+2. Prepend version byte 0x04 and base64 encode
+3. Encrypt credentials with customer managed KMS key (`alias/ses-mail-smtp-credentials-{environment}`)
+4. Store encrypted blob in DynamoDB with IAM user ARN
+
+**KMS Key Management:**
+
+A dedicated customer managed KMS key is created for encrypting SMTP credentials:
+
+- **Key Alias**: `alias/ses-mail-smtp-credentials-{environment}`
+- **Encryption**: Credentials stored as encrypted base64-encoded JSON containing `access_key_id` and `smtp_password`
+- **Rotation**: Key rotation enabled (automatic annual rotation)
+- **Access**: Lambda execution role has `kms:Encrypt`, `kms:Decrypt`, `kms:GenerateDataKey`, `kms:DescribeKey` permissions
 
 **Managing Routing Rules:**
 

@@ -13,6 +13,9 @@ Triggered by DynamoDB Streams, this function:
 Used as part of the SMTP credential management system.
 """
 
+import base64
+import hashlib
+import hmac
 import json
 import logging
 import os
@@ -35,6 +38,7 @@ AWS_REGION = os.environ.get('AWS_REGION', 'us-east-1')  # AWS_REGION is automati
 # Initialize AWS clients
 dynamodb = boto3.client('dynamodb')
 iam = boto3.client('iam')
+kms = boto3.client('kms')
 cloudwatch = boto3.client('cloudwatch')
 
 from aws_xray_sdk.core import xray_recorder
@@ -470,6 +474,103 @@ def create_iam_user_and_credentials(
             }
 
         subsegment.put_annotation('policy_attached', True)
+
+        # Convert IAM secret access key to SES SMTP password
+        logger.info(json.dumps({
+            "message": "Converting secret access key to SES SMTP password",
+            "correlation_id": correlation_id,
+            "region": AWS_REGION
+        }))
+
+        smtp_password = convert_secret_to_smtp_password(secret_access_key, AWS_REGION)
+
+        logger.info(json.dumps({
+            "message": "Successfully converted to SMTP password",
+            "correlation_id": correlation_id
+        }))
+
+        # Encrypt credentials with KMS
+        encryption_result = encrypt_credentials_with_kms(
+            access_key_id=access_key_id,
+            smtp_password=smtp_password,
+            correlation_id=correlation_id
+        )
+
+        if not encryption_result['success']:
+            logger.error(json.dumps({
+                "message": "Failed to encrypt credentials, rolling back",
+                "correlation_id": correlation_id,
+                "error": encryption_result.get('error')
+            }))
+
+            # Clean up: delete policy, access key, and IAM user
+            try:
+                iam.delete_user_policy(UserName=iam_user_name, PolicyName=policy_result.get('policy_name'))
+                iam.delete_access_key(UserName=iam_user_name, AccessKeyId=access_key_id)
+                iam.delete_user(UserName=iam_user_name)
+                logger.info(json.dumps({
+                    "message": "Cleaned up IAM resources after encryption failure",
+                    "correlation_id": correlation_id,
+                    "iam_user_name": iam_user_name
+                }))
+            except Exception as cleanup_error:
+                logger.error(json.dumps({
+                    "message": "Failed to clean up IAM resources after encryption failure",
+                    "correlation_id": correlation_id,
+                    "iam_user_name": iam_user_name,
+                    "error": str(cleanup_error)
+                }))
+
+            subsegment.put_annotation('error', True)
+            xray_recorder.end_subsegment()
+            return {
+                "success": False,
+                "error": f"Credential encryption failed: {encryption_result.get('error')}",
+                "correlation_id": correlation_id
+            }
+
+        # Store encrypted credentials in DynamoDB
+        storage_result = store_credentials_in_dynamodb(
+            username=username,
+            encrypted_credentials=encryption_result['encrypted_credentials'],
+            iam_user_arn=iam_user_arn,
+            correlation_id=correlation_id
+        )
+
+        if not storage_result['success']:
+            logger.error(json.dumps({
+                "message": "Failed to store credentials in DynamoDB, rolling back",
+                "correlation_id": correlation_id,
+                "error": storage_result.get('error')
+            }))
+
+            # Clean up: delete policy, access key, and IAM user
+            try:
+                iam.delete_user_policy(UserName=iam_user_name, PolicyName=policy_result.get('policy_name'))
+                iam.delete_access_key(UserName=iam_user_name, AccessKeyId=access_key_id)
+                iam.delete_user(UserName=iam_user_name)
+                logger.info(json.dumps({
+                    "message": "Cleaned up IAM resources after storage failure",
+                    "correlation_id": correlation_id,
+                    "iam_user_name": iam_user_name
+                }))
+            except Exception as cleanup_error:
+                logger.error(json.dumps({
+                    "message": "Failed to clean up IAM resources after storage failure",
+                    "correlation_id": correlation_id,
+                    "iam_user_name": iam_user_name,
+                    "error": str(cleanup_error)
+                }))
+
+            subsegment.put_annotation('error', True)
+            xray_recorder.end_subsegment()
+            return {
+                "success": False,
+                "error": f"Credential storage failed: {storage_result.get('error')}",
+                "correlation_id": correlation_id
+            }
+
+        subsegment.put_annotation('credentials_stored', True)
         xray_recorder.end_subsegment()
 
         return {
@@ -479,10 +580,12 @@ def create_iam_user_and_credentials(
             "iam_user_name": iam_user_name,
             "iam_user_arn": iam_user_arn,
             "access_key_id": access_key_id,
-            "secret_access_key": secret_access_key,  # Will be encrypted in task 3.3
             "allowed_from_addresses": allowed_from_addresses,
             "policy_name": policy_result.get('policy_name'),
-            "policy_attached": True
+            "policy_attached": True,
+            "credentials_encrypted": True,
+            "credentials_stored": True,
+            "status": "active"
         }
 
     except Exception as e:
@@ -641,6 +744,282 @@ def attach_ses_policy_to_user(
         subsegment.put_annotation('error', True)
         logger.error(json.dumps({
             "message": "Unexpected error in attach_ses_policy_to_user",
+            "correlation_id": correlation_id,
+            "error": str(e),
+            "error_type": type(e).__name__
+        }), exc_info=True)
+        xray_recorder.end_subsegment()
+        return {
+            "success": False,
+            "error": str(e),
+            "correlation_id": correlation_id
+        }
+
+
+def convert_secret_to_smtp_password(secret_access_key: str, region: str) -> str:
+    """
+    Convert IAM secret access key to SES SMTP password using AWS algorithm (Version 4).
+
+    This implements the official AWS SES SMTP password conversion algorithm which
+    uses a chain of HMAC-SHA256 operations to derive the SMTP password from the
+    IAM secret access key.
+
+    Args:
+        secret_access_key: IAM secret access key
+        region: AWS region (e.g., 'us-east-1', 'ap-southeast-2')
+
+    Returns:
+        str: Base64-encoded SES SMTP password
+
+    References:
+        https://docs.aws.amazon.com/ses/latest/dg/smtp-credentials.html
+    """
+    # Constants for SES SMTP password derivation (Version 4)
+    date = "11111111"
+    service = "ses"
+    terminal = "aws4_request"
+    message = "SendRawEmail"
+    version = bytes([0x04])
+
+    # Chain of HMAC-SHA256 operations
+    # Step 1: Sign date with "AWS4" + secret key
+    signature = hmac.new(
+        ("AWS4" + secret_access_key).encode('utf-8'),
+        date.encode('utf-8'),
+        hashlib.sha256
+    ).digest()
+
+    # Step 2: Sign region with previous signature
+    signature = hmac.new(
+        signature,
+        region.encode('utf-8'),
+        hashlib.sha256
+    ).digest()
+
+    # Step 3: Sign service name with previous signature
+    signature = hmac.new(
+        signature,
+        service.encode('utf-8'),
+        hashlib.sha256
+    ).digest()
+
+    # Step 4: Sign terminal string with previous signature
+    signature = hmac.new(
+        signature,
+        terminal.encode('utf-8'),
+        hashlib.sha256
+    ).digest()
+
+    # Step 5: Sign message with previous signature
+    signature = hmac.new(
+        signature,
+        message.encode('utf-8'),
+        hashlib.sha256
+    ).digest()
+
+    # Prepend version byte and base64 encode
+    signature_and_version = version + signature
+    smtp_password = base64.b64encode(signature_and_version).decode('utf-8')
+
+    return smtp_password
+
+
+def encrypt_credentials_with_kms(
+    access_key_id: str,
+    smtp_password: str,
+    correlation_id: str
+) -> Dict[str, Any]:
+    """
+    Encrypt SMTP credentials using AWS KMS.
+
+    Args:
+        access_key_id: IAM access key ID (SMTP username)
+        smtp_password: SES SMTP password
+        correlation_id: Correlation ID for tracing
+
+    Returns:
+        dict: Result containing success status and encrypted credentials
+    """
+    subsegment = xray_recorder.begin_subsegment('encrypt_credentials')
+    if subsegment is None:
+        raise RuntimeError("Failed to create X-Ray subsegment for KMS encryption")
+
+    try:
+        subsegment.put_annotation('correlation_id', correlation_id)
+
+        # Create credentials payload
+        credentials_payload = {
+            "access_key_id": access_key_id,
+            "smtp_password": smtp_password
+        }
+
+        logger.info(json.dumps({
+            "message": "Encrypting SMTP credentials with KMS",
+            "correlation_id": correlation_id,
+            "access_key_id": access_key_id
+        }))
+
+        # Encrypt using customer managed KMS key for SMTP credentials
+        kms_key_alias = f'alias/ses-mail-smtp-credentials-{ENVIRONMENT}'
+
+        try:
+            response = kms.encrypt(
+                KeyId=kms_key_alias,
+                Plaintext=json.dumps(credentials_payload).encode('utf-8')
+            )
+
+            encrypted_blob = base64.b64encode(response['CiphertextBlob']).decode('utf-8')
+
+            logger.info(json.dumps({
+                "message": "Successfully encrypted credentials with KMS",
+                "correlation_id": correlation_id,
+                "key_id": response.get('KeyId'),
+                "encrypted_blob_length": len(encrypted_blob)
+            }))
+
+            subsegment.put_annotation('encrypted', True)
+            xray_recorder.end_subsegment()
+
+            return {
+                "success": True,
+                "encrypted_credentials": encrypted_blob,
+                "key_id": response.get('KeyId'),
+                "correlation_id": correlation_id
+            }
+
+        except ClientError as e:
+            error_code = e.response.get('Error', {}).get('Code')
+            logger.error(json.dumps({
+                "message": "Failed to encrypt credentials with KMS",
+                "correlation_id": correlation_id,
+                "error": str(e),
+                "error_code": error_code
+            }))
+
+            subsegment.put_annotation('error', True)
+            xray_recorder.end_subsegment()
+
+            return {
+                "success": False,
+                "error": f"KMS encryption failed: {error_code} - {str(e)}",
+                "correlation_id": correlation_id
+            }
+
+    except Exception as e:
+        subsegment.put_annotation('error', True)
+        logger.error(json.dumps({
+            "message": "Unexpected error in encrypt_credentials_with_kms",
+            "correlation_id": correlation_id,
+            "error": str(e),
+            "error_type": type(e).__name__
+        }), exc_info=True)
+        xray_recorder.end_subsegment()
+        return {
+            "success": False,
+            "error": str(e),
+            "correlation_id": correlation_id
+        }
+
+
+def store_credentials_in_dynamodb(
+    username: str,
+    encrypted_credentials: str,
+    iam_user_arn: str,
+    correlation_id: str
+) -> Dict[str, Any]:
+    """
+    Store encrypted SMTP credentials in DynamoDB and update record status to active.
+
+    Args:
+        username: Username from DynamoDB SK (USER#{username})
+        encrypted_credentials: KMS-encrypted credentials blob (base64)
+        iam_user_arn: ARN of the created IAM user
+        correlation_id: Correlation ID for tracing
+
+    Returns:
+        dict: Result containing success status and update details
+    """
+    subsegment = xray_recorder.begin_subsegment('store_credentials')
+    if subsegment is None:
+        raise RuntimeError("Failed to create X-Ray subsegment for DynamoDB storage")
+
+    try:
+        subsegment.put_annotation('correlation_id', correlation_id)
+        subsegment.put_annotation('username', username)
+
+        # Generate ISO 8601 timestamp
+        updated_at = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+
+        logger.info(json.dumps({
+            "message": "Storing encrypted credentials in DynamoDB",
+            "correlation_id": correlation_id,
+            "username": username,
+            "table_name": DYNAMODB_TABLE_NAME
+        }))
+
+        # Update DynamoDB record
+        try:
+            response = dynamodb.update_item(
+                TableName=DYNAMODB_TABLE_NAME,
+                Key={
+                    'PK': {'S': 'SMTP_USER'},
+                    'SK': {'S': f'USER#{username}'}
+                },
+                UpdateExpression='SET #status = :status, encrypted_credentials = :creds, iam_user_arn = :arn, updated_at = :updated',
+                ExpressionAttributeNames={
+                    '#status': 'status'
+                },
+                ExpressionAttributeValues={
+                    ':status': {'S': 'active'},
+                    ':creds': {'S': encrypted_credentials},
+                    ':arn': {'S': iam_user_arn},
+                    ':updated': {'S': updated_at}
+                },
+                ReturnValues='ALL_NEW'
+            )
+
+            logger.info(json.dumps({
+                "message": "Successfully stored credentials in DynamoDB",
+                "correlation_id": correlation_id,
+                "username": username,
+                "status": "active",
+                "updated_at": updated_at
+            }))
+
+            subsegment.put_annotation('stored', True)
+            xray_recorder.end_subsegment()
+
+            return {
+                "success": True,
+                "username": username,
+                "status": "active",
+                "updated_at": updated_at,
+                "correlation_id": correlation_id
+            }
+
+        except ClientError as e:
+            error_code = e.response.get('Error', {}).get('Code')
+            logger.error(json.dumps({
+                "message": "Failed to store credentials in DynamoDB",
+                "correlation_id": correlation_id,
+                "username": username,
+                "error": str(e),
+                "error_code": error_code
+            }))
+
+            subsegment.put_annotation('error', True)
+            xray_recorder.end_subsegment()
+
+            return {
+                "success": False,
+                "error": f"DynamoDB storage failed: {error_code} - {str(e)}",
+                "correlation_id": correlation_id
+            }
+
+    except Exception as e:
+        subsegment.put_annotation('error', True)
+        logger.error(json.dumps({
+            "message": "Unexpected error in store_credentials_in_dynamodb",
             "correlation_id": correlation_id,
             "error": str(e),
             "error_type": type(e).__name__

@@ -37,7 +37,7 @@ A task is not complete until:
     - Attach inline policy to created IAM user
     - _Requirements: 4.1, 4.4_
 
-  - [ ] 3.3 Implement SMTP password conversion and encryption
+  - [x] 3.3 Implement SMTP password conversion and encryption
     - Convert IAM secret access key to SES SMTP password using AWS algorithm
     - Encrypt SMTP credentials using KMS with X-Ray tracing
     - Store encrypted credentials in DynamoDB record with detailed logging

@@ -540,7 +540,6 @@ resource "aws_iam_role_policy" "lambda_credential_manager_iam_access" {
 }
 
 # IAM policy document for credential manager Lambda KMS access
-# Note: This will use a default KMS key alias until a dedicated key is created
 data "aws_iam_policy_document" "lambda_credential_manager_kms_access" {
   statement {
     effect = "Allow"
@@ -551,13 +550,8 @@ data "aws_iam_policy_document" "lambda_credential_manager_kms_access" {
       "kms:DescribeKey"
     ]
     resources = [
-      "arn:aws:kms:*:${data.aws_caller_identity.current.account_id}:key/*"
+      aws_kms_key.smtp_credentials.arn
     ]
-    condition {
-      test     = "StringEquals"
-      variable = "kms:ViaService"
-      values   = ["dynamodb.${data.aws_region.current.name}.amazonaws.com"]
-    }
   }
 }
 
