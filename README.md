@@ -426,11 +426,21 @@ The table has DynamoDB Streams enabled to support automated SMTP credential mana
 
 The stream captures INSERT and MODIFY events for records with `PK="SMTP_USER"`. When administrators manually insert a new SMTP credential record with `status="pending"`, the stream triggers the credential manager Lambda function to automatically:
 
-1. Create an IAM user for SMTP authentication
-2. Generate SMTP credentials (access key and SES password)
-3. Encrypt credentials using KMS
-4. Store encrypted credentials back in DynamoDB
-5. Update the record status to `"active"`
+1. Create a programmatic-only IAM user for SMTP authentication with unique naming (`ses-smtp-user-{username}-{timestamp}`)
+2. Generate IAM access keys for SMTP authentication
+3. Log all operations with correlation IDs for traceability
+4. Track success/failure metrics in CloudWatch
+
+**Current Implementation Status (Task 3.1 Complete):**
+
+- ✅ Core credential creation logic with X-Ray tracing
+- ✅ Structured JSON logging with correlation IDs
+- ✅ IAM user creation with programmatic-only access
+- ✅ Access key generation
+- ⏳ Email restriction policy generation (Task 3.2)
+- ⏳ SMTP password conversion and encryption (Task 3.3)
+- ⏳ Credential storage in DynamoDB (Task 3.3)
+- ⏳ Error handling and DLQ processing (Task 4)
 
 This event-driven approach eliminates the need for manual credential creation and ensures secure, automated provisioning of SMTP access.
 

@@ -23,7 +23,7 @@ A task is not complete until:
   - _Requirements: 4.2, 5.2_
 
 - [ ] 3. Create SMTP credential manager Lambda function
-  - [ ] 3.1 Implement core credential creation logic
+  - [x] 3.1 Implement core credential creation logic
     - Write Lambda function to process DynamoDB Stream events with X-Ray tracing
     - Implement structured JSON logging with correlation IDs
     - Detect new records with PK="SMTP_USER" and status="pending"

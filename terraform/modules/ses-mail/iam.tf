@@ -523,7 +523,8 @@ data "aws_iam_policy_document" "lambda_credential_manager_iam_access" {
       "iam:ListAccessKeys",
       "iam:PutUserPolicy",
       "iam:DeleteUserPolicy",
-      "iam:GetUserPolicy"
+      "iam:GetUserPolicy",
+      "iam:TagUser"
     ]
     resources = [
       "arn:aws:iam::${data.aws_caller_identity.current.account_id}:user/ses-smtp-user-*"
@@ -565,4 +566,27 @@ resource "aws_iam_role_policy" "lambda_credential_manager_kms_access" {
   name   = "lambda-credential-manager-kms-access-${var.environment}"
   role   = aws_iam_role.lambda_credential_manager_execution.id
   policy = data.aws_iam_policy_document.lambda_credential_manager_kms_access.json
+}
+
+# IAM policy document for credential manager Lambda CloudWatch metrics access
+data "aws_iam_policy_document" "lambda_credential_manager_cloudwatch_metrics" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "cloudwatch:PutMetricData"
+    ]
+    resources = ["*"]
+    condition {
+      test     = "StringEquals"
+      variable = "cloudwatch:namespace"
+      values   = ["SESMail/${var.environment}"]
+    }
+  }
+}
+
+# IAM policy for credential manager Lambda to publish CloudWatch metrics
+resource "aws_iam_role_policy" "lambda_credential_manager_cloudwatch_metrics" {
+  name   = "lambda-credential-manager-cloudwatch-metrics-${var.environment}"
+  role   = aws_iam_role.lambda_credential_manager_execution.id
+  policy = data.aws_iam_policy_document.lambda_credential_manager_cloudwatch_metrics.json
 }

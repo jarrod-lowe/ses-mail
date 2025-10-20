@@ -101,7 +101,7 @@ Key changes:
 - **Handler lambdas**: Process specific actions (Gmail forwarding, bouncing)
 - **DynamoDB**: Stores routing rules with hierarchical address matching
 
-See `.kiro/specs/ses-email-routing-modernization/` for complete design documentation.
+See `.kiro/specs/ses-email-routing-modernization/` and `.kiro/specs/smtp-ses-gateway` -for complete design documentation.
 
 ### DynamoDB Single-Table Design Pattern
 
@@ -164,7 +164,7 @@ terraform/
 
 ### Task-Driven Development
 
-1. Read specification documents in `.kiro/specs/{project}/` (the current project is `ses-email-routing-modernization`)
+1. Read specification documents in `.kiro/specs/{project}/` (the current project is `smtp-ses-gateway`)
    1. Files include `requirements.md`, `design.md`, and `tasks.md`
 2. Follow tasks in order from `tasks.md`
 3. A task is not complete until:

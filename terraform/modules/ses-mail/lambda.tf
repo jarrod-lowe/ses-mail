@@ -177,6 +177,52 @@ resource "aws_cloudwatch_log_group" "lambda_bouncer_logs" {
   retention_in_days = 30
 }
 
+# Archive the SMTP credential manager Lambda function code with dependencies
+# Uses the same package directory as other lambdas to share dependencies (aws_xray_sdk, boto3)
+data "archive_file" "smtp_credential_manager_zip" {
+  type        = "zip"
+  source_dir  = "${path.module}/lambda/package"
+  output_path = "${path.module}/lambda/smtp_credential_manager.zip"
+  excludes    = ["__pycache__", "*.pyc", ".DS_Store", "email_processor.py", "router_enrichment.py", "gmail_forwarder.py", "bouncer.py"]
+}
+
+# Lambda function for SMTP credential management (triggered by DynamoDB Streams)
+resource "aws_lambda_function" "smtp_credential_manager" {
+  filename         = data.archive_file.smtp_credential_manager_zip.output_path
+  function_name    = "ses-mail-smtp-credential-manager-${var.environment}"
+  role             = aws_iam_role.lambda_credential_manager_execution.arn
+  handler          = "smtp_credential_manager.lambda_handler"
+  source_code_hash = data.archive_file.smtp_credential_manager_zip.output_base64sha256
+  runtime          = "python3.12"
+  timeout          = 60
+  memory_size      = 256
+
+  # Enable X-Ray tracing for distributed tracing
+  tracing_config {
+    mode = "Active"
+  }
+
+  environment {
+    variables = {
+      DYNAMODB_TABLE_NAME = aws_dynamodb_table.email_routing.name
+      ENVIRONMENT         = var.environment
+    }
+  }
+
+  depends_on = [
+    aws_iam_role_policy_attachment.lambda_credential_manager_basic_execution,
+    aws_iam_role_policy.lambda_credential_manager_dynamodb_streams,
+    aws_iam_role_policy.lambda_credential_manager_iam_access,
+    aws_iam_role_policy_attachment.lambda_credential_manager_xray_access
+  ]
+}
+
+# CloudWatch Log Group for SMTP credential manager Lambda function
+resource "aws_cloudwatch_log_group" "lambda_smtp_credential_manager_logs" {
+  name              = "/aws/lambda/${aws_lambda_function.smtp_credential_manager.function_name}"
+  retention_in_days = 30
+}
+
 # ===========================
 # SQS Event Source Mappings
 # ===========================
@@ -222,5 +268,40 @@ resource "aws_lambda_event_source_mapping" "bouncer" {
   depends_on = [
     aws_iam_role_policy_attachment.lambda_bouncer_basic_execution,
     aws_sqs_queue.bouncer
+  ]
+}
+
+# Event source mapping for SMTP credential manager lambda (DynamoDB Streams)
+resource "aws_lambda_event_source_mapping" "smtp_credential_manager" {
+  event_source_arn  = aws_dynamodb_table.email_routing.stream_arn
+  function_name     = aws_lambda_function.smtp_credential_manager.arn
+  starting_position = "LATEST"
+
+  # Process records in small batches for better error isolation
+  batch_size = 10
+
+  # Enable function response types for partial batch failures
+  function_response_types = ["ReportBatchItemFailures"]
+
+  # Filter to only process SMTP_USER records with status="pending"
+  filter_criteria {
+    filter {
+      # Only process INSERT and MODIFY events for SMTP_USER records
+      pattern = jsonencode({
+        eventName : ["INSERT", "MODIFY"],
+        dynamodb : {
+          NewImage : {
+            PK : {
+              S : ["SMTP_USER"]
+            }
+          }
+        }
+      })
+    }
+  }
+
+  depends_on = [
+    aws_iam_role_policy_attachment.lambda_credential_manager_basic_execution,
+    aws_iam_role_policy.lambda_credential_manager_dynamodb_streams
   ]
 }
