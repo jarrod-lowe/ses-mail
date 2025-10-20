@@ -16,7 +16,7 @@ A task is not complete until:
   - Create outputs for recommended SPF, DMARC, and MTA-STS records
   - _Requirements: 1.1, 8.1, 8.2_
 
-- [ ] 2. Configure DynamoDB Streams for existing table
+- [x] 2. Configure DynamoDB Streams for existing table
   - Enable DynamoDB Streams on existing table if not already enabled
   - Configure stream to capture INSERT and MODIFY events
   - Set up appropriate IAM permissions for Lambda to read streams

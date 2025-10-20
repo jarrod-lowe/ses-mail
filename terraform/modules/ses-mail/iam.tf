@@ -455,3 +455,114 @@ resource "aws_iam_role_policy" "lambda_bouncer_sqs_access" {
   role   = aws_iam_role.lambda_bouncer_execution.id
   policy = data.aws_iam_policy_document.lambda_bouncer_sqs_access.json
 }
+
+# IAM role for SMTP credential manager Lambda function (triggers on DynamoDB Streams)
+resource "aws_iam_role" "lambda_credential_manager_execution" {
+  name               = "ses-mail-lambda-credential-manager-${var.environment}"
+  assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
+  description        = "Role for SMTP credential manager Lambda function"
+}
+
+# Attach AWS managed policy for basic Lambda execution (CloudWatch Logs)
+resource "aws_iam_role_policy_attachment" "lambda_credential_manager_basic_execution" {
+  role       = aws_iam_role.lambda_credential_manager_execution.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+# Attach X-Ray write access for credential manager Lambda (for distributed tracing per Requirement 9.1)
+resource "aws_iam_role_policy_attachment" "lambda_credential_manager_xray_access" {
+  role       = aws_iam_role.lambda_credential_manager_execution.name
+  policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
+}
+
+# IAM policy document for credential manager Lambda DynamoDB Streams access
+data "aws_iam_policy_document" "lambda_credential_manager_dynamodb_streams" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:DescribeStream",
+      "dynamodb:ListStreams"
+    ]
+    resources = [
+      "${aws_dynamodb_table.email_routing.arn}/stream/*"
+    ]
+  }
+
+  statement {
+    effect = "Allow"
+    actions = [
+      "dynamodb:PutItem",
+      "dynamodb:UpdateItem",
+      "dynamodb:GetItem"
+    ]
+    resources = [
+      aws_dynamodb_table.email_routing.arn
+    ]
+  }
+}
+
+# IAM policy for credential manager Lambda to read DynamoDB Streams and write to table
+resource "aws_iam_role_policy" "lambda_credential_manager_dynamodb_streams" {
+  name   = "lambda-credential-manager-dynamodb-streams-${var.environment}"
+  role   = aws_iam_role.lambda_credential_manager_execution.id
+  policy = data.aws_iam_policy_document.lambda_credential_manager_dynamodb_streams.json
+}
+
+# IAM policy document for credential manager Lambda IAM user management
+data "aws_iam_policy_document" "lambda_credential_manager_iam_access" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "iam:CreateUser",
+      "iam:GetUser",
+      "iam:DeleteUser",
+      "iam:CreateAccessKey",
+      "iam:DeleteAccessKey",
+      "iam:ListAccessKeys",
+      "iam:PutUserPolicy",
+      "iam:DeleteUserPolicy",
+      "iam:GetUserPolicy"
+    ]
+    resources = [
+      "arn:aws:iam::${data.aws_caller_identity.current.account_id}:user/ses-smtp-user-*"
+    ]
+  }
+}
+
+# IAM policy for credential manager Lambda to manage IAM users for SMTP
+resource "aws_iam_role_policy" "lambda_credential_manager_iam_access" {
+  name   = "lambda-credential-manager-iam-access-${var.environment}"
+  role   = aws_iam_role.lambda_credential_manager_execution.id
+  policy = data.aws_iam_policy_document.lambda_credential_manager_iam_access.json
+}
+
+# IAM policy document for credential manager Lambda KMS access
+# Note: This will use a default KMS key alias until a dedicated key is created
+data "aws_iam_policy_document" "lambda_credential_manager_kms_access" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "kms:Encrypt",
+      "kms:Decrypt",
+      "kms:GenerateDataKey",
+      "kms:DescribeKey"
+    ]
+    resources = [
+      "arn:aws:kms:*:${data.aws_caller_identity.current.account_id}:key/*"
+    ]
+    condition {
+      test     = "StringEquals"
+      variable = "kms:ViaService"
+      values   = ["dynamodb.${data.aws_region.current.name}.amazonaws.com"]
+    }
+  }
+}
+
+# IAM policy for credential manager Lambda to use KMS for encryption
+resource "aws_iam_role_policy" "lambda_credential_manager_kms_access" {
+  name   = "lambda-credential-manager-kms-access-${var.environment}"
+  role   = aws_iam_role.lambda_credential_manager_execution.id
+  policy = data.aws_iam_policy_document.lambda_credential_manager_kms_access.json
+}

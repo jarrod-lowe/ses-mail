@@ -393,6 +393,7 @@ The system uses a DynamoDB table to store email routing rules. The table uses a 
 - **Primary Key (PK)**: `ROUTE#<email-pattern>` (e.g., `ROUTE#support@example.com`, `ROUTE#*@example.com`, `ROUTE#*`)
 - **Sort Key (SK)**: `RULE#v1` (allows versioning)
 - **Billing**: PAY_PER_REQUEST (no standing costs)
+- **DynamoDB Streams**: Enabled with `NEW_AND_OLD_IMAGES` view type for SMTP credential management
 
 **Routing Rules Attributes:**
 
@@ -413,6 +414,25 @@ The router lambda performs lookups in this order (first match wins):
 2. Normalized match: `ROUTE#user@example.com` (removes +tag)
 3. Domain wildcard: `ROUTE#*@example.com`
 4. Global wildcard: `ROUTE#*`
+
+**DynamoDB Streams:**
+
+The table has DynamoDB Streams enabled to support automated SMTP credential management:
+
+- **Stream Enabled**: `true`
+- **Stream View Type**: `NEW_AND_OLD_IMAGES` (captures both before and after values)
+- **Purpose**: Triggers credential manager Lambda when new SMTP credential records are inserted
+- **Stream ARN**: Available via `aws dynamodb describe-table --table-name ses-email-routing-{environment}`
+
+The stream captures INSERT and MODIFY events for records with `PK="SMTP_USER"`. When administrators manually insert a new SMTP credential record with `status="pending"`, the stream triggers the credential manager Lambda function to automatically:
+
+1. Create an IAM user for SMTP authentication
+2. Generate SMTP credentials (access key and SES password)
+3. Encrypt credentials using KMS
+4. Store encrypted credentials back in DynamoDB
+5. Update the record status to `"active"`
+
+This event-driven approach eliminates the need for manual credential creation and ensures secure, automated provisioning of SMTP access.
 
 **Managing Routing Rules:**
 

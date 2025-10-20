@@ -30,6 +30,10 @@ resource "aws_dynamodb_table" "email_routing" {
     enabled = true
   }
 
+  # Enable DynamoDB Streams to trigger Lambda functions for SMTP credential management
+  stream_enabled   = true
+  stream_view_type = "NEW_AND_OLD_IMAGES" # Capture both old and new item images for INSERT and MODIFY events
+
   tags = {
     Name        = "ses-email-routing-${var.environment}"
     Environment = var.environment
