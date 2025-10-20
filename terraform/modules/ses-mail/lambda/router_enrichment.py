@@ -30,10 +30,41 @@ ENVIRONMENT = os.environ.get('ENVIRONMENT', 'unknown')
 # Initialize AWS clients
 dynamodb = boto3.client('dynamodb')
 cloudwatch = boto3.client('cloudwatch')
+ssm = boto3.client('ssm')
 
 from aws_xray_sdk.core import xray_recorder
 from aws_xray_sdk.core import patch_all
 patch_all()
+
+# Cache for integration test token (loaded once at cold start in test environment)
+_integration_test_token = None
+
+
+def _load_integration_test_token() -> Optional[str]:
+    """
+    Load integration test bypass token from SSM Parameter Store.
+    Only loads in test environment. Cached for Lambda lifetime.
+
+    Returns:
+        str: Token value or None if not in test environment
+    """
+    global _integration_test_token
+
+    if _integration_test_token is not None:
+        return _integration_test_token
+
+    if ENVIRONMENT != 'test':
+        return None
+
+    try:
+        parameter_name = f'/ses-mail/{ENVIRONMENT}/integration-test-token'
+        response = ssm.get_parameter(Name=parameter_name, WithDecryption=True)
+        _integration_test_token = response['Parameter']['Value']
+        logger.info("Loaded integration test token from SSM")
+        return _integration_test_token
+    except Exception as e:
+        logger.error(f"Failed to load integration test token: {e}")
+        return None
 
 
 def lambda_handler(event, context):
@@ -65,10 +96,21 @@ def lambda_handler(event, context):
     for record in event:
         # EventBridge Pipes expects just the Detail payload
         # Pipes will add Source and DetailType based on target configuration
+
+        # Extract the actual SES message ID from the SQS body
+        try:
+            body = json.loads(record['body'])
+            ses_message_id = body.get('mail', {}).get('messageId', 'unknown')
+        except (json.JSONDecodeError, KeyError) as e:
+            logger.error(f"Failed to parse SES event body: {str(e)}", exc_info=True)
+            failure_count += 1
+            # Skip this record - we can't process an email without a valid body
+            continue
+
         enriched_result = {
             **record,
             **{
-                "originalMessageId": record["messageId"],
+                "originalMessageId": ses_message_id,  # Use SES message ID, not SQS messageId
                 "actions": {
                     "store": {
                         "count": 0,
@@ -191,6 +233,23 @@ def check_spam(body: Dict[str, Any]) -> bool:
     Returns:
         bool: True if email is spam, False otherwise
     """
+    # Skip spam checks for integration test emails only in test environment
+    # Requires secret token in X-Integration-Test-Token header that matches SSM parameter
+    if ENVIRONMENT == 'test':
+        expected_token = _load_integration_test_token()
+        if expected_token:
+            # Look for X-Integration-Test-Token header in email
+            headers = body.get('mail', {}).get('headers', [])
+            for header in headers:
+                if header.get('name', '').lower() == 'x-integration-test-token':
+                    provided_token = header.get('value', '')
+                    if provided_token == expected_token:
+                        logger.info("Valid integration test token found - skipping spam checks")
+                        return False
+                    else:
+                        logger.warning("Invalid integration test token provided")
+                        break
+
     receipt = body['receipt']
     if receipt["spamVerdict"]["status"].lower() == "fail":
         return True

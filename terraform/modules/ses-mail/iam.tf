@@ -1,3 +1,25 @@
+# Generate random UUID for integration test token (test environment only)
+resource "random_uuid" "integration_test_token" {
+  count = var.environment == "test" ? 1 : 0
+}
+
+# SSM Parameter for integration test bypass token (test environment only)
+resource "aws_ssm_parameter" "integration_test_token" {
+  count = var.environment == "test" ? 1 : 0
+
+  name        = "/ses-mail/${var.environment}/integration-test-token"
+  description = "Secret token for bypassing spam checks in integration tests (${var.environment})"
+  type        = "SecureString"
+  value       = random_uuid.integration_test_token[0].result
+
+  tags = {
+    Name        = "integration-test-token-${var.environment}"
+    Environment = var.environment
+    Service     = "ses-mail"
+    Purpose     = "Integration test bypass token"
+  }
+}
+
 # SSM Parameter for storing Gmail OAuth token
 resource "aws_ssm_parameter" "gmail_token" {
   name        = "/ses-mail/${var.environment}/gmail-token"
@@ -101,6 +123,20 @@ data "aws_iam_policy_document" "lambda_router_dynamodb_access" {
     resources = [
       aws_dynamodb_table.email_routing.arn
     ]
+  }
+
+  # Allow router lambda to read integration test token in test environment
+  dynamic "statement" {
+    for_each = var.environment == "test" ? [1] : []
+    content {
+      effect = "Allow"
+      actions = [
+        "ssm:GetParameter"
+      ]
+      resources = [
+        aws_ssm_parameter.integration_test_token[0].arn
+      ]
+    }
   }
 }
 
@@ -332,6 +368,14 @@ data "aws_iam_policy_document" "lambda_gmail_forwarder_sqs_access" {
       "arn:aws:sqs:*:*:ses-gmail-forwarder-${var.environment}"
     ]
   }
+
+  statement {
+    effect = "Allow"
+    actions = [
+      "cloudwatch:PutMetricData"
+    ]
+    resources = ["*"]
+  }
 }
 
 # IAM policy for Gmail forwarder Lambda to access SQS
@@ -364,9 +408,17 @@ data "aws_iam_policy_document" "lambda_bouncer_ses_access" {
     ]
     resources = ["*"]
   }
+
+  statement {
+    effect = "Allow"
+    actions = [
+      "cloudwatch:PutMetricData"
+    ]
+    resources = ["*"]
+  }
 }
 
-# IAM policy for bouncer Lambda to send bounce emails via SES
+# IAM policy for bouncer Lambda to send bounce emails via SES and publish CloudWatch metrics
 resource "aws_iam_role_policy" "lambda_bouncer_ses_access" {
   name   = "lambda-bouncer-ses-access-${var.environment}"
   role   = aws_iam_role.lambda_bouncer_execution.id

@@ -59,6 +59,7 @@ class IntegrationTest:
         self.xray = boto3.client('xray', region_name=self.region)
         self.events = boto3.client('events', region_name=self.region)
         self.pipes = boto3.client('pipes', region_name=self.region)
+        self.ssm = boto3.client('ssm', region_name=self.region)
 
         # Get AWS account ID
         sts = boto3.client('sts')
@@ -74,12 +75,37 @@ class IntegrationTest:
         self.event_bus_name = f'ses-email-routing-{environment}'
         self.pipe_name = f'ses-email-router-{environment}'
 
+        # Load integration test bypass token (test environment only)
+        self.integration_test_token = self._load_integration_test_token()
+
         # Test results
         self.results = {
             'timestamp': datetime.now(timezone.utc).isoformat(),
             'environment': environment,
             'tests': []
         }
+
+    def _load_integration_test_token(self) -> Optional[str]:
+        """
+        Load integration test bypass token from SSM Parameter Store.
+
+        Returns:
+            str: Token value or None if not available
+        """
+        if self.environment != 'test':
+            logger.info("Not in test environment - no integration test token needed")
+            return None
+
+        try:
+            parameter_name = f'/ses-mail/{self.environment}/integration-test-token'
+            response = self.ssm.get_parameter(Name=parameter_name, WithDecryption=True)
+            token = response['Parameter']['Value']
+            logger.info("Loaded integration test bypass token from SSM")
+            return token
+        except ClientError as e:
+            logger.error(f"Failed to load integration test token: {e}")
+            logger.warning("Tests may fail due to DMARC checks without bypass token")
+            return None
 
     def get_queue_url(self, queue_name: str) -> str:
         """Get SQS queue URL from queue name."""
@@ -199,6 +225,11 @@ class IntegrationTest:
         msg['To'] = to_addr
         msg['Subject'] = subject
         msg['Date'] = formatdate(localtime=True)
+
+        # Add integration test bypass token header (test environment only)
+        if self.integration_test_token:
+            msg['X-Integration-Test-Token'] = self.integration_test_token
+            logger.debug("Added integration test bypass token to email header")
 
         # Create unique message ID that we can track
         domain = to_addr.split('@')[1]
@@ -423,6 +454,112 @@ class IntegrationTest:
             logger.error(f"Error getting router logs: {e}")
             return []
 
+    def get_handler_logs(
+        self,
+        handler_name: str,
+        message_id: str,
+        since_minutes: int = 5
+    ) -> List[Dict[str, Any]]:
+        """
+        Get handler lambda logs for a specific message.
+
+        Args:
+            handler_name: Handler name ('gmail-forwarder' or 'bouncer')
+            message_id: SES message ID to search for
+            since_minutes: How far back to search
+
+        Returns:
+            list: Log events containing the message ID
+        """
+        log_group = f'/aws/lambda/ses-mail-{handler_name}-{self.environment}'
+
+        try:
+            start_time = int((time.time() - (since_minutes * 60)) * 1000)
+            end_time = int(time.time() * 1000)
+
+            # Don't use filterPattern - it doesn't reliably match across all log content
+            # Instead, fetch all logs in time range and filter in Python
+            response = self.logs.filter_log_events(
+                logGroupName=log_group,
+                startTime=start_time,
+                endTime=end_time
+            )
+
+            # Filter events that contain the message ID
+            all_events = response.get('events', [])
+            events = [e for e in all_events if message_id in e.get('message', '')]
+
+            logger.info(f"Found {len(events)} {handler_name} log events for message {message_id}")
+            return events
+        except Exception as e:
+            logger.error(f"Error getting {handler_name} logs: {e}")
+            return []
+
+    def wait_for_handler_success(
+        self,
+        handler_name: str,
+        message_id: str,
+        success_pattern: str,
+        timeout_seconds: int = 60
+    ) -> bool:
+        """
+        Wait for handler lambda to successfully process a message.
+
+        Args:
+            handler_name: Handler name ('gmail-forwarder' or 'bouncer')
+            message_id: SES message ID to search for
+            success_pattern: Log pattern indicating success (e.g., 'Successfully imported')
+            timeout_seconds: Maximum time to wait
+
+        Returns:
+            bool: True if handler succeeded, False otherwise
+        """
+        logger.info(f"Waiting for {handler_name} to process message (timeout: {timeout_seconds}s)...")
+
+        start_time = time.time()
+        log_group = f'/aws/lambda/ses-mail-{handler_name}-{self.environment}'
+
+        while time.time() - start_time < timeout_seconds:
+            # Get logs containing the message ID
+            logs_with_msg_id = self.get_handler_logs(handler_name, message_id, since_minutes=2)
+
+            if logs_with_msg_id:
+                # Extract Request ID from first log that contains message ID
+                # Log stream name format: YYYY/MM/DD/[$LATEST]request-id
+                # Or we can extract from log message which contains RequestId
+                first_log = logs_with_msg_id[0]
+                log_stream_name = first_log.get('logStreamName', '')
+
+                # Get ALL logs from the same log stream (same lambda invocation)
+                try:
+                    stream_start = int((time.time() - (2 * 60)) * 1000)
+                    stream_end = int(time.time() * 1000)
+
+                    response = self.logs.filter_log_events(
+                        logGroupName=log_group,
+                        logStreamNames=[log_stream_name],
+                        startTime=stream_start,
+                        endTime=stream_end
+                    )
+
+                    all_invocation_logs = response.get('events', [])
+
+                    # Check if ANY log in this invocation contains the success pattern
+                    for log_event in all_invocation_logs:
+                        message = log_event.get('message', '')
+                        if success_pattern.lower() in message.lower():
+                            logger.info(f"{handler_name} successfully processed message: {message.strip()}")
+                            return True
+
+                except Exception as e:
+                    logger.error(f"Error fetching logs from stream {log_stream_name}: {e}")
+
+            logger.debug(f"Handler not finished yet, retrying... ({int(time.time() - start_time)}s elapsed)")
+            time.sleep(5)  # Check every 5 seconds
+
+        logger.warning(f"Timeout waiting for {handler_name} to process message")
+        return False
+
     def wait_for_xray_trace(
         self,
         message_id: str,
@@ -611,16 +748,31 @@ class IntegrationTest:
             else:
                 result['errors'].append("Message not found in gmail forwarder queue")
 
-            # 6. Check DLQs
-            logger.info("Step 6: Checking dead letter queues...")
+            # 6. Wait for Gmail forwarder lambda to successfully process the message
+            logger.info("Step 6: Waiting for Gmail forwarder lambda to process message...")
+            gmail_success = self.wait_for_handler_success(
+                handler_name='gmail-forwarder',
+                message_id=message_id,
+                success_pattern='Successfully imported to Gmail',
+                timeout_seconds=60
+            )
+            if gmail_success:
+                result['details']['gmail_handler_success'] = True
+                # If handler succeeded, clear the queue check error (message was already consumed)
+                result['errors'] = [e for e in result['errors'] if 'not found in gmail forwarder queue' not in e.lower()]
+            else:
+                result['errors'].append("Gmail forwarder lambda did not successfully process message")
+
+            # 7. Check DLQs
+            logger.info("Step 7: Checking dead letter queues...")
             gmail_dlq_url = self.get_queue_url(self.gmail_dlq_name)
             dlq_count = self.check_dlq_messages(gmail_dlq_url)
             result['details']['dlq_messages'] = dlq_count
             if dlq_count > 0:
                 result['errors'].append(f"Found {dlq_count} messages in DLQ")
 
-            # 7. Wait for X-Ray trace
-            logger.info("Step 7: Retrieving X-Ray trace...")
+            # 8. Wait for X-Ray trace
+            logger.info("Step 8: Retrieving X-Ray trace...")
             trace = self.wait_for_xray_trace(message_id, timeout_seconds=90)
             if trace:
                 result['details']['xray_trace_found'] = True
@@ -719,16 +871,31 @@ class IntegrationTest:
             else:
                 result['errors'].append("Message not found in bouncer queue")
 
-            # 6. Check DLQs
-            logger.info("Step 6: Checking dead letter queues...")
+            # 6. Wait for bouncer lambda to successfully process the message
+            logger.info("Step 6: Waiting for bouncer lambda to process message...")
+            bouncer_success = self.wait_for_handler_success(
+                handler_name='bouncer',
+                message_id=message_id,
+                success_pattern='Bounce sent successfully',
+                timeout_seconds=60
+            )
+            if bouncer_success:
+                result['details']['bouncer_handler_success'] = True
+                # If handler succeeded, clear the queue check error (message was already consumed)
+                result['errors'] = [e for e in result['errors'] if 'not found in bouncer queue' not in e.lower()]
+            else:
+                result['errors'].append("Bouncer lambda did not successfully process message")
+
+            # 7. Check DLQs
+            logger.info("Step 7: Checking dead letter queues...")
             bouncer_dlq_url = self.get_queue_url(self.bouncer_dlq_name)
             dlq_count = self.check_dlq_messages(bouncer_dlq_url)
             result['details']['dlq_messages'] = dlq_count
             if dlq_count > 0:
                 result['errors'].append(f"Found {dlq_count} messages in DLQ")
 
-            # 7. Wait for X-Ray trace
-            logger.info("Step 7: Retrieving X-Ray trace...")
+            # 8. Wait for X-Ray trace
+            logger.info("Step 8: Retrieving X-Ray trace...")
             trace = self.wait_for_xray_trace(message_id, timeout_seconds=90)
             if trace:
                 result['details']['xray_trace_found'] = True
@@ -819,23 +986,26 @@ class IntegrationTest:
 
         test_recipients = []
 
-        try:
-            # Test 1: Forward to Gmail
-            to_addr = f"test-forward@{test_domain}"
-            test_recipients.append(to_addr)
-            result = self.test_forward_to_gmail(from_addr, to_addr, gmail_target)
-            self.results['tests'].append(result)
+        # Test 1: Forward to Gmail
+        to_addr = f"test-forward@{test_domain}"
+        test_recipients.append(to_addr)
+        result = self.test_forward_to_gmail(from_addr, to_addr, gmail_target)
+        self.results['tests'].append(result)
 
-            # Test 2: Bounce
-            to_addr = f"test-bounce@{test_domain}"
-            test_recipients.append(to_addr)
-            result = self.test_bounce(from_addr, to_addr)
-            self.results['tests'].append(result)
+        # Clean up test 1 rule only if test completed (successfully or not)
+        # This ensures the rule exists during the entire test execution
+        if not skip_cleanup:
+            self.delete_test_routing_rule(to_addr)
 
-        finally:
-            # Cleanup
-            if not skip_cleanup:
-                self.cleanup_test_rules(test_recipients)
+        # Test 2: Bounce
+        to_addr = f"test-bounce@{test_domain}"
+        test_recipients.append(to_addr)
+        result = self.test_bounce(from_addr, to_addr)
+        self.results['tests'].append(result)
+
+        # Clean up test 2 rule only if test completed (successfully or not)
+        if not skip_cleanup:
+            self.delete_test_routing_rule(to_addr)
 
         # Generate report
         self.generate_report()

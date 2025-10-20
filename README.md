@@ -2,54 +2,54 @@
 
 ## Initial Google Cloud Setup
 
-* Go to <https://console.cloud.google.com>
-* Click the current project (top left next to "Google Cloud")
-* Click "New Project"
-* Name it "ses-mail"
-* Leave the organisation as "No organisation"
-* Create
-* ☰ -> APIs and services -> Library
-* Search for "Gmail API"
-* Select "Gmail API"
-* Click "Enable"
-* Select "OAuth consent screen" in the left-side menu
-* It will say "Google auth platform not configured yet" - Click "Get started"
-* App name: ses-mail
-* User support email: select your email address
-* Next
-* Select External
-* Next
-* Add your email address for the contact address
-* Next
-* Agree to the policy
-* Continue
-* Create
-* Audience -> Add users
-* Add your gmail address
-* Save
-* Clients -> Create client
-* Select "Create OAuth client"
-* Application type: Desktop app
-* Name: ses-mail
-* Create
-* Select "Download JSON" - and save it for later
-* OK
-* From the left menu -> Data Access -> Add or remove scopes
-* Add "Gmail API .../auth/gmail.insert"
-* Update
-* Save
-* Put the client secret file in this directory, named "client_secret.json"
-* `python3 -m venv .venv`
-* Either source the file mentioned, or let VSCode handle it and create a new terminal
-* `pip3 install -r requirements.txt`
-* `./scripts/create_refresh_token.py`
-* In the browser window that pops up, select your account
-* Continue
-* Continue
-* Close the tab
-* You can use the scripts in `scripts/` to test the token
-* After setting up the infrastructure, set the token parameter to the value of token.json
-* Delete the `client_secret.json` and `token.json` files from the local filesystem
+- Go to <https://console.cloud.google.com>
+- Click the current project (top left next to "Google Cloud")
+- Click "New Project"
+- Name it "ses-mail"
+- Leave the organisation as "No organisation"
+- Create
+- ☰ -> APIs and services -> Library
+- Search for "Gmail API"
+- Select "Gmail API"
+- Click "Enable"
+- Select "OAuth consent screen" in the left-side menu
+- It will say "Google auth platform not configured yet" - Click "Get started"
+- App name: ses-mail
+- User support email: select your email address
+- Next
+- Select External
+- Next
+- Add your email address for the contact address
+- Next
+- Agree to the policy
+- Continue
+- Create
+- Audience -> Add users
+- Add your gmail address
+- Save
+- Clients -> Create client
+- Select "Create OAuth client"
+- Application type: Desktop app
+- Name: ses-mail
+- Create
+- Select "Download JSON" - and save it for later
+- OK
+- From the left menu -> Data Access -> Add or remove scopes
+- Add "Gmail API .../auth/gmail.insert"
+- Update
+- Save
+- Put the client secret file in this directory, named "client_secret.json"
+- `python3 -m venv .venv`
+- Either source the file mentioned, or let VSCode handle it and create a new terminal
+- `pip3 install -r requirements.txt`
+- `./scripts/create_refresh_token.py`
+- In the browser window that pops up, select your account
+- Continue
+- Continue
+- Close the tab
+- You can use the scripts in `scripts/` to test the token
+- After setting up the infrastructure, set the token parameter to the value of token.json
+- Delete the `client_secret.json` and `token.json` files from the local filesystem
 
 ## Terraform Infrastructure Setup
 
@@ -72,7 +72,7 @@ terraform/
 
 1. The infrastructure uses a Terraform state bucket in S3. The Makefile will automatically create `terraform-state-{account-id}` in your AWS account on first run.
 
-2. Review and customize the configuration for your environment:
+1. Review and customize the configuration for your environment:
 
    ```bash
    # For test environment
@@ -85,7 +85,7 @@ terraform/
    # domain should be a list: ["mail.example.com", "mail2.example.com"]
    ```
 
-3. Deploy the infrastructure (first pass):
+1. Deploy the infrastructure (first pass):
 
    ```bash
    # For test environment
@@ -101,7 +101,7 @@ terraform/
 
    **Note:** The `make plan` target automatically packages the Lambda function with its dependencies. If MTA-STS is enabled, the first apply will create the ACM certificate but CloudFront creation will fail. This is expected - continue to step 4.
 
-4. Configure DNS records in Route53:
+1. Configure DNS records in Route53:
 
    First, get the DNS records from Terraform:
 
@@ -119,54 +119,54 @@ terraform/
 
    **Domain Verification (TXT record)**
 
-   * Name: `_amazonses.YOUR_DOMAIN`
-   * Type: TXT
-   * Value: The verification token from the output
-   * TTL: 1800 (or default)
+   - Name: `_amazonses.YOUR_DOMAIN`
+   - Type: TXT
+   - Value: The verification token from the output
+   - TTL: 1800 (or default)
 
    **Email Receiving (MX record)**
 
-   * Name: `YOUR_DOMAIN` (or leave blank if zone is YOUR_DOMAIN)
-   * Type: MX
-   * Value: `10 inbound-smtp.ap-southeast-2.amazonaws.com` (adjust region as needed)
-   * TTL: 1800 (or default)
+   - Name: `YOUR_DOMAIN` (or leave blank if zone is YOUR_DOMAIN)
+   - Type: MX
+   - Value: `10 inbound-smtp.ap-southeast-2.amazonaws.com` (adjust region as needed)
+   - TTL: 1800 (or default)
 
    **DKIM Authentication (3 CNAME records per domain)**
 
-   * For each of the 3 DKIM tokens in the output:
-     * Name: `{token}._domainkey.YOUR_DOMAIN`
-     * Type: CNAME
-     * Value: `{token}.dkim.amazonses.com`
-     * TTL: 1800 (or default)
+   - For each of the 3 DKIM tokens in the output:
+     - Name: `{token}._domainkey.YOUR_DOMAIN`
+     - Type: CNAME
+     - Value: `{token}.dkim.amazonses.com`
+     - TTL: 1800 (or default)
 
    **DMARC Policy (TXT record per domain)**
 
-   * Name: `_dmarc.YOUR_DOMAIN`
-   * Type: TXT
-   * Value: `v=DMARC1; p=reject; rua=mailto:dmarc@YOUR_DOMAIN` (if prefix configured)
-   * TTL: 1800 (or default)
-   * Purpose: Prevents others from spoofing your domain
+   - Name: `_dmarc.YOUR_DOMAIN`
+   - Type: TXT
+   - Value: `v=DMARC1; p=reject; rua=mailto:dmarc@YOUR_DOMAIN` (if prefix configured)
+   - TTL: 1800 (or default)
+   - Purpose: Prevents others from spoofing your domain
 
    **MTA-STS (if enabled - records per domain)**
 
-   * Name: `_mta-sts.YOUR_DOMAIN`
-   * Type: TXT
-   * Value: From terraform output (contains policy ID)
-   * TTL: 1800 (or default)
+   - Name: `_mta-sts.YOUR_DOMAIN`
+   - Type: TXT
+   - Value: From terraform output (contains policy ID)
+   - TTL: 1800 (or default)
 
-   * Name: `mta-sts.YOUR_DOMAIN`
-   * Type: CNAME
-   * Value: CloudFront distribution URL from output
-   * TTL: 1800 (or default)
+   - Name: `mta-sts.YOUR_DOMAIN`
+   - Type: CNAME
+   - Value: CloudFront distribution URL from output
+   - TTL: 1800 (or default)
 
-   * ACM validation CNAME records (from terraform output, one set per domain)
+   - ACM validation CNAME records (from terraform output, one set per domain)
 
    **TLS Reporting (if email configured - per domain)**
 
-   * Name: `_smtp._tls.YOUR_DOMAIN`
-   * Type: TXT
-   * Value: `v=TLSRPTv1; rua=mailto:tlsrpt@YOUR_DOMAIN`
-   * TTL: 1800 (or default)
+   - Name: `_smtp._tls.YOUR_DOMAIN`
+   - Type: TXT
+   - Value: `v=TLSRPTv1; rua=mailto:tlsrpt@YOUR_DOMAIN`
+   - TTL: 1800 (or default)
 
    **Via AWS Console:**
    1. Go to Route53 → Hosted zones
@@ -191,7 +191,7 @@ terraform/
    aws ses get-identity-verification-attributes --identities mail.example.com mail2.example.com
    ```
 
-5. Complete MTA-STS setup (if enabled):
+1. Complete MTA-STS setup (if enabled):
 
    After adding the DNS records (including ACM validation records for each domain), wait for all ACM certificates to validate:
 
@@ -207,7 +207,7 @@ terraform/
    make apply ENV=test  # or ENV=prod
    ```
 
-6. Upload your Gmail token to SSM Parameter Store:
+1. Upload your Gmail token to SSM Parameter Store:
 
    ```bash
    # For test environment
@@ -225,7 +225,7 @@ terraform/
      --overwrite
    ```
 
-7. Enable GLE
+1. Enable GLE
 
 The auto-enablement of the GLE does not work yet. Run it manually with:
 
@@ -234,15 +234,19 @@ aws resource-groups update-account-settings \
 --group-lifecycle-events-desired-status ACTIVE
 ```
 
+1. Enable Transaction Search
+
+Go to the XRay console, and enable transaction search, with 1% ingestion.
+
 ### Workflow
 
 All commands now require an `ENV` parameter to specify which environment (test or prod):
 
-* **make package ENV=test**: Packages the Lambda function with dependencies (automatically run by make plan)
-* **make plan ENV=test**: Creates a plan file showing what changes will be made
-* **make apply ENV=test**: Applies the plan file (depends on plan, so will create it if missing)
-* **make plan-destroy ENV=test**: Creates a destroy plan
-* **make destroy ENV=test**: Applies the destroy plan (depends on plan-destroy)
+- **make package ENV=test**: Packages the Lambda function with dependencies (automatically run by make plan)
+- **make plan ENV=test**: Creates a plan file showing what changes will be made
+- **make apply ENV=test**: Applies the plan file (depends on plan, so will create it if missing)
+- **make plan-destroy ENV=test**: Creates a destroy plan
+- **make destroy ENV=test**: Applies the destroy plan (depends on plan-destroy)
 
 For detailed instructions and configuration options, see [terraform/modules/ses-mail/README.md](terraform/modules/ses-mail/README.md).
 
@@ -269,44 +273,46 @@ SES → S3 → SNS (X-Ray tracing) → SQS Input Queue → EventBridge Pipes[rou
 
 **Infrastructure Components:**
 
-* **SNS Topic**: `ses-email-processing-{environment}` with X-Ray Active tracing
-* **SQS Input Queue**: `ses-email-input-{environment}` with 3-retry DLQ policy
-* **EventBridge Pipe**: `ses-email-router-{environment}` with router lambda enrichment
-  * Source: SQS input queue
-  * Enrichment: Router lambda function (DynamoDB routing rules lookup)
-  * Target: EventBridge Event Bus
-  * Logging: CloudWatch Logs at INFO level with execution data
-* **Router Lambda**: `ses-mail-router-enrichment-{environment}` with X-Ray Active tracing
-  * Queries DynamoDB for routing rules with hierarchical address matching
-  * Enriches messages with routing decisions and email metadata
-  * Timeout: 30 seconds, Memory: 128 MB
-* **EventBridge Event Bus**: `ses-email-routing-{environment}` with routing rules
-  * Routes messages to Gmail forwarder queue (action: `forward-to-gmail`)
-  * Routes messages to bouncer queue (action: `bounce`)
-* **Handler Queues**:
-  * `ses-gmail-forwarder-{environment}` - Triggers Gmail forwarder lambda
-  * `ses-bouncer-{environment}` - Triggers bouncer lambda
-  * Both with 3-retry DLQ policies and CloudWatch alarms
-* **Dead Letter Queues**: All queues have corresponding DLQs with 14-day retention
-* **CloudWatch Alarms**: Monitors DLQ messages, queue age, and Pipes failures
+- **SNS Topic**: `ses-email-processing-{environment}` with X-Ray Active tracing
+- **SQS Input Queue**: `ses-email-input-{environment}` with 3-retry DLQ policy
+- **EventBridge Pipe**: `ses-email-router-{environment}` with router lambda enrichment
+  - Source: SQS input queue
+  - Enrichment: Router lambda function (DynamoDB routing rules lookup)
+  - Target: EventBridge Event Bus
+  - Logging: CloudWatch Logs at INFO level with execution data
+- **Router Lambda**: `ses-mail-router-enrichment-{environment}` with X-Ray Active tracing
+  - Queries DynamoDB for routing rules with hierarchical address matching
+  - Enriches messages with routing decisions and email metadata
+  - Timeout: 30 seconds, Memory: 128 MB
+- **EventBridge Event Bus**: `ses-email-routing-{environment}` with routing rules
+  - Routes messages to Gmail forwarder queue (action: `forward-to-gmail`)
+  - Routes messages to bouncer queue (action: `bounce`)
+- **Handler Queues**:
+  - `ses-gmail-forwarder-{environment}` - Triggers Gmail forwarder lambda
+  - `ses-bouncer-{environment}` - Triggers bouncer lambda
+  - Both with 3-retry DLQ policies and CloudWatch alarms
+- **Dead Letter Queues**: All queues have corresponding DLQs with 14-day retention
+- **CloudWatch Alarms**: Monitors DLQ messages, queue age, and Pipes failures
 
 **X-Ray Distributed Tracing:**
 
 The entire email processing pipeline is instrumented with X-Ray tracing:
-* SNS topic initiates traces with Active tracing
-* SQS queues propagate trace context
-* EventBridge Pipes maintains trace context through enrichment
-* Router lambda adds custom annotations for email metadata
-* Handler lambdas continue the trace for end-to-end visibility
+
+- SNS topic initiates traces with Active tracing
+- SQS queues propagate trace context
+- EventBridge Pipes maintains trace context through enrichment
+- Router lambda adds custom annotations for email metadata
+- Handler lambdas continue the trace for end-to-end visibility
 
 **EventBridge Pipes Integration:**
 
 EventBridge Pipes provides serverless message enrichment and routing:
-* Automatically polls SQS input queue and invokes router lambda
-* Manages retries and error handling with built-in DLQ support
-* Logs all executions to CloudWatch for debugging and monitoring
-* Transforms enriched output into EventBridge events with proper source and detail-type
-* No custom polling or dispatch logic required - fully managed by AWS
+
+- Automatically polls SQS input queue and invokes router lambda
+- Manages retries and error handling with built-in DLQ support
+- Logs all executions to CloudWatch for debugging and monitoring
+- Transforms enriched output into EventBridge events with proper source and detail-type
+- No custom polling or dispatch logic required - fully managed by AWS
 
 ## AWS myApplications Integration
 
@@ -316,11 +322,11 @@ The infrastructure is registered with AWS myApplications through AWS Service Cat
 
 AWS myApplications provides a centralized view to manage your applications and their resources. It integrates with AppRegistry to:
 
-* View application health and status
-* Track costs at the application level
-* Monitor operational metrics
-* Manage application metadata and documentation
-* Access application resources in one place
+- View application health and status
+- Track costs at the application level
+- Monitor operational metrics
+- Manage application metadata and documentation
+- Access application resources in one place
 
 **Accessing myApplications:**
 
@@ -342,17 +348,17 @@ The AppRegistry application automatically discovers and includes all resources t
 
 The infrastructure includes an AWS Resource Group that provides a single view of all resources for each environment. All resources are automatically tagged with:
 
-* **Project**: `ses-mail`
-* **ManagedBy**: `terraform`
-* **Environment**: `test` or `prod`
-* **Application**: `ses-mail-{environment}` (combined tag for myApplications integration)
+- **Project**: `ses-mail`
+- **ManagedBy**: `terraform`
+- **Environment**: `test` or `prod`
+- **Application**: `ses-mail-{environment}` (combined tag for myApplications integration)
 
 The Resource Group uses these tags to organize resources, making it easy to:
 
-* View all related resources in one place
-* Track costs by environment
-* Manage resources collectively
-* Monitor resource health
+- View all related resources in one place
+- Track costs by environment
+- Manage resources collectively
+- Monitor resource health
 
 **Accessing the Resource Group:**
 
@@ -367,14 +373,14 @@ terraform output resource_group_url
 
 The Resource Group includes all infrastructure components:
 
-* S3 buckets
-* Lambda functions
-* DynamoDB tables
-* SQS queues
-* SNS topics
-* CloudWatch alarms and log groups
-* IAM roles
-* SES resources
+- S3 buckets
+- Lambda functions
+- DynamoDB tables
+- SQS queues
+- SNS topics
+- CloudWatch alarms and log groups
+- IAM roles
+- SES resources
 
 ## Email Routing Configuration
 
@@ -384,20 +390,20 @@ The system uses a DynamoDB table to store email routing rules. The table uses a 
 
 **Table Structure:**
 
-* **Primary Key (PK)**: `ROUTE#<email-pattern>` (e.g., `ROUTE#support@example.com`, `ROUTE#*@example.com`, `ROUTE#*`)
-* **Sort Key (SK)**: `RULE#v1` (allows versioning)
-* **Billing**: PAY_PER_REQUEST (no standing costs)
+- **Primary Key (PK)**: `ROUTE#<email-pattern>` (e.g., `ROUTE#support@example.com`, `ROUTE#*@example.com`, `ROUTE#*`)
+- **Sort Key (SK)**: `RULE#v1` (allows versioning)
+- **Billing**: PAY_PER_REQUEST (no standing costs)
 
 **Routing Rules Attributes:**
 
-* `entity_type`: `ROUTE` (for filtering)
-* `recipient`: Email pattern (denormalized from PK)
-* `action`: `forward-to-gmail` | `bounce`
-* `target`: Gmail address for forwarding, or empty for bounces
-* `enabled`: Boolean (true/false)
-* `created_at`: ISO timestamp
-* `updated_at`: ISO timestamp
-* `description`: Human-readable description
+- `entity_type`: `ROUTE` (for filtering)
+- `recipient`: Email pattern (denormalized from PK)
+- `action`: `forward-to-gmail` | `bounce`
+- `target`: Gmail address for forwarding, or empty for bounces
+- `enabled`: Boolean (true/false)
+- `created_at`: ISO timestamp
+- `updated_at`: ISO timestamp
+- `description`: Human-readable description
 
 **Hierarchical Matching:**
 
@@ -452,11 +458,11 @@ The router enrichment lambda (`ses-mail-router-enrichment-{environment}`) is use
 
 **Functionality:**
 
-* **Hierarchical DynamoDB Lookup**: Performs lookups in order of specificity (exact → normalized → domain wildcard → global wildcard)
-* **Email Address Normalization**: Removes +tag from addresses (e.g., `user+newsletter@example.com` → `user@example.com`) for plus addressing support
-* **Security Analysis**: Extracts and analyzes DMARC, SPF, DKIM, spam, and virus verdicts from SES receipt
-* **Fallback Behavior**: Defaults to "bounce" action when DynamoDB is unavailable or no rule matches
-* **X-Ray Tracing**: Active tracing enabled with custom annotations for message ID, source, and routing action
+- **Hierarchical DynamoDB Lookup**: Performs lookups in order of specificity (exact → normalized → domain wildcard → global wildcard)
+- **Email Address Normalization**: Removes +tag from addresses (e.g., `user+newsletter@example.com` → `user@example.com`) for plus addressing support
+- **Security Analysis**: Extracts and analyses DMARC, SPF, DKIM, spam, and virus verdicts from SES receipt
+- **Fallback Behaviour**: Defaults to "bounce" action when DynamoDB is unavailable or no rule matches
+- **X-Ray Tracing**: Active tracing enabled with custom annotations for message ID, source, and routing action
 
 **Input Format** (from EventBridge Pipes):
 
@@ -534,28 +540,28 @@ The system uses an EventBridge Event Bus (`ses-email-routing-{environment}`) to 
 
 **EventBridge Event Bus:**
 
-* **Name**: `ses-email-routing-{environment}`
-* **Type**: Custom event bus (not default)
-* **Purpose**: Routes enriched messages from EventBridge Pipes to handler SQS queues
-* **Logging**: CloudWatch log group `/aws/events/ses-email-routing-{environment}` (30-day retention)
+- **Name**: `ses-email-routing-{environment}`
+- **Type**: Custom event bus (not default)
+- **Purpose**: Routes enriched messages from EventBridge Pipes to handler SQS queues
+- **Logging**: CloudWatch log group `/aws/events/ses-email-routing-{environment}` (30-day retention)
 
 **EventBridge Rules:**
 
 The Event Bus has two rules that match on routing decisions:
 
 1. **Gmail Forwarder Rule** (`route-to-gmail-{environment}`):
-   * **Event Pattern**: Matches `action: "forward-to-gmail"` in routing decisions
-   * **Source**: `ses.email.router`
-   * **Target**: `ses-gmail-forwarder-{environment}` SQS queue
-   * **Retry Policy**: Max 2 retries, 1 hour max event age
-   * **Dead Letter Queue**: `ses-gmail-forwarder-dlq-{environment}`
+   - **Event Pattern**: Matches `action: "forward-to-gmail"` in routing decisions
+   - **Source**: `ses.email.router`
+   - **Target**: `ses-gmail-forwarder-{environment}` SQS queue
+   - **Retry Policy**: Max 2 retries, 1 hour max event age
+   - **Dead Letter Queue**: `ses-gmail-forwarder-dlq-{environment}`
 
 2. **Bouncer Rule** (`route-to-bouncer-{environment}`):
-   * **Event Pattern**: Matches `action: "bounce"` in routing decisions
-   * **Source**: `ses.email.router`
-   * **Target**: `ses-bouncer-{environment}` SQS queue
-   * **Retry Policy**: Max 2 retries, 1 hour max event age
-   * **Dead Letter Queue**: `ses-bouncer-dlq-{environment}`
+   - **Event Pattern**: Matches `action: "bounce"` in routing decisions
+   - **Source**: `ses.email.router`
+   - **Target**: `ses-bouncer-{environment}` SQS queue
+   - **Retry Policy**: Max 2 retries, 1 hour max event age
+   - **Dead Letter Queue**: `ses-bouncer-dlq-{environment}`
 
 **Event Flow:**
 
@@ -574,18 +580,18 @@ Gmail Forwarder Lambda              Bouncer Lambda
 
 **CloudWatch Monitoring:**
 
-* **Metric Filters**: Track EventBridge rule failures for both Gmail and bouncer rules
-* **Alarms**: Trigger when EventBridge fails to deliver events to target queues
-* **Namespace**: `SESMail/{environment}`
-* **Metrics**: `EventBridgeGmailRuleFailures`, `EventBridgeBouncerRuleFailures`
+- **Metric Filters**: Track EventBridge rule failures for both Gmail and bouncer rules
+- **Alarms**: Trigger when EventBridge fails to deliver events to target queues
+- **Namespace**: `SESMail/{environment}`
+- **Metrics**: `EventBridgeGmailRuleFailures`, `EventBridgeBouncerRuleFailures`
 
 **IAM Permissions:**
 
 The EventBridge Event Bus uses an IAM role (`ses-mail-eventbridge-sqs-{environment}`) with permissions to:
 
-* Send messages to Gmail forwarder SQS queue
-* Send messages to bouncer SQS queue
-* Send failed events to dead letter queues
+- Send messages to Gmail forwarder SQS queue
+- Send messages to bouncer SQS queue
+- Send failed events to dead letter queues
 
 **Testing EventBridge Rules:**
 
@@ -624,6 +630,7 @@ AWS_PROFILE=ses-mail aws events put-events \
 The EventBridge rules use event patterns to match routing decisions based on action counts. Here are the patterns used:
 
 Gmail Forwarder Rule:
+
 ```json
 {
   "source": ["ses.email.router"],
@@ -641,6 +648,7 @@ Gmail Forwarder Rule:
 This matches any event where at least one recipient has a `forward-to-gmail` action.
 
 Bouncer Rule:
+
 ```json
 {
   "source": ["ses.email.router"],
@@ -663,13 +671,13 @@ The Gmail forwarder lambda (`ses-mail-gmail-forwarder-{environment}`) processes 
 
 **Functionality:**
 
-* **SQS Event Processing**: Triggered by messages in the gmail-forwarder queue
-* **Enriched Message Handling**: Extracts routing decisions and email metadata from EventBridge-enriched messages
-* **Gmail API Integration**: Imports emails into Gmail with INBOX and UNREAD labels
-* **S3 Email Management**: Fetches raw email from S3 and deletes after successful import
-* **Token Management**: Automatically refreshes OAuth tokens and updates SSM Parameter Store
-* **X-Ray Tracing**: Active tracing with custom annotations for message ID, recipient, action, and target
-* **Error Handling**: Returns batch item failures for SQS retry logic
+- **SQS Event Processing**: Triggered by messages in the gmail-forwarder queue
+- **Enriched Message Handling**: Extracts routing decisions and email metadata from EventBridge-enriched messages
+- **Gmail API Integration**: Imports emails into Gmail with INBOX and UNREAD labels
+- **S3 Email Management**: Fetches raw email from S3 and deletes after successful import
+- **Token Management**: Automatically refreshes OAuth tokens and updates SSM Parameter Store
+- **X-Ray Tracing**: Active tracing with custom annotations for message ID, recipient, action, and target
+- **Error Handling**: Returns batch item failures for SQS retry logic
 
 **Input Format** (from SQS/EventBridge):
 
@@ -695,12 +703,12 @@ The lambda receives SQS messages containing EventBridge events with the router's
 
 **Configuration:**
 
-* **Runtime**: Python 3.12
-* **Memory**: 128MB
-* **Timeout**: 3 seconds (default)
-* **Environment Variables**:
-  * `GMAIL_TOKEN_PARAMETER`: SSM parameter path for Gmail OAuth token
-  * `EMAIL_BUCKET`: S3 bucket containing email files
+- **Runtime**: Python 3.12
+- **Memory**: 128MB
+- **Timeout**: 3 seconds (default)
+- **Environment Variables**:
+  - `GMAIL_TOKEN_PARAMETER`: SSM parameter path for Gmail OAuth token
+  - `EMAIL_BUCKET`: S3 bucket containing email files
 
 **Testing the Gmail Forwarder Lambda:**
 
@@ -732,12 +740,12 @@ AWS_PROFILE=ses-mail aws logs tail /aws/lambda/ses-mail-gmail-forwarder-test --f
 
 **SQS Queue Configuration:**
 
-* **Queue Name**: `ses-gmail-forwarder-{environment}`
-* **Dead Letter Queue**: `ses-gmail-forwarder-dlq-{environment}` (14 day retention)
-* **Visibility Timeout**: 30 seconds (10x lambda timeout)
-* **Max Retries**: 3 (before moving to DLQ)
-* **Event Source Mapping**: Batch size 1, max concurrency 10
-* **CloudWatch Alarms**: DLQ messages >0, queue age >5 minutes
+- **Queue Name**: `ses-gmail-forwarder-{environment}`
+- **Dead Letter Queue**: `ses-gmail-forwarder-dlq-{environment}` (14 day retention)
+- **Visibility Timeout**: 30 seconds (10x lambda timeout)
+- **Max Retries**: 3 (before moving to DLQ)
+- **Event Source Mapping**: Batch size 1, max concurrency 10
+- **CloudWatch Alarms**: DLQ messages >0, queue age >5 minutes
 
 ### Bouncer Lambda Function
 
@@ -745,13 +753,13 @@ The bouncer lambda (`ses-mail-bouncer-{environment}`) processes enriched email m
 
 **Functionality:**
 
-* **SQS Event Processing**: Triggered by messages in the bouncer queue
-* **Enriched Message Handling**: Extracts routing decisions and email metadata from EventBridge-enriched messages
-* **Bounce Notification**: Sends formatted bounce emails via SES to the original sender
-* **Email Metadata**: Includes original sender, recipient, subject, timestamp, and routing rule information in bounce
-* **X-Ray Tracing**: Active tracing with custom annotations for message ID, source, action, and environment
-* **Error Handling**: Returns batch item failures for SQS retry logic
-* **Professional Formatting**: Sends both HTML and plain text bounce messages
+- **SQS Event Processing**: Triggered by messages in the bouncer queue
+- **Enriched Message Handling**: Extracts routing decisions and email metadata from EventBridge-enriched messages
+- **Bounce Notification**: Sends formatted bounce emails via SES to the original sender
+- **Email Metadata**: Includes original sender, recipient, subject, timestamp, and routing rule information in bounce
+- **X-Ray Tracing**: Active tracing with custom annotations for message ID, source, action, and environment
+- **Error Handling**: Returns batch item failures for SQS retry logic
+- **Professional Formatting**: Sends both HTML and plain text bounce messages
 
 **Input Format** (from SQS/EventBridge):
 
@@ -777,20 +785,21 @@ The lambda receives SQS messages containing EventBridge events with the router's
 **Bounce Email Format:**
 
 The bounce notification includes:
-* Subject: `Mail Delivery Failed: {original subject}`
-* Original message details (from, to, subject, timestamp)
-* Reason for bounce (recipient not configured)
-* Routing rule that triggered the bounce
-* Professional HTML and plain text formatting
+
+- Subject: `Mail Delivery Failed: {original subject}`
+- Original message details (from, to, subject, timestamp)
+- Reason for bounce (recipient not configured)
+- Routing rule that triggered the bounce
+- Professional HTML and plain text formatting
 
 **Configuration:**
 
-* **Runtime**: Python 3.12
-* **Memory**: 128MB
-* **Timeout**: 30 seconds (for SES API calls)
-* **Environment Variables**:
-  * `BOUNCE_SENDER`: Sender address for bounce notifications (e.g., `mailer-daemon@domain.com`)
-  * `ENVIRONMENT`: Environment name (test/prod)
+- **Runtime**: Python 3.12
+- **Memory**: 128MB
+- **Timeout**: 30 seconds (for SES API calls)
+- **Environment Variables**:
+  - `BOUNCE_SENDER`: Sender address for bounce notifications (e.g., `mailer-daemon@domain.com`)
+  - `ENVIRONMENT`: Environment name (test/prod)
 
 **Testing the Bouncer Lambda:**
 
@@ -821,17 +830,17 @@ AWS_PROFILE=ses-mail aws logs tail /aws/lambda/ses-mail-bouncer-test --follow
 
 **SQS Queue Configuration:**
 
-* **Queue Name**: `ses-bouncer-{environment}`
-* **Dead Letter Queue**: `ses-bouncer-dlq-{environment}` (14 day retention)
-* **Visibility Timeout**: 180 seconds (6x lambda timeout)
-* **Max Retries**: 3 (before moving to DLQ)
-* **Event Source Mapping**: Batch size 1, max concurrency 5
-* **CloudWatch Alarms**: DLQ messages >0, queue age >5 minutes
+- **Queue Name**: `ses-bouncer-{environment}`
+- **Dead Letter Queue**: `ses-bouncer-dlq-{environment}` (14 day retention)
+- **Visibility Timeout**: 180 seconds (6x lambda timeout)
+- **Max Retries**: 3 (before moving to DLQ)
+- **Event Source Mapping**: Batch size 1, max concurrency 5
+- **CloudWatch Alarms**: DLQ messages >0, queue age >5 minutes
 
 **Important Notes:**
 
-* SES sandbox mode requires sender email verification. In production with verified domain, bounces will be sent to any address.
-* Bounce sender defaults to `mailer-daemon@{domain}` using the first domain from configuration.
+- SES sandbox mode requires sender email verification. In production with verified domain, bounces will be sent to any address.
+- Bounce sender defaults to `mailer-daemon@{domain}` using the first domain from configuration.
 
 ## Monitoring and Alerting
 
@@ -855,9 +864,9 @@ echo "https://console.aws.amazon.com/cloudwatch/home?region=ap-southeast-2#dashb
 
 1. **Email Processing Overview** - Total emails accepted, spam detected, virus detected
 2. **Handler Success/Failure Rates** - Custom metrics showing success/failure counts for:
-   * Router enrichment operations
-   * Gmail forwarding operations
-   * Bounce sending operations
+   - Router enrichment operations
+   - Gmail forwarding operations
+   - Bounce sending operations
 3. **Lambda Function Errors** - Error counts for all lambda functions (processor, router, gmail forwarder, bouncer)
 4. **Lambda Function Invocations** - Invocation counts for all lambda functions
 5. **SQS Queue Depths** - Current message counts in input, gmail-forwarder, and bouncer queues
@@ -870,16 +879,19 @@ echo "https://console.aws.amazon.com/cloudwatch/home?region=ap-southeast-2#dashb
 The lambda functions publish custom CloudWatch metrics to the `SESMail/{environment}` namespace for tracking operation success/failure rates:
 
 **Router Enrichment Metrics:**
-* `RouterEnrichmentSuccess` - Count of successfully enriched messages
-* `RouterEnrichmentFailure` - Count of failed enrichments (using fallback routing)
+
+- `RouterEnrichmentSuccess` - Count of successfully enriched messages
+- `RouterEnrichmentFailure` - Count of failed enrichments (using fallback routing)
 
 **Gmail Forwarder Metrics:**
-* `GmailForwardSuccess` - Count of successful Gmail imports
-* `GmailForwardFailure` - Count of failed Gmail imports
+
+- `GmailForwardSuccess` - Count of successful Gmail imports
+- `GmailForwardFailure` - Count of failed Gmail imports
 
 **Bouncer Metrics:**
-* `BounceSendSuccess` - Count of successful bounce notifications sent
-* `BounceSendFailure` - Count of failed bounce notifications
+
+- `BounceSendSuccess` - Count of successful bounce notifications sent
+- `BounceSendFailure` - Count of failed bounce notifications
 
 **Querying Custom Metrics:**
 
@@ -908,29 +920,34 @@ AWS_PROFILE=ses-mail aws cloudwatch get-metric-statistics \
 The system includes CloudWatch alarms that trigger when operational thresholds are exceeded. All alarms publish to the SNS topic specified in `terraform.tfvars` for notifications.
 
 **Dead Letter Queue Alarms:**
-* `ses-email-input-dlq-messages-{environment}` - Input queue DLQ has messages
-* `ses-gmail-forwarder-dlq-messages-{environment}` - Gmail forwarder DLQ has messages
-* `ses-bouncer-dlq-messages-{environment}` - Bouncer DLQ has messages
+
+- `ses-email-input-dlq-messages-{environment}` - Input queue DLQ has messages
+- `ses-gmail-forwarder-dlq-messages-{environment}` - Gmail forwarder DLQ has messages
+- `ses-bouncer-dlq-messages-{environment}` - Bouncer DLQ has messages
 
 **Queue Age Alarms:**
-* `ses-email-input-queue-age-{environment}` - Messages aging >5 minutes in input queue
-* `ses-gmail-forwarder-queue-age-{environment}` - Messages aging >5 minutes in Gmail queue
-* `ses-bouncer-queue-age-{environment}` - Messages aging >5 minutes in bouncer queue
+
+- `ses-email-input-queue-age-{environment}` - Messages aging >5 minutes in input queue
+- `ses-gmail-forwarder-queue-age-{environment}` - Messages aging >5 minutes in Gmail queue
+- `ses-bouncer-queue-age-{environment}` - Messages aging >5 minutes in bouncer queue
 
 **Lambda Error Alarms:**
-* `ses-mail-lambda-errors-{environment}` - Email processor lambda has >5 errors in 5 minutes
-* `ses-mail-lambda-router-errors-{environment}` - Router enrichment lambda has >5 errors in 5 minutes
-* `ses-mail-lambda-gmail-forwarder-errors-{environment}` - Gmail forwarder lambda has >5 errors in 5 minutes
-* `ses-mail-lambda-bouncer-errors-{environment}` - Bouncer lambda has >5 errors in 5 minutes
+
+- `ses-mail-lambda-errors-{environment}` - Email processor lambda has >5 errors in 5 minutes
+- `ses-mail-lambda-router-errors-{environment}` - Router enrichment lambda has >5 errors in 5 minutes
+- `ses-mail-lambda-gmail-forwarder-errors-{environment}` - Gmail forwarder lambda has >5 errors in 5 minutes
+- `ses-mail-lambda-bouncer-errors-{environment}` - Bouncer lambda has >5 errors in 5 minutes
 
 **Email Processing Alarms:**
-* `ses-mail-high-email-volume-{environment}` - More than 100 emails in 5 minutes
-* `ses-mail-high-spam-rate-{environment}` - Spam rate >10% in 5 minutes
+
+- `ses-mail-high-email-volume-{environment}` - More than 100 emails in 5 minutes
+- `ses-mail-high-spam-rate-{environment}` - Spam rate >10% in 5 minutes
 
 **EventBridge Alarms:**
-* `eventbridge-pipes-failures-{environment}` - EventBridge Pipes enrichment failures
-* `eventbridge-gmail-failures-{environment}` - EventBridge failed to deliver to Gmail queue
-* `eventbridge-bouncer-failures-{environment}` - EventBridge failed to deliver to bouncer queue
+
+- `eventbridge-pipes-failures-{environment}` - EventBridge Pipes enrichment failures
+- `eventbridge-gmail-failures-{environment}` - EventBridge failed to deliver to Gmail queue
+- `eventbridge-bouncer-failures-{environment}` - EventBridge failed to deliver to bouncer queue
 
 **Viewing Alarm Status:**
 
@@ -950,11 +967,12 @@ AWS_PROFILE=ses-mail aws cloudwatch describe-alarms \
 The entire email processing pipeline is instrumented with AWS X-Ray for end-to-end request tracing:
 
 **Trace Components:**
-* SNS topic initiates traces with Active tracing mode
-* SQS queues propagate trace context through the pipeline
-* EventBridge Pipes maintains trace context during enrichment
-* Router lambda adds custom annotations (messageId, source, recipient, action)
-* Handler lambdas (Gmail forwarder, bouncer) continue the trace with operation-specific annotations
+
+- SNS topic initiates traces with Active tracing mode
+- SQS queues propagate trace context through the pipeline
+- EventBridge Pipes maintains trace context during enrichment
+- Router lambda adds custom annotations (messageId, source, recipient, action)
+- Handler lambdas (Gmail forwarder, bouncer) continue the trace with operation-specific annotations
 
 **Viewing Traces:**
 
@@ -969,35 +987,39 @@ The entire email processing pipeline is instrumented with AWS X-Ray for end-to-e
 **X-Ray Annotations:**
 
 Router enrichment lambda annotations:
-* `messageId` - SES message ID
-* `source` - Email sender address
-* `recipient` - Email recipient address
-* `action` - Routing action (forward-to-gmail or bounce)
+
+- `messageId` - SES message ID
+- `source` - Email sender address
+- `recipient` - Email recipient address
+- `action` - Routing action (forward-to-gmail or bounce)
 
 Gmail forwarder lambda annotations:
-* `action` - forward-to-gmail
-* `recipient` - Original recipient address
-* `target` - Gmail target address
-* `gmail_message_id` - Gmail message ID after import
-* `import_status` - success or error
+
+- `action` - forward-to-gmail
+- `recipient` - Original recipient address
+- `target` - Gmail target address
+- `gmail_message_id` - Gmail message ID after import
+- `import_status` - success or error
 
 Bouncer lambda annotations:
-* `messageId` - SES message ID
-* `source` - Email sender address
-* `environment` - Environment name (test/prod)
-* `action` - bounce
+
+- `messageId` - SES message ID
+- `source` - Email sender address
+- `environment` - Environment name (test/prod)
+- `action` - bounce
 
 ### CloudWatch Logs
 
 All lambda functions log to CloudWatch Logs with 30-day retention:
 
 **Log Groups:**
-* `/aws/lambda/ses-mail-email-processor-{environment}` - Email processor logs
-* `/aws/lambda/ses-mail-router-enrichment-{environment}` - Router enrichment logs
-* `/aws/lambda/ses-mail-gmail-forwarder-{environment}` - Gmail forwarder logs
-* `/aws/lambda/ses-mail-bouncer-{environment}` - Bouncer logs
-* `/aws/events/ses-email-routing-{environment}` - EventBridge Event Bus logs
-* `/aws/vendedlogs/pipes/{environment}/ses-email-router` - EventBridge Pipes logs
+
+- `/aws/lambda/ses-mail-email-processor-{environment}` - Email processor logs
+- `/aws/lambda/ses-mail-router-enrichment-{environment}` - Router enrichment logs
+- `/aws/lambda/ses-mail-gmail-forwarder-{environment}` - Gmail forwarder logs
+- `/aws/lambda/ses-mail-bouncer-{environment}` - Bouncer logs
+- `/aws/events/ses-email-routing-{environment}` - EventBridge Event Bus logs
+- `/aws/vendedlogs/pipes/{environment}/ses-email-router` - EventBridge Pipes logs
 
 **Viewing Logs:**
 
@@ -1180,7 +1202,7 @@ The integration tests validate:
 
 The integration test script provides detailed output during execution:
 
-```
+```plain
 ==============================================================
 Test: Forward to Gmail
 ==============================================================
@@ -1258,24 +1280,28 @@ Example test configuration file (`scripts/test_config.json`):
 ### Troubleshooting Test Failures
 
 **Test fails with "Message not found in input queue":**
+
 - Check SES receipt rule is active and publishing to SNS
 - Verify SNS topic subscription to SQS input queue
 - Check CloudWatch Logs for SES receipt errors
 - Verify sender email is verified in SES (sandbox mode)
 
 **Test fails with "Router logs not found":**
+
 - Check EventBridge Pipes is active and invoking router lambda
 - Verify router lambda has permissions to read DynamoDB
 - Check router lambda CloudWatch Logs for errors
 - Verify DynamoDB routing table exists and is accessible
 
 **Test fails with "Message not found in handler queue":**
+
 - Check EventBridge Event Bus rules are active
 - Verify event pattern matching in EventBridge rules
 - Check router enrichment added correct routing decision
 - Verify EventBridge has permissions to send to SQS queues
 
 **Test fails with "X-Ray trace not found":**
+
 - Wait longer (X-Ray traces can take 60-90 seconds)
 - Check SNS topic has Active tracing enabled
 - Verify all lambda functions have X-Ray tracing enabled
@@ -1283,6 +1309,7 @@ Example test configuration file (`scripts/test_config.json`):
 - Verify EventBridge Pipes propagates trace context
 
 **Messages found in dead letter queues:**
+
 - Check handler lambda CloudWatch Logs for errors
 - Verify Gmail OAuth token is valid and not expired
 - For bouncer: verify SES sending permissions and bounce sender email
@@ -1304,6 +1331,7 @@ Example test configuration file (`scripts/test_config.json`):
 For additional test scenarios not covered by the basic integration tests:
 
 **Plus Addressing Normalization:**
+
 ```bash
 # Manually create routing rule for normalized address
 AWS_PROFILE=ses-mail aws dynamodb put-item \
@@ -1326,6 +1354,7 @@ AWS_PROFILE=ses-mail aws dynamodb put-item \
 ```
 
 **Domain Wildcard Matching:**
+
 ```bash
 # Create domain wildcard rule
 AWS_PROFILE=ses-mail aws dynamodb put-item \
@@ -1348,6 +1377,7 @@ AWS_PROFILE=ses-mail aws dynamodb put-item \
 ```
 
 **Global Wildcard (Default Rule):**
+
 ```bash
 # Create global wildcard rule
 AWS_PROFILE=ses-mail aws dynamodb put-item \
@@ -1367,6 +1397,7 @@ AWS_PROFILE=ses-mail aws dynamodb put-item \
 ```
 
 **Error Scenario Testing:**
+
 ```bash
 # Test DynamoDB unavailable (temporarily remove permissions)
 # Expected: Router should use fallback routing (bounce)

@@ -1,8 +1,11 @@
 {
     "cSpell.words": [
+        "aging",
         "amazonses",
         "appregistry",
+        "AWSX",
         "boto",
+        "cleanup",
         "creds",
         "DMARC",
         "domainkey",
@@ -20,12 +23,14 @@
         "resp",
         "rrod",
         "runbook",
+        "runbooks",
         "servicecatalogappregistry",
         "testmail",
         "tfstate",
         "tfvars",
         "TLSRP",
         "tlsrpt",
+        "vendedlogs",
         "venv"
     ]
 }
