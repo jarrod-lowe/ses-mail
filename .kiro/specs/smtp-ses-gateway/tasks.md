@@ -45,7 +45,13 @@ A task is not complete until:
     - Log all operations with correlation IDs for traceability
     - _Requirements: 4.2, 4.5, 9.1, 9.3, 9.4_
 
-  - [ ] 3.4 Remove IAM user and credentials when the record is deleted
+  - [x] 3.4 Remove IAM user and credentials when the record is deleted
+    - Handle REMOVE events from DynamoDB Streams
+    - List and delete all IAM access keys for the user
+    - List and delete all inline IAM policies
+    - Delete the IAM user
+    - Publish CloudWatch metrics for deletion operations
+    - Implement idempotent cleanup (handle already-deleted users gracefully)
 
 - [ ] 4. Implement error handling and DLQ processing
   - [ ] 4.1 Configure SQS Dead Letter Queue for credential manager

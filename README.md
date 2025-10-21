@@ -431,7 +431,7 @@ The stream captures INSERT and MODIFY events for records with `PK="SMTP_USER"`. 
 3. Log all operations with correlation IDs for traceability
 4. Track success/failure metrics in CloudWatch
 
-**Current Implementation Status (Tasks 3.1-3.3 Complete):**
+**Current Implementation Status (Tasks 3.1-3.4 Complete):**
 
 - ✅ Core credential creation logic with X-Ray tracing
 - ✅ Structured JSON logging with correlation IDs
@@ -442,6 +442,7 @@ The stream captures INSERT and MODIFY events for records with `PK="SMTP_USER"`. 
 - ✅ SMTP password conversion using AWS algorithm (Version 4)
 - ✅ KMS encryption of credentials with customer managed key
 - ✅ Credential storage in DynamoDB with status="active"
+- ✅ Automatic IAM resource cleanup on record deletion
 - ⏳ Error handling and DLQ processing (Task 4)
 
 This event-driven approach eliminates the need for manual credential creation and ensures secure, automated provisioning of SMTP access.
@@ -463,6 +464,19 @@ A dedicated customer managed KMS key is created for encrypting SMTP credentials:
 - **Encryption**: Credentials stored as encrypted base64-encoded JSON containing `access_key_id` and `smtp_password`
 - **Rotation**: Key rotation enabled (automatic annual rotation)
 - **Access**: Lambda execution role has `kms:Encrypt`, `kms:Decrypt`, `kms:GenerateDataKey`, `kms:DescribeKey` permissions
+
+**Automatic Resource Cleanup:**
+
+When SMTP credential records are deleted from DynamoDB, the system automatically cleans up all associated IAM resources:
+
+1. **DynamoDB Stream REMOVE Event Detection**: Lambda detects record deletion via DynamoDB Streams
+2. **Access Key Deletion**: Lists and deletes all IAM access keys for the user
+3. **Policy Deletion**: Lists and deletes all inline IAM policies attached to the user
+4. **IAM User Deletion**: Removes the IAM user completely
+5. **CloudWatch Metrics**: Publishes deletion success/failure metrics for monitoring
+6. **Idempotent Operation**: Gracefully handles cases where IAM user was already deleted
+
+This ensures no orphaned IAM resources remain after credential deletion, maintaining security and preventing resource clutter.
 
 **Managing Routing Rules:**
 

@@ -524,6 +524,7 @@ data "aws_iam_policy_document" "lambda_credential_manager_iam_access" {
       "iam:PutUserPolicy",
       "iam:DeleteUserPolicy",
       "iam:GetUserPolicy",
+      "iam:ListUserPolicies",
       "iam:TagUser"
     ]
     resources = [
@@ -573,7 +574,7 @@ data "aws_iam_policy_document" "lambda_credential_manager_cloudwatch_metrics" {
     condition {
       test     = "StringEquals"
       variable = "cloudwatch:namespace"
-      values   = ["SESMail/${var.environment}"]
+      values   = ["SESMail/${var.environment}", "SESMail/SMTPCredentials"]
     }
   }
 }

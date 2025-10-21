@@ -283,14 +283,28 @@ resource "aws_lambda_event_source_mapping" "smtp_credential_manager" {
   # Enable function response types for partial batch failures
   function_response_types = ["ReportBatchItemFailures"]
 
-  # Filter to only process SMTP_USER records with status="pending"
+  # Filter to only process SMTP_USER records
   filter_criteria {
     filter {
-      # Only process INSERT and MODIFY events for SMTP_USER records
+      # Process INSERT, MODIFY, and REMOVE events for SMTP_USER records
+      # Note: REMOVE events use OldImage instead of NewImage
       pattern = jsonencode({
-        eventName : ["INSERT", "MODIFY"],
+        eventName : ["INSERT", "MODIFY", "REMOVE"],
         dynamodb : {
           NewImage : {
+            PK : {
+              S : ["SMTP_USER"]
+            }
+          }
+        }
+      })
+    }
+    filter {
+      # Also capture REMOVE events (which only have OldImage)
+      pattern = jsonencode({
+        eventName : ["REMOVE"],
+        dynamodb : {
+          OldImage : {
             PK : {
               S : ["SMTP_USER"]
             }

@@ -152,10 +152,10 @@ def process_stream_record(record: Dict[str, Any], correlation_id: str) -> Dict[s
             "event_id": record.get('eventID')
         }))
 
-        # Only process INSERT and MODIFY events
-        if event_name not in ['INSERT', 'MODIFY']:
+        # Only process INSERT, MODIFY, and REMOVE events
+        if event_name not in ['INSERT', 'MODIFY', 'REMOVE']:
             logger.info(json.dumps({
-                "message": "Skipping non-INSERT/MODIFY event",
+                "message": "Skipping unsupported event type",
                 "correlation_id": correlation_id,
                 "event_name": event_name
             }))
@@ -168,6 +168,108 @@ def process_stream_record(record: Dict[str, Any], correlation_id: str) -> Dict[s
                 "correlation_id": correlation_id
             }
 
+        # Handle REMOVE events (record deletion) - cleanup IAM resources
+        if event_name == 'REMOVE':
+            # For REMOVE events, use OldImage (record data before deletion)
+            old_image = record.get('dynamodb', {}).get('OldImage')
+            if not old_image:
+                logger.warning(json.dumps({
+                    "message": "No OldImage in REMOVE event",
+                    "correlation_id": correlation_id
+                }))
+                subsegment.put_annotation('skipped', True)
+                xray_recorder.end_subsegment()
+                return {
+                    "success": True,
+                    "skipped": True,
+                    "reason": "No OldImage in REMOVE record",
+                    "correlation_id": correlation_id
+                }
+
+            # Check if this is an SMTP_USER record
+            pk = old_image.get('PK', {}).get('S', '')
+            sk = old_image.get('SK', {}).get('S', '')
+
+            if pk != 'SMTP_USER':
+                logger.debug(json.dumps({
+                    "message": "Skipping non-SMTP_USER REMOVE event",
+                    "correlation_id": correlation_id,
+                    "pk": pk
+                }))
+                subsegment.put_annotation('skipped', True)
+                xray_recorder.end_subsegment()
+                return {
+                    "success": True,
+                    "skipped": True,
+                    "reason": f"Not an SMTP_USER record (PK={pk})",
+                    "correlation_id": correlation_id
+                }
+
+            # Extract username from SK (format: USER#{username})
+            if not sk.startswith('USER#'):
+                logger.error(json.dumps({
+                    "message": "Invalid SK format for SMTP_USER REMOVE event",
+                    "correlation_id": correlation_id,
+                    "sk": sk
+                }))
+                subsegment.put_annotation('error', True)
+                xray_recorder.end_subsegment()
+                return {
+                    "success": False,
+                    "error": f"Invalid SK format: {sk}",
+                    "correlation_id": correlation_id
+                }
+
+            username = sk.replace('USER#', '', 1)
+            subsegment.put_annotation('username', username)
+
+            # Get IAM user ARN from the deleted record
+            iam_user_arn = old_image.get('iam_user_arn', {}).get('S', '')
+            if not iam_user_arn:
+                logger.warning(json.dumps({
+                    "message": "No iam_user_arn in deleted record - IAM user may not have been created",
+                    "correlation_id": correlation_id,
+                    "username": username,
+                    "sk": sk
+                }))
+                subsegment.put_annotation('skipped', True)
+                xray_recorder.end_subsegment()
+                return {
+                    "success": True,
+                    "skipped": True,
+                    "reason": "No IAM user ARN - nothing to delete",
+                    "correlation_id": correlation_id
+                }
+
+            logger.info(json.dumps({
+                "message": "Processing SMTP credential deletion",
+                "correlation_id": correlation_id,
+                "username": username,
+                "iam_user_arn": iam_user_arn,
+                "pk": pk,
+                "sk": sk
+            }))
+
+            # Delete IAM user and associated credentials
+            deletion_result = delete_iam_user_and_credentials(
+                iam_user_arn=iam_user_arn,
+                username=username,
+                correlation_id=correlation_id
+            )
+
+            if deletion_result.get('success'):
+                logger.info(json.dumps({
+                    "message": "Successfully processed REMOVE event",
+                    "correlation_id": correlation_id,
+                    "username": username,
+                    "deletion_result": deletion_result
+                }))
+
+            subsegment.put_annotation('removed', True)
+            xray_recorder.end_subsegment()
+            return deletion_result
+
+        # Handle INSERT and MODIFY events (credential creation)
         # Get the new image from the stream record
         new_image = record.get('dynamodb', {}).get('NewImage')
         if not new_image:
@@ -592,6 +694,304 @@ def create_iam_user_and_credentials(
         subsegment.put_annotation('error', True)
         logger.error(json.dumps({
             "message": "Unexpected error in create_iam_user_and_credentials",
+            "correlation_id": correlation_id,
+            "error": str(e),
+            "error_type": type(e).__name__
+        }), exc_info=True)
+        xray_recorder.end_subsegment()
+        return {
+            "success": False,
+            "error": str(e),
+            "correlation_id": correlation_id
+        }
+
+
+def delete_iam_user_and_credentials(
+    iam_user_arn: str,
+    username: str,
+    correlation_id: str
+) -> Dict[str, Any]:
+    """
+    Delete IAM user and all associated credentials when SMTP record is deleted.
+
+    This function performs complete cleanup of IAM resources:
+    1. Lists and deletes all access keys
+    2. Lists and deletes all inline policies
+    3. Deletes the IAM user
+
+    Args:
+        iam_user_arn: ARN of the IAM user to delete
+        username: DynamoDB username (for logging)
+        correlation_id: Correlation ID for tracing
+
+    Returns:
+        dict: Result with success status and cleanup details
+    """
+    subsegment = xray_recorder.begin_subsegment('delete_iam_user_and_credentials')
+    if subsegment is None:
+        raise RuntimeError("Failed to create X-Ray subsegment for IAM user deletion")
+
+    try:
+        subsegment.put_annotation('correlation_id', correlation_id)
+        subsegment.put_annotation('username', username)
+
+        # Extract IAM username from ARN (format: arn:aws:iam::account:user/username)
+        iam_user_name = iam_user_arn.split('/')[-1]
+        subsegment.put_annotation('iam_user_name', iam_user_name)
+
+        logger.info(json.dumps({
+            "message": "Starting IAM user cleanup",
+            "correlation_id": correlation_id,
+            "username": username,
+            "iam_user_name": iam_user_name,
+            "iam_user_arn": iam_user_arn
+        }))
+
+        cleanup_errors = []
+        deleted_access_keys = []
+        deleted_policies = []
+
+        # Step 1: List and delete all access keys
+        try:
+            logger.info(json.dumps({
+                "message": "Listing access keys for deletion",
+                "correlation_id": correlation_id,
+                "iam_user_name": iam_user_name
+            }))
+
+            response = iam.list_access_keys(UserName=iam_user_name)
+            access_keys = response.get('AccessKeyMetadata', [])
+
+            logger.info(json.dumps({
+                "message": "Found access keys to delete",
+                "correlation_id": correlation_id,
+                "iam_user_name": iam_user_name,
+                "access_key_count": len(access_keys)
+            }))
+
+            for key_metadata in access_keys:
+                access_key_id = key_metadata['AccessKeyId']
+                try:
+                    iam.delete_access_key(UserName=iam_user_name, AccessKeyId=access_key_id)
+                    deleted_access_keys.append(access_key_id)
+                    logger.info(json.dumps({
+                        "message": "Deleted access key",
+                        "correlation_id": correlation_id,
+                        "iam_user_name": iam_user_name,
+                        "access_key_id": access_key_id
+                    }))
+                except ClientError as e:
+                    error_code = e.response.get('Error', {}).get('Code')
+                    error_msg = f"Failed to delete access key {access_key_id}: {error_code}"
+                    cleanup_errors.append(error_msg)
+                    logger.warning(json.dumps({
+                        "message": "Failed to delete access key",
+                        "correlation_id": correlation_id,
+                        "iam_user_name": iam_user_name,
+                        "access_key_id": access_key_id,
+                        "error_code": error_code,
+                        "error": str(e)
+                    }))
+
+        except ClientError as e:
+            error_code = e.response.get('Error', {}).get('Code')
+            if error_code == 'NoSuchEntity':
+                logger.info(json.dumps({
+                    "message": "IAM user does not exist (already deleted)",
+                    "correlation_id": correlation_id,
+                    "iam_user_name": iam_user_name
+                }))
+                subsegment.put_annotation('already_deleted', True)
+                xray_recorder.end_subsegment()
+                return {
+                    "success": True,
+                    "already_deleted": True,
+                    "correlation_id": correlation_id,
+                    "username": username,
+                    "iam_user_name": iam_user_name
+                }
+            else:
+                cleanup_errors.append(f"Failed to list access keys: {error_code}")
+                logger.error(json.dumps({
+                    "message": "Failed to list access keys",
+                    "correlation_id": correlation_id,
+                    "iam_user_name": iam_user_name,
+                    "error_code": error_code,
+                    "error": str(e)
+                }))
+
+        # Step 2: List and delete all inline policies
+        try:
+            logger.info(json.dumps({
+                "message": "Listing inline policies for deletion",
+                "correlation_id": correlation_id,
+                "iam_user_name": iam_user_name
+            }))
+
+            response = iam.list_user_policies(UserName=iam_user_name)
+            policy_names = response.get('PolicyNames', [])
+
+            logger.info(json.dumps({
+                "message": "Found inline policies to delete",
+                "correlation_id": correlation_id,
+                "iam_user_name": iam_user_name,
+                "policy_count": len(policy_names)
+            }))
+
+            for policy_name in policy_names:
+                try:
+                    iam.delete_user_policy(UserName=iam_user_name, PolicyName=policy_name)
+                    deleted_policies.append(policy_name)
+                    logger.info(json.dumps({
+                        "message": "Deleted inline policy",
+                        "correlation_id": correlation_id,
+                        "iam_user_name": iam_user_name,
+                        "policy_name": policy_name
+                    }))
+                except ClientError as e:
+                    error_code = e.response.get('Error', {}).get('Code')
+                    error_msg = f"Failed to delete policy {policy_name}: {error_code}"
+                    cleanup_errors.append(error_msg)
+                    logger.warning(json.dumps({
+                        "message": "Failed to delete inline policy",
+                        "correlation_id": correlation_id,
+                        "iam_user_name": iam_user_name,
+                        "policy_name": policy_name,
+                        "error_code": error_code,
+                        "error": str(e)
+                    }))
+
+        except ClientError as e:
+            error_code = e.response.get('Error', {}).get('Code')
+            if error_code != 'NoSuchEntity':
+                cleanup_errors.append(f"Failed to list policies: {error_code}")
+                logger.error(json.dumps({
+                    "message": "Failed to list inline policies",
+                    "correlation_id": correlation_id,
+                    "iam_user_name": iam_user_name,
+                    "error_code": error_code,
+                    "error": str(e)
+                }))
+
+        # Step 3: Delete the IAM user
+        try:
+            logger.info(json.dumps({
+                "message": "Deleting IAM user",
+                "correlation_id": correlation_id,
+                "iam_user_name": iam_user_name
+            }))
+
+            iam.delete_user(UserName=iam_user_name)
+
+            logger.info(json.dumps({
+                "message": "Successfully deleted IAM user",
+                "correlation_id": correlation_id,
+                "iam_user_name": iam_user_name,
+                "deleted_access_keys": deleted_access_keys,
+                "deleted_policies": deleted_policies
+            }))
+
+            # Publish success metric to CloudWatch
+            try:
+                cloudwatch.put_metric_data(
+                    Namespace='SESMail/SMTPCredentials',
+                    MetricData=[
+                        {
+                            'MetricName': 'CredentialDeletion',
+                            'Value': 1,
+                            'Unit': 'Count',
+                            'Dimensions': [
+                                {'Name': 'Environment', 'Value': ENVIRONMENT},
+                                {'Name': 'Status', 'Value': 'Success'}
+                            ]
+                        }
+                    ]
+                )
+            except Exception as metric_error:
+                logger.warning(json.dumps({
+                    "message": "Failed to publish deletion success metric",
+                    "correlation_id": correlation_id,
+                    "error": str(metric_error)
+                }))
+
+            subsegment.put_annotation('user_deleted', True)
+            xray_recorder.end_subsegment()
+
+            return {
+                "success": True,
+                "correlation_id": correlation_id,
+                "username": username,
+                "iam_user_name": iam_user_name,
+                "deleted_access_keys": deleted_access_keys,
+                "deleted_policies": deleted_policies,
+                "cleanup_errors": cleanup_errors if cleanup_errors else None
+            }
+
+        except ClientError as e:
+            error_code = e.response.get('Error', {}).get('Code')
+            if error_code == 'NoSuchEntity':
+                logger.info(json.dumps({
+                    "message": "IAM user does not exist (already deleted)",
+                    "correlation_id": correlation_id,
+                    "iam_user_name": iam_user_name
+                }))
+                subsegment.put_annotation('already_deleted', True)
+                xray_recorder.end_subsegment()
+                return {
+                    "success": True,
+                    "already_deleted": True,
+                    "correlation_id": correlation_id,
+                    "username": username,
+                    "iam_user_name": iam_user_name
+                }
+            else:
+                logger.error(json.dumps({
+                    "message": "Failed to delete IAM user",
+                    "correlation_id": correlation_id,
+                    "iam_user_name": iam_user_name,
+                    "error_code": error_code,
+                    "error": str(e),
+                    "cleanup_errors": cleanup_errors
+                }), exc_info=True)
+
+                # Publish failure metric to CloudWatch
+                try:
+                    cloudwatch.put_metric_data(
+                        Namespace='SESMail/SMTPCredentials',
+                        MetricData=[
+                            {
+                                'MetricName': 'CredentialDeletion',
+                                'Value': 1,
+                                'Unit': 'Count',
+                                'Dimensions': [
+                                    {'Name': 'Environment', 'Value': ENVIRONMENT},
+                                    {'Name': 'Status', 'Value': 'Failure'}
+                                ]
+                            }
+                        ]
+                    )
+                except Exception as metric_error:
+                    logger.warning(json.dumps({
+                        "message": "Failed to publish deletion failure metric",
+                        "correlation_id": correlation_id,
+                        "error": str(metric_error)
+                    }))
+
+                subsegment.put_annotation('error', True)
+                xray_recorder.end_subsegment()
+                return {
+                    "success": False,
+                    "error": f"Failed to delete IAM user: {error_code}",
+                    "correlation_id": correlation_id,
+                    "username": username,
+                    "iam_user_name": iam_user_name,
+                    "cleanup_errors": cleanup_errors
+                }
+
+    except Exception as e:
+        subsegment.put_annotation('error', True)
+        logger.error(json.dumps({
+            "message": "Unexpected error in delete_iam_user_and_credentials",
             "correlation_id": correlation_id,
             "error": str(e),
             "error_type": type(e).__name__
@@ -1064,8 +1464,16 @@ def publish_metrics(success_count: int, failure_count: int) -> None:
                 Namespace=f'SESMail/{ENVIRONMENT}',
                 MetricData=metric_data
             )
-            logger.info(f"Published metrics: success={success_count}, failure={failure_count}")
+            logger.info(json.dumps({
+                "message": "Published metrics",
+                "success_count": success_count,
+                "failure_count": failure_count
+            }))
 
     except Exception as e:
         # Don't fail the lambda if metrics publishing fails
-        logger.error(f"Error publishing metrics: {str(e)}", exc_info=True)
+        logger.error(json.dumps({
+            "message": "Error publishing metrics",
+            "error": str(e),
+            "error_type": type(e).__name__
+        }), exc_info=True)
