@@ -1478,7 +1478,9 @@ backup_mx_records = [
 
 **Note**: Backup MX servers are for RECEIVING email only. They should NOT be added to the SPF record unless they also send email on behalf of your domain.
 
-The backup MX records will automatically appear in the `dns_configuration_summary` output alongside the primary SES MX record.
+The backup MX records will automatically:
+- Appear in the `dns_configuration_summary` output alongside the primary SES MX record
+- Be included in the MTA-STS policy file (if MTA-STS is enabled) to authorize them for TLS email delivery
 
 ### Troubleshooting SMTP Issues
 

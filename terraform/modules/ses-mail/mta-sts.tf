@@ -20,12 +20,20 @@ resource "aws_s3_bucket_public_access_block" "mta_sts" {
 
 # MTA-STS policy file content
 locals {
+  # Build list of all MX servers (primary SES + backups)
+  all_mx_servers = concat(
+    ["inbound-smtp.${var.aws_region}.amazonaws.com"],
+    [for mx in var.backup_mx_records : mx.hostname]
+  )
+
   mta_sts_policy = <<-EOT
-    version: STSv1
-    mode: ${var.mta_sts_mode}
-    mx: inbound-smtp.${var.aws_region}.amazonaws.com
-    max_age: 86400
-  EOT
+version: STSv1
+mode: ${var.mta_sts_mode}
+%{for mx in local.all_mx_servers~}
+mx: ${mx}
+%{endfor~}
+max_age: 86400
+EOT
 
   # Policy ID is a hash of the content to change when policy changes
   mta_sts_policy_id = substr(sha256(local.mta_sts_policy), 0, 8)
