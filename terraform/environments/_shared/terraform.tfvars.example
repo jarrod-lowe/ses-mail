@@ -1,0 +1,42 @@
+# AWS Configuration
+aws_region  = "ap-southeast-2"
+environment = "prod"
+
+# Email Domain Configuration
+domain = ["mail.example.com", "mail2.example.com"]
+
+# Email Retention
+email_retention_days = 90
+
+# Alarm Configuration
+alarm_sns_topic_arn            = "arn:aws:sns:ap-southeast-2:123456789012:AlarmTopic"
+alarm_email_count_threshold    = 100  # emails per 5 minutes
+alarm_rejection_rate_threshold = 50   # percentage
+
+# Email Security
+mta_sts_mode      = "testing"  # testing, enforce, or none
+dmarc_rua_prefix  = "dmarc"    # Email prefix for DMARC reports (default: dmarc)
+tlsrpt_rua_prefix = "tlsrpt"   # Email prefix for TLS reports (default: tlsrpt)
+
+# SPF Configuration
+# Authorize mail servers to send on behalf of your domain
+spf_a_records = [
+  # "mail-out.example.com",  # Authorize IPs from A records
+]
+spf_mx_records = [
+  # "mail.example.com",      # Authorize IPs from MX records (only if MX also sends)
+]
+spf_include_domains = [
+  # "_spf.google.com",           # Google Workspace
+  # "spf.protection.outlook.com" # Microsoft 365
+]
+spf_policy = "softfail"  # "softfail" (~all) for testing, "fail" (-all) for production
+
+# Backup MX Configuration
+# Additional MX servers for email receiving failover
+backup_mx_records = [
+  # {
+  #   hostname = "mail-backup.example.com"
+  #   priority = 20  # Higher number = lower preference (SES is priority 10)
+  # }
+]
