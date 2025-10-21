@@ -1178,6 +1178,334 @@ AWS_PROFILE=ses-mail aws ssm start-automation-execution \
 
 8. **Enable detailed monitoring**: For production environments, consider enabling detailed (1-minute) CloudWatch metrics for faster alerting
 
+## SMTP Credential Management
+
+The system provides automated SMTP credential management for outbound email sending through SES. This allows users to configure email clients (Gmail, Outlook, Thunderbird) to send emails through AWS SES SMTP.
+
+### How It Works
+
+The credential management system uses an event-driven architecture:
+
+1. **Manual DynamoDB Record Creation**: Administrator manually inserts SMTP credential record with `status="pending"`
+2. **DynamoDB Streams Trigger**: Stream detects new record and triggers credential manager Lambda
+3. **Automated IAM Provisioning**: Lambda creates IAM user, generates access keys, applies email restrictions
+4. **SMTP Password Conversion**: Secret access key is converted to SES SMTP password using AWS algorithm
+5. **KMS Encryption**: Credentials are encrypted with customer managed KMS key
+6. **DynamoDB Update**: Encrypted credentials stored in DynamoDB with `status="active"`
+
+### SMTP Endpoint Configuration
+
+Get your SES SMTP endpoint configuration from Terraform outputs:
+
+```bash
+# For test environment
+cd terraform/environments/test
+terraform output smtp_endpoint
+terraform output smtp_ports
+
+# Example output:
+# smtp_endpoint = "email-smtp.ap-southeast-2.amazonaws.com"
+# smtp_ports = {
+#   recommended = {
+#     port     = 587
+#     security = "STARTTLS"
+#     note     = "Recommended for most email clients"
+#   }
+# }
+```
+
+**SMTP Server Settings**:
+- **Host**: `email-smtp.{region}.amazonaws.com` (from terraform output)
+- **Port**: 587 (recommended - STARTTLS)
+- **Security**: STARTTLS
+- **Authentication**: Username/Password (SMTP credentials from DynamoDB)
+
+### Creating SMTP Credentials
+
+To create new SMTP credentials, manually insert a record into the DynamoDB table:
+
+```bash
+# Create SMTP credential record for a user
+AWS_PROFILE=ses-mail aws dynamodb put-item \
+  --table-name ses-email-routing-test \
+  --item '{
+    "PK": {"S": "SMTP_USER"},
+    "SK": {"S": "USER#john.doe"},
+    "status": {"S": "pending"},
+    "description": {"S": "John Doe email sending access"},
+    "allowed_from_addresses": {"L": [
+      {"S": "john.doe@example.com"},
+      {"S": "*@marketing.example.com"}
+    ]},
+    "entity_type": {"S": "smtp_credential"}
+  }'
+```
+
+**Required Fields**:
+- `PK`: Always `"SMTP_USER"` (partition key for SMTP credential records)
+- `SK`: `"USER#{username}"` (unique identifier, e.g., `USER#john.doe`)
+- `status`: `"pending"` (triggers Lambda processing)
+- `description`: Human-readable description of the credential
+- `allowed_from_addresses`: Array of email patterns the user can send from (e.g., `["user@domain.com", "*@domain.com"]`)
+- `entity_type`: `"smtp_credential"` (record type identifier)
+
+**Email Restriction Patterns**:
+- Exact address: `"john.doe@example.com"` (only this specific address)
+- Domain wildcard: `"*@marketing.example.com"` (any address at this domain)
+- Global wildcard: `"*"` (any address - use with caution)
+
+### Retrieving SMTP Credentials
+
+After the Lambda processes the record (usually within 1-2 seconds), retrieve the encrypted credentials:
+
+```bash
+# Get SMTP credential record
+AWS_PROFILE=ses-mail aws dynamodb get-item \
+  --table-name ses-email-routing-test \
+  --key '{"PK": {"S": "SMTP_USER"}, "SK": {"S": "USER#john.doe"}}' \
+  --output json
+
+# The response will include:
+# - status: "active" (processing complete)
+# - encrypted_password: Base64-encoded encrypted credentials
+# - iam_user_arn: ARN of created IAM user
+# - created_at: Timestamp of credential creation
+```
+
+**Important**: The `encrypted_password` field contains KMS-encrypted credentials as a base64-encoded JSON blob with `access_key_id` and `smtp_password`. Only authorized administrators with KMS decrypt permissions can decrypt these credentials.
+
+### Decrypting SMTP Credentials
+
+To decrypt and use the SMTP credentials:
+
+```bash
+# Step 1: Get the encrypted password from DynamoDB
+ENCRYPTED_PASSWORD=$(AWS_PROFILE=ses-mail aws dynamodb get-item \
+  --table-name ses-email-routing-test \
+  --key '{"PK": {"S": "SMTP_USER"}, "SK": {"S": "USER#john.doe"}}' \
+  --query 'Item.encrypted_password.S' \
+  --output text)
+
+# Step 2: Decrypt using KMS
+AWS_PROFILE=ses-mail aws kms decrypt \
+  --key-id alias/ses-mail-smtp-credentials-test \
+  --ciphertext-blob fileb://<(echo "$ENCRYPTED_PASSWORD" | base64 -d) \
+  --query 'Plaintext' \
+  --output text | base64 -d
+
+# Output will be JSON with access_key_id and smtp_password:
+# {"access_key_id": "AKIA...", "smtp_password": "BHdSG..."}
+```
+
+**Security Note**: Only decrypt credentials when needed and never store plaintext credentials. Distribute credentials securely to end users through secure channels.
+
+### Configuring Email Clients
+
+Once you have the SMTP credentials (username = `access_key_id`, password = `smtp_password`), configure your email client:
+
+#### Gmail Configuration
+
+1. **Gmail Settings** → **Accounts and Import** → **Send mail as** → **Add another email address**
+2. **Name**: Your name as it will appear in sent emails
+3. **Email address**: One of your `allowed_from_addresses` (e.g., `john.doe@example.com`)
+4. **Next** → **SMTP Server Settings**:
+   - SMTP Server: `email-smtp.ap-southeast-2.amazonaws.com` (from terraform output)
+   - Port: `587`
+   - Username: Your `access_key_id` from decrypted credentials
+   - Password: Your `smtp_password` from decrypted credentials
+   - Security: TLS (STARTTLS)
+5. **Add Account** → Verify email address if required
+
+#### Outlook Configuration
+
+1. **File** → **Add Account** → **Manual setup**
+2. **Account Type**: IMAP or POP (for receiving) + SMTP (for sending)
+3. **Outgoing Mail Server (SMTP)**:
+   - Server: `email-smtp.ap-southeast-2.amazonaws.com`
+   - Port: `587`
+   - Encryption: STARTTLS
+   - Authentication: Required
+   - Username: Your `access_key_id`
+   - Password: Your `smtp_password`
+
+#### Thunderbird Configuration
+
+1. **Tools** → **Account Settings** → **Outgoing Server (SMTP)** → **Add**
+2. **Server Name**: `email-smtp.ap-southeast-2.amazonaws.com`
+3. **Port**: `587`
+4. **Connection security**: STARTTLS
+5. **Authentication method**: Normal password
+6. **Username**: Your `access_key_id`
+7. **Password**: Your `smtp_password` (will be stored securely)
+
+### Monitoring SMTP Credential Usage
+
+Monitor credential creation and usage through CloudWatch:
+
+```bash
+# Check CloudWatch metrics for credential operations
+AWS_PROFILE=ses-mail aws cloudwatch get-metric-statistics \
+  --namespace "SESMail/test" \
+  --metric-name SMTPCredentialCreations \
+  --start-time $(date -u -v-1H +%Y-%m-%dT%H:%M:%S) \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+  --period 300 \
+  --statistics Sum
+
+# View credential manager Lambda logs
+AWS_PROFILE=ses-mail aws logs tail /aws/lambda/ses-mail-smtp-credential-manager-test --follow
+```
+
+### Disabling or Deleting SMTP Credentials
+
+**To temporarily disable credentials**:
+
+```bash
+# Update status to disabled (IAM user access keys will be deactivated)
+AWS_PROFILE=ses-mail aws dynamodb update-item \
+  --table-name ses-email-routing-test \
+  --key '{"PK": {"S": "SMTP_USER"}, "SK": {"S": "USER#john.doe"}}' \
+  --update-expression "SET #status = :disabled" \
+  --expression-attribute-names '{"#status": "status"}' \
+  --expression-attribute-values '{":disabled": {"S": "disabled"}}'
+```
+
+**To permanently delete credentials**:
+
+```bash
+# Delete record from DynamoDB (triggers automatic IAM cleanup)
+AWS_PROFILE=ses-mail aws dynamodb delete-item \
+  --table-name ses-email-routing-test \
+  --key '{"PK": {"S": "SMTP_USER"}, "SK": {"S": "USER#john.doe"}}'
+```
+
+When a credential record is deleted, the Lambda function automatically:
+1. Detects the REMOVE event via DynamoDB Streams
+2. Lists and deletes all IAM access keys for the user
+3. Lists and deletes all inline IAM policies
+4. Deletes the IAM user completely
+5. Publishes CloudWatch metrics for the deletion operation
+
+This ensures no orphaned IAM resources remain after credential deletion.
+
+### DNS SPF Record Configuration
+
+To authorize SES to send emails on behalf of your domain, add an SPF record to your DNS. The SPF record is included in the `dns_configuration_summary` output and also available as a separate `spf_record` output.
+
+```bash
+# Get SPF record recommendation from Terraform
+cd terraform/environments/test
+terraform output spf_record
+
+# Example output for testmail.domain.com:
+# {
+#   "testmail.domain.com" = {
+#     "name"    = "testmail.domain.com"
+#     "type"    = "TXT"
+#     "value"   = "v=spf1 include:amazonses.com ~all"
+#     "purpose" = "Authorize SES to send emails on behalf of testmail.domain.com"
+#     "note"    = "Soft fail (~all) - unauthorized senders marked as suspicious but accepted"
+#   }
+# }
+```
+
+**Configuring SPF Policy** (in `terraform.tfvars`):
+
+```hcl
+# SPF policy: "softfail" (~all) for testing, "fail" (-all) for production
+spf_policy = "softfail"  # Default - recommended during testing
+
+# For production, use hard fail after confirming SPF works correctly:
+# spf_policy = "fail"
+
+# Add specific mail server A records
+spf_a_records = [
+  "srv2.rrod.net",       # Authorize IP addresses from srv2.rrod.net A record
+  "mail-out.rrod.net"    # Authorize IP addresses from mail-out.rrod.net A record
+]
+
+# Add additional SPF includes for other email services
+spf_include_domains = [
+  "outbound.mailhop.org",           # Mail relay service
+  "_spf.google.com",                # Google Workspace
+  "spf.protection.outlook.com"      # Microsoft 365
+]
+```
+
+**SPF Mechanism Order**:
+The SPF record is built in this order:
+1. `v=spf1` - SPF version identifier
+2. `a:hostname` - A records (authorize IPs from these hostnames' A records)
+3. `mx:hostname` - MX records (authorize IPs from these hostnames' MX records - only use if the MX server also SENDS email)
+4. `include:amazonses.com` - SES (always included)
+5. `include:domain` - Additional includes (other email services)
+6. `-all` or `~all` - Policy for unauthorized senders
+
+**Important**: SPF is for authorizing who can SEND email on behalf of your domain. Don't add backup MX servers to SPF unless they also send email. Use the `backup_mx_records` configuration below for email receiving.
+
+**SPF Policy Explanation**:
+- `~all` (soft fail) - Default setting. Tells receiving servers "if the email doesn't match SPF, mark it as suspicious but still accept it"
+  - **Use for**: Testing, initial setup, or when you have other email services not included in SPF
+  - **Behavior**: Emails from unauthorized sources are typically delivered to spam/junk folders
+
+- `-all` (hard fail) - Strict setting. Tells receiving servers "if the email doesn't match SPF, reject it completely"
+  - **Use for**: Production environments after confirming all legitimate email sources are included
+  - **Behavior**: Emails from unauthorized sources are rejected and not delivered
+  - **Warning**: Test thoroughly before using - misconfigured SPF with `-all` can cause legitimate emails to be rejected
+
+**The SPF record is automatically included in `dns_configuration_summary`** and will appear in the consolidated DNS records list when you run `terraform output dns_configuration_summary`.
+
+### Backup MX Configuration
+
+To configure backup MX servers for email receiving (failover), add them to `terraform.tfvars`:
+
+```hcl
+# Backup MX records for email receiving (not SPF)
+backup_mx_records = [
+  {
+    hostname = "mail-in.rrod.net"
+    priority = 20  # Higher number = lower preference (SES is priority 10)
+  }
+]
+```
+
+**MX Priority Explained**:
+- Lower priority number = higher preference (tried first)
+- SES primary MX has priority 10
+- Backup MX should have priority > 10 (e.g., 20, 30, etc.)
+- Email servers try MX records in order of priority
+- If primary (SES) is unavailable, mail is delivered to backup
+
+**Note**: Backup MX servers are for RECEIVING email only. They should NOT be added to the SPF record unless they also send email on behalf of your domain.
+
+The backup MX records will automatically appear in the `dns_configuration_summary` output alongside the primary SES MX record.
+
+### Troubleshooting SMTP Issues
+
+**Authentication Failures**:
+- Verify SMTP credentials are correct (username = `access_key_id`, password = `smtp_password`)
+- Check IAM user status in DynamoDB (`status` should be `"active"`)
+- Verify IAM user exists and has active access keys
+- Check credential manager Lambda logs for creation errors
+
+**Email Sending Blocked**:
+- Verify sender address matches one of the `allowed_from_addresses` patterns
+- Check IAM policy attached to user restricts `ses:FromAddress` correctly
+- Verify SES is out of sandbox mode (or recipient is verified in sandbox)
+- Check CloudWatch Logs for SES rejection errors
+
+**DNS/Deliverability Issues**:
+- Verify SPF record is properly configured in DNS
+- Ensure DKIM records are added and verified in SES
+- Check DMARC policy is configured
+- Monitor bounce and complaint rates in CloudWatch
+
+**Lambda Processing Failures**:
+- Check DLQ for failed credential creation events (Task 4 implementation)
+- Review credential manager Lambda CloudWatch Logs
+- Verify KMS key permissions allow encryption/decryption
+- Check DynamoDB Streams are enabled and Lambda has read permissions
+
 ## Integration Testing
 
 The system includes comprehensive integration tests that validate the entire email processing pipeline end-to-end, from SES receipt through to final handler processing (Gmail forwarding or bouncing).

@@ -72,4 +72,9 @@ module "ses_mail" {
   mta_sts_mode                   = var.mta_sts_mode
   dmarc_rua_prefix               = var.dmarc_rua_prefix
   tlsrpt_rua_prefix              = var.tlsrpt_rua_prefix
+  spf_include_domains            = var.spf_include_domains
+  spf_a_records                  = var.spf_a_records
+  spf_mx_records                 = var.spf_mx_records
+  spf_policy                     = var.spf_policy
+  backup_mx_records              = var.backup_mx_records
 }

@@ -65,3 +65,41 @@ variable "tlsrpt_rua_prefix" {
   type        = string
   default     = "tlsrpt"
 }
+
+variable "spf_include_domains" {
+  description = "Additional domains to include in SPF record (e.g., _spf.google.com for Google Workspace). amazonses.com is always included."
+  type        = list(string)
+  default     = []
+}
+
+variable "spf_a_records" {
+  description = "Additional A record hostnames to authorize in SPF (e.g., mail.example.com). Use for specific mail servers."
+  type        = list(string)
+  default     = []
+}
+
+variable "spf_mx_records" {
+  description = "Additional MX record hostnames to authorize in SPF (e.g., mail-in.example.com). Use only if these servers SEND email on behalf of your domain."
+  type        = list(string)
+  default     = []
+}
+
+variable "spf_policy" {
+  description = "SPF policy for unauthorized senders: softfail (~all) for testing, fail (-all) for production"
+  type        = string
+  default     = "softfail"
+
+  validation {
+    condition     = contains(["softfail", "fail"], var.spf_policy)
+    error_message = "SPF policy must be either 'softfail' (~all) or 'fail' (-all)"
+  }
+}
+
+variable "backup_mx_records" {
+  description = "Backup MX records for email receiving. List of objects with hostname and priority (lower priority = higher preference)."
+  type = list(object({
+    hostname = string
+    priority = number
+  }))
+  default = []
+}

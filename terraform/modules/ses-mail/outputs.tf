@@ -128,6 +128,59 @@ output "eventbridge_bouncer_rule_arn" {
   value       = aws_cloudwatch_event_rule.bouncer.arn
 }
 
+# SMTP Configuration Outputs
+
+output "smtp_endpoint" {
+  description = "SES SMTP server endpoint for email client configuration"
+  value       = "email-smtp.${var.aws_region}.amazonaws.com"
+}
+
+output "smtp_ports" {
+  description = "Recommended SMTP ports and security settings"
+  value = {
+    recommended = {
+      port     = 587
+      security = "STARTTLS"
+      note     = "Recommended for most email clients (Gmail, Outlook, Thunderbird)"
+    }
+    alternative = {
+      port     = 465
+      security = "TLS Wrapper"
+      note     = "Alternative TLS connection method"
+    }
+    legacy = {
+      port     = 25
+      security = "STARTTLS"
+      note     = "Often blocked by ISPs, not recommended"
+    }
+  }
+}
+
+output "smtp_region" {
+  description = "AWS region for SES SMTP endpoint"
+  value       = var.aws_region
+}
+
+output "spf_record" {
+  description = "Recommended SPF record for each domain to authorize SES for outbound email"
+  value = {
+    for domain in var.domain : domain => {
+      name = domain
+      type = "TXT"
+      value = join(" ", concat(
+        ["v=spf1"],
+        [for a_record in var.spf_a_records : "a:${a_record}"],
+        [for mx_record in var.spf_mx_records : "mx:${mx_record}"],
+        ["include:amazonses.com"],
+        [for include in var.spf_include_domains : "include:${include}"],
+        [var.spf_policy == "fail" ? "-all" : "~all"]
+      ))
+      purpose = "Authorize SES to send emails on behalf of ${domain}"
+      note    = var.spf_policy == "fail" ? "Hard fail (-all) - unauthorized senders will be rejected" : "Soft fail (~all) - unauthorized senders marked as suspicious but accepted"
+    }
+  }
+}
+
 output "dns_configuration_summary" {
   description = "Summary of all DNS records to configure in Route53, grouped by domain"
   value = {
@@ -146,7 +199,31 @@ output "dns_configuration_summary" {
             type     = "MX"
             priority = 10
             value    = "inbound-smtp.${var.aws_region}.amazonaws.com"
-            purpose  = "Email receiving"
+            purpose  = "Primary email receiving (SES)"
+          },
+        ],
+        [
+          for mx in var.backup_mx_records : {
+            name     = domain
+            type     = "MX"
+            priority = mx.priority
+            value    = mx.hostname
+            purpose  = "Backup email receiving (priority ${mx.priority})"
+          }
+        ],
+        [
+          {
+            name = domain
+            type = "TXT"
+            value = join(" ", concat(
+              ["v=spf1"],
+              [for a_record in var.spf_a_records : "a:${a_record}"],
+              [for mx_record in var.spf_mx_records : "mx:${mx_record}"],
+              ["include:amazonses.com"],
+              [for include in var.spf_include_domains : "include:${include}"],
+              [var.spf_policy == "fail" ? "-all" : "~all"]
+            ))
+            purpose = "SPF - authorize SES to send emails (${var.spf_policy == "fail" ? "hard fail" : "soft fail"})"
           },
           {
             name    = "_dmarc.${domain}"

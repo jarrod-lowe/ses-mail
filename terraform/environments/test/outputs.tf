@@ -1,7 +1,33 @@
+# DNS and Domain Configuration
+
 output "dns_configuration_summary" {
   description = "DNS configuration instructions grouped by domain"
   value       = module.ses_mail.dns_configuration_summary
 }
+
+output "spf_record" {
+  description = "Recommended SPF record for each domain to authorize SES for outbound email"
+  value       = module.ses_mail.spf_record
+}
+
+# SMTP Configuration
+
+output "smtp_endpoint" {
+  description = "SES SMTP server endpoint for email client configuration"
+  value       = module.ses_mail.smtp_endpoint
+}
+
+output "smtp_ports" {
+  description = "Recommended SMTP ports and security settings"
+  value       = module.ses_mail.smtp_ports
+}
+
+output "smtp_region" {
+  description = "AWS region for SES SMTP endpoint"
+  value       = module.ses_mail.smtp_region
+}
+
+# Infrastructure Resources
 
 output "ses_receipt_rule_set" {
   description = "Name of the SES receipt rule set"
@@ -17,6 +43,8 @@ output "s3_bucket_name" {
   description = "Name of the S3 bucket for email storage"
   value       = module.ses_mail.s3_bucket_name
 }
+
+# AWS Resource Organization
 
 output "resource_group_name" {
   description = "Name of the AWS Resource Group for this environment"

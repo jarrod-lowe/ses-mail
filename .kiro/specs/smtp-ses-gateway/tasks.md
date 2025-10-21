@@ -9,11 +9,13 @@ A task is not complete until:
 - The task has been marked as done in this file
 - A `git commit` has been made
 
-- [ ] 1. Set up SES domain configuration and outputs
+- [x] 1. Set up SES domain configuration and outputs
   - Create Terraform configuration for SES domain identity
   - Configure SES DKIM signing for domains
   - Create Terraform outputs for required DNS records (domain verification, DKIM CNAMEs)
   - Create outputs for recommended SPF, DMARC, and MTA-STS records
+  - Create SMTP endpoint outputs for client configuration
+  - Add comprehensive SMTP credential management documentation to README
   - _Requirements: 1.1, 8.1, 8.2_
 
 - [x] 2. Configure DynamoDB Streams for existing table
