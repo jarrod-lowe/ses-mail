@@ -135,24 +135,34 @@ def process_bounce_request(message: Dict[str, Any], sqs_message_id: str):
         logger.info(f"Processing bounce - Message ID: {message_id}, From: {source}")
 
         # Add X-Ray annotations for searchability
-        subsegment.put_annotation('messageId', message_id)
-        subsegment.put_annotation('source', source)
-        subsegment.put_annotation('environment', ENVIRONMENT)
-        subsegment.put_annotation('action', 'bounce')
+        if subsegment:
+            subsegment.put_annotation('messageId', message_id)
+            subsegment.put_annotation('source', source)
+            subsegment.put_annotation('environment', ENVIRONMENT)
+            subsegment.put_annotation('action', 'bounce')
+
+            # Count bounce reasons for X-Ray analytics
+            bounce_reasons = {'security': 0, 'policy': 0}
+            for target_info in targets:
+                reason = target_info.get('reason', 'policy')
+                bounce_reasons[reason] += 1
+
+            subsegment.put_annotation('bounce_security_count', bounce_reasons['security'])
+            subsegment.put_annotation('bounce_policy_count', bounce_reasons['policy'])
 
         # Send bounce notification for each target recipient
         for target_info in targets:
             recipient = target_info.get('target')
+            bounce_reason = target_info.get('reason', 'policy')  # Default to policy if not specified
 
-            logger.info(f"Sending bounce for recipient: {recipient}")
+            logger.info(f"Sending bounce for recipient: {recipient}, reason: {bounce_reason}")
 
             send_bounce_notification(
                 recipient=recipient,
                 original_sender=source,
                 original_subject=subject,
                 original_timestamp=timestamp,
-                matched_rule='ROUTE#*',  # Rule info not in simplified structure
-                rule_description='Email bounced by routing system'
+                bounce_reason=bounce_reason
             )
 
             logger.info(f"Bounce sent successfully for recipient: {recipient}")
@@ -169,8 +179,7 @@ def send_bounce_notification(
     original_sender: str,
     original_subject: str,
     original_timestamp: str,
-    matched_rule: str,
-    rule_description: str
+    bounce_reason: str = 'policy'
 ):
     """
     Send a bounce notification email via SES.
@@ -180,11 +189,18 @@ def send_bounce_notification(
         original_sender: Original sender email address
         original_subject: Original email subject
         original_timestamp: Original email timestamp
-        matched_rule: Routing rule that triggered the bounce
-        rule_description: Human-readable description of the rule
+        bounce_reason: Reason for bounce ('security' or 'policy')
     """
     # Construct bounce message
     bounce_subject = f"Mail Delivery Failed: {original_subject}"
+
+    # Determine bounce reason text without revealing internal system details
+    if bounce_reason == 'security':
+        reason_text = "Your message was rejected due to security policies."
+        reason_html = "Your message was rejected due to security policies."
+    else:  # policy
+        reason_text = f"The recipient address ({recipient}) is not configured to receive mail."
+        reason_html = f"The recipient address (<strong>{recipient}</strong>) is not configured to receive mail."
 
     bounce_body_text = f"""
 This is an automatically generated Delivery Status Notification.
@@ -200,10 +216,7 @@ Original Message Details:
 - Timestamp: {original_timestamp}
 
 Reason:
-The recipient address ({recipient}) is not configured to receive mail.
-
-Routing Rule: {matched_rule}
-Rule Description: {rule_description}
+{reason_text}
 
 If you believe this is an error, please contact the system administrator.
 
@@ -230,10 +243,7 @@ This is an automated message. Please do not reply to this email.
     </ul>
 
     <h3>Reason:</h3>
-    <p>The recipient address (<strong>{recipient}</strong>) is not configured to receive mail.</p>
-
-    <p><strong>Routing Rule:</strong> {matched_rule}<br>
-    <strong>Rule Description:</strong> {rule_description}</p>
+    <p>{reason_html}</p>
 
     <p>If you believe this is an error, please contact the system administrator.</p>
 
@@ -268,7 +278,13 @@ This is an automated message. Please do not reply to this email.
             }
         )
 
-        logger.info(f"Bounce notification sent - MessageId: {response['MessageId']}")
+        bounce_message_id = response['MessageId']
+        logger.info(f"Bounce notification sent - MessageId: {bounce_message_id}")
+
+        # Add bounce message ID to X-Ray for traceability
+        subsegment = xray_recorder.current_subsegment()
+        if subsegment:
+            subsegment.put_annotation('bounce_message_id', bounce_message_id)
 
     except ClientError as e:
         error_code = e.response.get('Error', {}).get('Code')

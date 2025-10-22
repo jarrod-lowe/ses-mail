@@ -154,14 +154,20 @@ def process_sqs_record(record, service):
         if not message_id:
             raise ValueError("Missing originalMessageId in enriched message")
 
+        # Fetch raw email from S3 once before processing targets
+        raw_eml = fetch_raw_email_from_s3(message_id)
+        logger.info(f"Fetched {len(raw_eml)} bytes from S3")
+
         # Process each target (typically one, but could be multiple)
         results = []
         for target_info in targets:
             recipient = target_info.get('target')  # Original recipient email
             destination = target_info.get('destination')  # Gmail destination address
 
-            # Add X-Ray annotations
+            # Add X-Ray annotations for searchability and correlation
             if subsegment:
+                subsegment.put_annotation('messageId', message_id)
+                subsegment.put_annotation('source', source)
                 subsegment.put_annotation('action', 'forward-to-gmail')
                 subsegment.put_annotation('recipient', recipient)
                 subsegment.put_annotation('target', destination)
@@ -174,11 +180,6 @@ def process_sqs_record(record, service):
             logger.info(f"  Subject: {subject}")
             logger.info(f"  Target Gmail: {destination}")
 
-            # Fetch raw email from S3 (only once, reuse for all targets)
-            if not results:  # First target
-                raw_eml = fetch_raw_email_from_s3(message_id)
-                logger.info(f"  Fetched {len(raw_eml)} bytes from S3")
-
             # Import into Gmail with INBOX and UNREAD labels
             gmail_response = gmail_import(service, raw_eml, DEFAULT_LABEL_IDS)
 
@@ -187,7 +188,6 @@ def process_sqs_record(record, service):
             # Add Gmail response details to X-Ray subsegment
             if subsegment:
                 subsegment.put_annotation('gmail_message_id', gmail_response.get('id', 'unknown'))
-                subsegment.put_annotation('gmail_thread_id', gmail_response.get('threadId', 'unknown'))
                 subsegment.put_annotation('import_status', 'success')
 
             results.append({

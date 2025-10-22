@@ -188,6 +188,14 @@ def decide_action(ses_message: Dict[str, Any]) -> List[Tuple[str, Optional[Any]]
     if subsegment is None:
         raise RuntimeError("Failed to create X-Ray subsegment for enrichment")
 
+    # Extract and annotate messageId and source for X-Ray indexing
+    mail = ses_message.get('mail', {})
+    message_id = mail.get('messageId', 'unknown')
+    source = mail.get('source', 'unknown')
+
+    subsegment.put_annotation('messageId', message_id)
+    subsegment.put_annotation('source', source)
+
     bounce = check_spam(ses_message)
     results = []
     counts = {
@@ -198,10 +206,13 @@ def decide_action(ses_message: Dict[str, Any]) -> List[Tuple[str, Optional[Any]]
 
     for target in ses_message["receipt"]["recipients"]:
         if bounce:
-            results.append(('bounce', {"target": target}))
+            results.append(('bounce', {"target": target, "reason": "security"}))
         else:
             routing_decision, destination = get_routing_decision(target)
-            results.append((routing_decision, {"target": target, "destination": destination}))
+            if routing_decision == 'bounce':
+                results.append((routing_decision, {"target": target, "reason": "policy"}))
+            else:
+                results.append((routing_decision, {"target": target, "destination": destination}))
         counts[results[-1][0]] += 1
 
     subsegment.put_annotation('recipient_count', len(results))
