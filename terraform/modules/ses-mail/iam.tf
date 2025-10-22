@@ -183,6 +183,26 @@ resource "aws_iam_role_policy" "lambda_router_cloudwatch_metrics" {
   policy = data.aws_iam_policy_document.lambda_router_cloudwatch_metrics.json
 }
 
+# IAM policy document for router Lambda to publish events to EventBridge Event Bus
+data "aws_iam_policy_document" "lambda_router_eventbridge_access" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "events:PutEvents"
+    ]
+    resources = [
+      aws_cloudwatch_event_bus.email_routing.arn
+    ]
+  }
+}
+
+# IAM policy for router Lambda to publish to EventBridge Event Bus
+resource "aws_iam_role_policy" "lambda_router_eventbridge_access" {
+  name   = "lambda-router-eventbridge-access-${var.environment}"
+  role   = aws_iam_role.lambda_router_execution.id
+  policy = data.aws_iam_policy_document.lambda_router_eventbridge_access.json
+}
+
 # IAM role for tag-sync starter Lambda function
 resource "aws_iam_role" "lambda_tag_sync_execution" {
   name               = "ses-mail-lambda-tag-sync-${var.environment}"

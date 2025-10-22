@@ -224,6 +224,32 @@ resource "aws_cloudwatch_log_group" "lambda_smtp_credential_manager_logs" {
 }
 
 # ===========================
+# SNS Subscription for Router Enrichment Lambda
+# ===========================
+
+# SNS topic subscription for router enrichment lambda
+# This lambda subscribes directly to SNS to preserve X-Ray tracing context
+resource "aws_sns_topic_subscription" "router_enrichment" {
+  topic_arn = aws_sns_topic.email_processing.arn
+  protocol  = "lambda"
+  endpoint  = aws_lambda_function.router_enrichment.arn
+
+  depends_on = [
+    aws_lambda_function.router_enrichment,
+    aws_lambda_permission.router_enrichment_sns
+  ]
+}
+
+# Lambda permission to allow SNS to invoke router enrichment function
+resource "aws_lambda_permission" "router_enrichment_sns" {
+  statement_id  = "AllowExecutionFromSNS"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.router_enrichment.function_name
+  principal     = "sns.amazonaws.com"
+  source_arn    = aws_sns_topic.email_processing.arn
+}
+
+# ===========================
 # SQS Event Source Mappings
 # ===========================
 

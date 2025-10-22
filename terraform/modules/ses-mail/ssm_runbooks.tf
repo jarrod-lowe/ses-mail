@@ -34,8 +34,6 @@ data "aws_iam_policy_document" "ssm_automation_sqs" {
       "sqs:ChangeMessageVisibility"
     ]
     resources = [
-      aws_sqs_queue.input_queue.arn,
-      aws_sqs_queue.input_dlq.arn,
       aws_sqs_queue.gmail_forwarder.arn,
       aws_sqs_queue.gmail_forwarder_dlq.arn,
       aws_sqs_queue.bouncer.arn,
@@ -135,7 +133,6 @@ resource "aws_ssm_document" "dlq_redrive" {
         type        = "String"
         description = "Dead letter queue URL to redrive messages from"
         allowedValues = [
-          aws_sqs_queue.input_dlq.url,
           aws_sqs_queue.gmail_forwarder_dlq.url,
           aws_sqs_queue.bouncer_dlq.url
         ]
@@ -144,7 +141,6 @@ resource "aws_ssm_document" "dlq_redrive" {
         type        = "String"
         description = "Source queue URL to send messages back to"
         allowedValues = [
-          aws_sqs_queue.input_queue.url,
           aws_sqs_queue.gmail_forwarder.url,
           aws_sqs_queue.bouncer.url
         ]
@@ -321,49 +317,6 @@ resource "aws_ssm_document" "queue_health_check" {
 
     mainSteps = [
       {
-        name   = "CheckInputQueue"
-        action = "aws:executeAwsApi"
-        inputs = {
-          Service  = "sqs"
-          Api      = "GetQueueAttributes"
-          QueueUrl = aws_sqs_queue.input_queue.url
-          AttributeNames = [
-            "ApproximateNumberOfMessages",
-            "ApproximateAgeOfOldestMessage",
-            "ApproximateNumberOfMessagesNotVisible"
-          ]
-        }
-        outputs = [
-          {
-            Name     = "Messages"
-            Selector = "$.Attributes.ApproximateNumberOfMessages"
-            Type     = "String"
-          },
-          {
-            Name     = "OldestAge"
-            Selector = "$.Attributes.ApproximateAgeOfOldestMessage"
-            Type     = "String"
-          }
-        ]
-      },
-      {
-        name   = "CheckInputDLQ"
-        action = "aws:executeAwsApi"
-        inputs = {
-          Service        = "sqs"
-          Api            = "GetQueueAttributes"
-          QueueUrl       = aws_sqs_queue.input_dlq.url
-          AttributeNames = ["ApproximateNumberOfMessages"]
-        }
-        outputs = [
-          {
-            Name     = "DLQMessages"
-            Selector = "$.Attributes.ApproximateNumberOfMessages"
-            Type     = "String"
-          }
-        ]
-      },
-      {
         name   = "CheckGmailQueue"
         action = "aws:executeAwsApi"
         inputs = {
@@ -456,11 +409,6 @@ resource "aws_ssm_document" "queue_health_check" {
           Script  = <<-PYTHON
             def script_handler(events, context):
               report = {
-                'InputQueue': {
-                  'Messages': events['InputMessages'],
-                  'OldestAge': events['InputOldestAge'],
-                  'DLQMessages': events['InputDLQMessages']
-                },
                 'GmailQueue': {
                   'Messages': events['GmailMessages'],
                   'OldestAge': events['GmailOldestAge'],
@@ -475,14 +423,10 @@ resource "aws_ssm_document" "queue_health_check" {
 
               # Check for issues
               issues = []
-              if int(events['InputDLQMessages']) > 0:
-                issues.append('Input DLQ has messages')
               if int(events['GmailDLQMessages']) > 0:
                 issues.append('Gmail DLQ has messages')
               if int(events['BouncerDLQMessages']) > 0:
                 issues.append('Bouncer DLQ has messages')
-              if int(events['InputOldestAge']) > 300:
-                issues.append('Input queue has old messages (>5min)')
               if int(events['GmailOldestAge']) > 300:
                 issues.append('Gmail queue has old messages (>5min)')
               if int(events['BouncerOldestAge']) > 300:
@@ -494,9 +438,6 @@ resource "aws_ssm_document" "queue_health_check" {
               return report
           PYTHON
           InputPayload = {
-            InputMessages      = "{{ CheckInputQueue.Messages }}"
-            InputOldestAge     = "{{ CheckInputQueue.OldestAge }}"
-            InputDLQMessages   = "{{ CheckInputDLQ.DLQMessages }}"
             GmailMessages      = "{{ CheckGmailQueue.Messages }}"
             GmailOldestAge     = "{{ CheckGmailQueue.OldestAge }}"
             GmailDLQMessages   = "{{ CheckGmailDLQ.DLQMessages }}"

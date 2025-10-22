@@ -1,0 +1,179 @@
+{
+  "version": "0",
+  "id": "kkkkkkkk-llll-mmmm-nnnn-oooooooooooo",
+  "detail-type": "Email Routing Decision",
+  "source": "ses.email.router",
+  "account": "123456789012",
+  "time": "2025-10-22T06:26:37Z",
+  "region": "ap-southeast-2",
+  "resources": [],
+  "detail": {
+    "originalMessageId": "xyz987wvu654tsr321qpo098nml765kji432hgf109",
+    "ses": {
+      "notificationType": "Received",
+      "mail": {
+        "timestamp": "2025-10-22T06:26:36.048Z",
+        "source": "sender@example.com",
+        "messageId": "xyz987wvu654tsr321qpo098nml765kji432hgf109",
+        "destination": [
+          "bounce@mail.example.com"
+        ],
+        "headersTruncated": false,
+        "headers": [
+          {
+            "name": "Return-Path",
+            "value": "<sender@example.com>"
+          },
+          {
+            "name": "Received",
+            "value": "from mail-wr1-f52.google.com (mail-wr1-f52.google.com [192.0.2.1]) by inbound-smtp.ap-southeast-2.amazonaws.com with SMTP id xyz987wvu654tsr321qpo098nml765kji432hgf109 for bounce@mail.example.com; Wed, 22 Oct 2025 06:26:36 +0000 (UTC)"
+          },
+          {
+            "name": "X-SES-Spam-Verdict",
+            "value": "PASS"
+          },
+          {
+            "name": "X-SES-Virus-Verdict",
+            "value": "PASS"
+          },
+          {
+            "name": "Received-SPF",
+            "value": "pass (spfCheck: domain of example.com designates 192.0.2.1 as permitted sender) client-ip=192.0.2.1; envelope-from=sender@example.com; helo=mail-wr1-f52.google.com;"
+          },
+          {
+            "name": "Authentication-Results",
+            "value": "amazonses.com; spf=pass (spfCheck: domain of example.com designates 192.0.2.1 as permitted sender) client-ip=192.0.2.1; envelope-from=sender@example.com; helo=mail-wr1-f52.google.com; dkim=pass header.i=@example.com; dmarc=pass header.from=example.com;"
+          },
+          {
+            "name": "X-SES-RECEIPT",
+            "value": "AEFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQT09"
+          },
+          {
+            "name": "X-SES-DKIM-SIGNATURE",
+            "value": "a=rsa-sha256; q=dns/txt; b=VjgITtR01Qmvpes4ZehBETYX1Kt0OAQhptxwiAJO9bjf8rqXpR1q6VxaPHXLULNUmxpPFNCjRbqZfkxPD8l9mfxFCDiUj0gQ+Up6VZSL0K6PR4D2YDACQbTRtW0fWr5s+y/SkuRl4312//EpaNqdXi1S738EtU7vpWkmbaYSLFc=; c=relaxed/simple; s=o6ptibvfbllhpdhtxr7klizy2riobquz; d=amazonses.com; t=1761114396; v=1; bh=NUWKBWmQ57YcSIz1xt07PVpJtX4rKx5KwPkB6ASGLYs=; h=From:To:Cc:Bcc:Subject:Date:Message-ID:MIME-Version:Content-Type:X-SES-RECEIPT;"
+          },
+          {
+            "name": "Received",
+            "value": "by mail-wr1-f52.google.com with SMTP id abc123def456-1a2b3c4d5e6fso3666170f8f.0 for <bounce@mail.example.com>; Tue, 21 Oct 2025 23:26:35 -0700 (PDT)"
+          },
+          {
+            "name": "DKIM-Signature",
+            "value": "v=1; a=rsa-sha256; c=relaxed/relaxed; d=example.com; s=google; t=1761114392; x=1761719192; darn=mail.example.com; h=to:subject:message-id:date:from:mime-version:from:to:cc:subject:date:message-id:reply-to; bh=z4sG22q2z6Dv/1FPE3BwA/wg+97vDxSb50prROm9Brg=; b=uFd0qJbMAh1L/9r1oIOWLVFagEoZZpGFmKdO0RCOklm7o0KZUXg0pYUhd5vdldjdD8WupyXKm03tGkAtRB+6Rtm20QRsxLWkxsVCnMxMPCcBb8kEw2MGyELWwWo06miSkYQgdxJI1jdS/QZoxLS/rYJDu10B0RV4KOBeTvp3pwYL7N0tg9Fu63FJCedv+edg6jfd6Q5hBNKAcNbvANQ/iklD/EXZecmQNjV50FCGtpnZJFDIQnPIIQR1PQSjHacq7HOdMJ/ffnrQrtOOJolBSrQoGmPEc06DIYuuuB5BKqHx7y7tb8OAXRJVQEIS2Z+jVFpjd+ii+Jbcs+s3PgxBEg=="
+          },
+          {
+            "name": "X-Google-DKIM-Signature",
+            "value": "v=1; a=rsa-sha256; c=relaxed/relaxed; d=1e100.net; s=20230601; t=1761114392; x=1761719192; h=to:subject:message-id:date:from:mime-version:x-gm-message-state :from:to:cc:subject:date:message-id:reply-to; bh=z4sG22q2z6Dv/1FPE3BwA/wg+97vDxSb50prROm9Brg=; b=Boj/7S+XZCeFycO/2GEiVoUJm1iNFXhvU8vtO0a6nZLSx0WOnzS1k3oQTo1A6R70ez eZBMnUPg5iX4+et1gslTfK319nKPBmm8EJU6vkPNedYgb1x17/MQVEsBEZ1ng6sKMFS9 EmpTQyfzyiJyPddY969hUim7hRuMo52LZ3r8rigfUGZrZkcNEYd9NI6htdwz/Lkssttv vM+vC9aIv4bCD3sCGJHjh0wxDp+Q9Qt08SK58WEzEI86cEuIFEaGCxdUXNc/bptBQJwl 5qryvLgz04LeWC8jLu6Z5cBH10JchnrJpi6YjR7JyUmwPQKddKsJXAxvezhyMcSkB2QN AXmg=="
+          },
+          {
+            "name": "X-Gm-Message-State",
+            "value": "AOJu0YzABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+          },
+          {
+            "name": "X-Gm-Gg",
+            "value": "ASbGncABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890abcdefghijklmnopqrstuvwxyz"
+          },
+          {
+            "name": "X-Google-Smtp-Source",
+            "value": "AGHT+IFabcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTU="
+          },
+          {
+            "name": "X-Received",
+            "value": "by 2001:db8::1 with SMTP id abc123def456-1a2b3c4d5e6fmr13278004f8f.44.1761114392202; Tue, 21 Oct 2025 23:26:32 -0700 (PDT)"
+          },
+          {
+            "name": "MIME-Version",
+            "value": "1.0"
+          },
+          {
+            "name": "From",
+            "value": "Test User <sender@example.com>"
+          },
+          {
+            "name": "Date",
+            "value": "Wed, 22 Oct 2025 19:26:20 +1300"
+          },
+          {
+            "name": "X-Gm-Features",
+            "value": "AS18NWD1234567890abcdefghijklmnopqrstuvwxyz"
+          },
+          {
+            "name": "Message-ID",
+            "value": "<CAZyXwVuTsRqPoNmLkJiHgFeDcBaZyXwVuTsRqPoNmLkJiHgFeD@mail.gmail.com>"
+          },
+          {
+            "name": "Subject",
+            "value": "Test bounce"
+          },
+          {
+            "name": "To",
+            "value": "bounce@mail.example.com"
+          },
+          {
+            "name": "Content-Type",
+            "value": "multipart/alternative; boundary=\"000000000000c19dd00641b9656a\""
+          }
+        ],
+        "commonHeaders": {
+          "returnPath": "sender@example.com",
+          "from": [
+            "Test User <sender@example.com>"
+          ],
+          "date": "Wed, 22 Oct 2025 19:26:20 +1300",
+          "to": [
+            "bounce@mail.example.com"
+          ],
+          "messageId": "<CAZyXwVuTsRqPoNmLkJiHgFeDcBaZyXwVuTsRqPoNmLkJiHgFeD@mail.gmail.com>",
+          "subject": "Test bounce"
+        }
+      },
+      "receipt": {
+        "timestamp": "2025-10-22T06:26:36.048Z",
+        "processingTimeMillis": 642,
+        "recipients": [
+          "bounce@mail.example.com"
+        ],
+        "spamVerdict": {
+          "status": "PASS"
+        },
+        "virusVerdict": {
+          "status": "PASS"
+        },
+        "spfVerdict": {
+          "status": "PASS"
+        },
+        "dkimVerdict": {
+          "status": "PASS"
+        },
+        "dmarcVerdict": {
+          "status": "PASS"
+        },
+        "action": {
+          "type": "S3",
+          "topicArn": "arn:aws:sns:ap-southeast-2:123456789012:ses-email-processing-test",
+          "bucketName": "ses-mail-storage-123456789012-test",
+          "objectKeyPrefix": "emails/",
+          "objectKey": "emails/xyz987wvu654tsr321qpo098nml765kji432hgf109"
+        }
+      }
+    },
+    "actions": {
+      "store": {
+        "count": 0,
+        "targets": []
+      },
+      "forward-to-gmail": {
+        "count": 0,
+        "targets": []
+      },
+      "bounce": {
+        "count": 1,
+        "targets": [
+          {
+            "target": "bounce@mail.example.com",
+            "destination": ""
+          }
+        ]
+      }
+    }
+  }
+}

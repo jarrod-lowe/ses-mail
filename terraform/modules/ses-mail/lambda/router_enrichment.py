@@ -2,12 +2,13 @@
 SES Email Router Enrichment Lambda Function
 
 This Lambda function enriches SES email events with routing decisions by:
-1. Performing hierarchical DynamoDB lookups for routing rules
-2. Normalizing email addresses (removing +tag for plus addressing)
-3. Analysing DMARC and security headers from SES receipt
-4. Returning enriched messages for EventBridge Event Bus routing
+1. Receiving SES events from SNS topic
+2. Performing hierarchical DynamoDB lookups for routing rules
+3. Normalizing email addresses (removing +tag for plus addressing)
+4. Analysing DMARC and security headers from SES receipt
+5. Publishing enriched events to EventBridge Event Bus for handler dispatch
 
-Used by EventBridge Pipes as an enrichment function.
+Invoked by SNS topic subscription (preserves X-Ray tracing context).
 """
 
 from functools import lru_cache
@@ -26,10 +27,12 @@ logger.setLevel(logging.INFO)
 # Environment configuration
 DYNAMODB_TABLE_NAME = os.environ.get('DYNAMODB_TABLE_NAME')
 ENVIRONMENT = os.environ.get('ENVIRONMENT', 'unknown')
+EVENT_BUS_NAME = f"ses-email-routing-{ENVIRONMENT}"
 
 # Initialize AWS clients
 dynamodb = boto3.client('dynamodb')
 cloudwatch = boto3.client('cloudwatch')
+eventbridge = boto3.client('events')
 ssm = boto3.client('ssm')
 
 from aws_xray_sdk.core import xray_recorder
@@ -71,100 +74,121 @@ def lambda_handler(event, context):
     """
     Lambda handler for enriching SES email events with routing decisions.
 
-    This function is invoked by EventBridge Pipes as an enrichment step.
-    It receives SES events from SQS and returns enriched messages with
-    routing decisions for EventBridge Event Bus.
+    This function is invoked by SNS when SES receives an email.
+    It processes the SES event, determines routing actions, and publishes
+    enriched events to EventBridge Event Bus for handler dispatch.
 
     Args:
-        event: List of SES records from EventBridge Pipes
+        event: SNS event containing SES message
         context: Lambda context object
 
     Returns:
-        list: Enriched messages with routing decisions
+        dict: Success response
     """
-    logger.info(f"Received event for enrichment: {json.dumps(event)}")
+    logger.info(f"Received SNS event for enrichment: {json.dumps(event)}")
 
     if not DYNAMODB_TABLE_NAME:
         raise ValueError("DYNAMODB_TABLE_NAME environment variable must be set")
 
-    # EventBridge Pipes sends events as a list
-    # Each item is a record from SQS
-    enriched_results = []
     success_count = 0
     failure_count = 0
+    events_to_publish = []
 
-    for record in event:
-        # EventBridge Pipes expects just the Detail payload
-        # Pipes will add Source and DetailType based on target configuration
-
-        # Extract the actual SES message ID from the SQS body
-        try:
-            body = json.loads(record['body'])
-            ses_message_id = body.get('mail', {}).get('messageId', 'unknown')
-        except (json.JSONDecodeError, KeyError) as e:
-            logger.error(f"Failed to parse SES event body: {str(e)}", exc_info=True)
-            failure_count += 1
-            # Skip this record - we can't process an email without a valid body
+    # SNS sends events as Records array
+    for record in event.get('Records', []):
+        if record.get('EventSource') != 'aws:sns':
+            logger.warning(f"Skipping non-SNS record: {record.get('EventSource')}")
             continue
 
-        enriched_result = {
-            **record,
-            **{
-                "originalMessageId": ses_message_id,  # Use SES message ID, not SQS messageId
-                "actions": {
-                    "store": {
-                        "count": 0,
-                        "targets": [],
-                    },
-                    "forward-to-gmail": {
-                        "count": 0,
-                        "targets": [],
-                    },
-                    "bounce": {
-                        "count": 0,
-                        "targets": [],
-                    },
-                },
-            },
-        }
-        del(enriched_result["messageId"])
-        action = "store"
         try:
-            results = decide_action(record)
-            for action, dest in results:
-                enriched_result["actions"][action]["count"] += 1
+            # Extract SES message from SNS
+            sns_message = json.loads(record['Sns']['Message'])
+            ses_message_id = sns_message.get('mail', {}).get('messageId', 'unknown')
+
+            logger.info(f"Processing SES message: {ses_message_id}")
+
+            # Determine routing actions for all recipients
+            routing_results = decide_action(sns_message)
+
+            # Aggregate actions by type
+            actions = {
+                "store": {"count": 0, "targets": []},
+                "forward-to-gmail": {"count": 0, "targets": []},
+                "bounce": {"count": 0, "targets": []},
+            }
+
+            for action_type, dest in routing_results:
+                actions[action_type]["count"] += 1
                 if dest:
-                    enriched_result["actions"][action]["targets"].append(dest)
+                    actions[action_type]["targets"].append(dest)
+
+            # Create enriched event for EventBridge
+            enriched_event = {
+                'Source': 'ses.email.router',
+                'DetailType': 'Email Routing Decision',
+                'Detail': json.dumps({
+                    'originalMessageId': ses_message_id,
+                    'ses': sns_message,
+                    'actions': actions,
+                }),
+                'EventBusName': EVENT_BUS_NAME
+            }
+
+            events_to_publish.append(enriched_event)
             success_count += 1
+
         except Exception as e:
-            logger.error(f"Error enriching record: {str(e)}", exc_info=True)
-            # On enrichment failure, create a fallback enrichment with store action
-            enriched_result["actions"]["store"]["count"] += 1
+            logger.error(f"Error enriching SNS record: {str(e)}", exc_info=True)
             failure_count += 1
-        enriched_results.append(enriched_result)
+
+    # Publish enriched events to EventBridge Event Bus
+    if events_to_publish:
+        try:
+            response = eventbridge.put_events(Entries=events_to_publish)
+
+            # Check for failed entries
+            if response.get('FailedEntryCount', 0) > 0:
+                logger.error(f"Failed to publish {response['FailedEntryCount']} events to EventBridge")
+                for entry in response.get('Entries', []):
+                    if 'ErrorCode' in entry:
+                        logger.error(f"EventBridge error: {entry['ErrorCode']} - {entry.get('ErrorMessage', 'No message')}")
+                failure_count += response['FailedEntryCount']
+            else:
+                logger.info(f"Successfully published {len(events_to_publish)} events to EventBridge")
+
+        except Exception as e:
+            logger.error(f"Error publishing events to EventBridge: {str(e)}", exc_info=True)
+            failure_count += len(events_to_publish)
+            raise
 
     # Publish custom metrics for success/failure rates
     publish_metrics(success_count, failure_count)
 
-    logger.info(f"Returning {len(enriched_results)} enriched records (success: {success_count}, failures: {failure_count})")
-    return enriched_results
+    logger.info(f"Completed enrichment: success={success_count}, failures={failure_count}")
+
+    return {
+        'statusCode': 200,
+        'body': json.dumps({
+            'success': success_count,
+            'failures': failure_count
+        })
+    }
 
 
-def decide_action(record: Dict[str, Any]) -> List[Tuple[str, Optional[Any]]]:
+def decide_action(ses_message: Dict[str, Any]) -> List[Tuple[str, Optional[Any]]]:
     """
-    Decide routing action for a single SES event record.
+    Decide routing action for a single SES event.
 
     Args:
-        record: SES event record
+        ses_message: SES event message
     Returns:
-        str: Routing action (e.g., 'deliver', 'store', 'bounce')
+        List of tuples: [(action, destination), ...]
     """
     subsegment = xray_recorder.begin_subsegment('email_enrichment')
     if subsegment is None:
         raise RuntimeError("Failed to create X-Ray subsegment for enrichment")
 
-    body = json.loads(record['body'])
-    bounce = check_spam(body)
+    bounce = check_spam(ses_message)
     results = []
     counts = {
         "forward-to-gmail": 0,
@@ -172,7 +196,7 @@ def decide_action(record: Dict[str, Any]) -> List[Tuple[str, Optional[Any]]]:
         "bounce": 0,
     }
 
-    for target in body["receipt"]["recipients"]:
+    for target in ses_message["receipt"]["recipients"]:
         if bounce:
             results.append(('bounce', {"target": target}))
         else:
@@ -224,12 +248,12 @@ def get_routing_decision(recipient: str) -> Tuple[str, Optional[str]]:
     logger.warning(f"No routing rule found for {recipient}, defaulting to store")
     return 'store', None
 
-def check_spam(body: Dict[str, Any]) -> bool:
+def check_spam(ses_message: Dict[str, Any]) -> bool:
     """
     Check if the email is marked as spam based on SES receipt verdicts.
 
     Args:
-        body: SES event body
+        ses_message: SES event message
     Returns:
         bool: True if email is spam, False otherwise
     """
@@ -239,7 +263,7 @@ def check_spam(body: Dict[str, Any]) -> bool:
         expected_token = _load_integration_test_token()
         if expected_token:
             # Look for X-Integration-Test-Token header in email
-            headers = body.get('mail', {}).get('headers', [])
+            headers = ses_message.get('mail', {}).get('headers', [])
             for header in headers:
                 if header.get('name', '').lower() == 'x-integration-test-token':
                     provided_token = header.get('value', '')
@@ -250,7 +274,7 @@ def check_spam(body: Dict[str, Any]) -> bool:
                         logger.warning("Invalid integration test token provided")
                         break
 
-    receipt = body['receipt']
+    receipt = ses_message['receipt']
     if receipt["spamVerdict"]["status"].lower() == "fail":
         return True
     if receipt["virusVerdict"]["status"].lower() == "fail":

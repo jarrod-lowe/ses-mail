@@ -170,8 +170,7 @@ resource "aws_cloudwatch_dashboard" "ses_mail" {
         y      = 12
         properties = {
           metrics = [
-            ["AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", aws_sqs_queue.input_queue.name, { stat = "Average", label = "Input Queue" }],
-            ["...", aws_sqs_queue.gmail_forwarder.name, { stat = "Average", label = "Gmail Queue" }],
+            ["AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", aws_sqs_queue.gmail_forwarder.name, { stat = "Average", label = "Gmail Queue" }],
             ["...", aws_sqs_queue.bouncer.name, { stat = "Average", label = "Bouncer Queue" }]
           ]
           period = 300
@@ -194,8 +193,7 @@ resource "aws_cloudwatch_dashboard" "ses_mail" {
         y      = 12
         properties = {
           metrics = [
-            ["AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", aws_sqs_queue.input_dlq.name, { stat = "Average", label = "Input DLQ" }],
-            ["...", aws_sqs_queue.gmail_forwarder_dlq.name, { stat = "Average", label = "Gmail DLQ" }],
+            ["AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", aws_sqs_queue.gmail_forwarder_dlq.name, { stat = "Average", label = "Gmail DLQ" }],
             ["...", aws_sqs_queue.bouncer_dlq.name, { stat = "Average", label = "Bouncer DLQ" }]
           ]
           period = 300
