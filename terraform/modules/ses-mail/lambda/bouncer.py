@@ -118,18 +118,37 @@ def process_bounce_request(message: Dict[str, Any], sqs_message_id: str):
             logger.warning(f"No bounce targets found in message {sqs_message_id}")
             return
 
-        # Parse the original SES event from the body field to get email metadata
-        ses_event_body = json.loads(detail.get('body', '{}'))
-        ses_message = ses_event_body.get('Message')
-        if ses_message:
-            ses_event = json.loads(ses_message)
-        else:
-            ses_event = ses_event_body
-
-        # Extract SES mail metadata
+        # Extract SES mail metadata from the router-enriched EventBridge message
+        # Structure: EventBridge message → detail → ses → mail
+        ses_event = detail.get('ses', {})
         ses_mail = ses_event.get('mail', {})
-        source = ses_mail.get('source', 'unknown@unknown.com')
-        subject = ses_mail.get('commonHeaders', {}).get('subject', 'No Subject')
+
+        # Get the actual sender from the From header (not the Return-Path/source)
+        # The 'source' field contains SES's internal Return-Path
+        # The 'commonHeaders.from' contains the actual From header we should bounce to
+        common_headers = ses_mail.get('commonHeaders', {})
+        from_addresses = common_headers.get('from', [])
+
+        # Extract sender address with validation
+        source = None
+        if from_addresses and len(from_addresses) > 0:
+            source = from_addresses[0]
+        else:
+            # Fallback to envelope sender (Return-Path) if From header is missing
+            source = ses_mail.get('source')
+
+        # Validate that we successfully extracted a sender address
+        if not source or '@' not in source:
+            logger.error(
+                f"Failed to extract valid sender address from message {sqs_message_id}. "
+                f"ses_mail structure: {json.dumps(ses_mail, default=str)}"
+            )
+            raise ValueError(
+                f"Cannot process bounce: unable to extract valid sender address. "
+                f"From headers: {from_addresses}, source: {ses_mail.get('source')}"
+            )
+
+        subject = common_headers.get('subject', 'No Subject')
         timestamp = ses_mail.get('timestamp', '')
 
         logger.info(f"Processing bounce - Message ID: {message_id}, From: {source}")
