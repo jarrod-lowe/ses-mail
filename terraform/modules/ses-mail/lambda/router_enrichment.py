@@ -143,6 +143,18 @@ def lambda_handler(event, context):
 
     # Publish enriched events to EventBridge Event Bus
     if events_to_publish:
+        # Log details of each event being published (shows fields EventBridge rules filter on)
+        for event in events_to_publish:
+            detail = json.loads(event['Detail'])
+            actions = detail.get('actions', {})
+            logger.info(
+                f"Publishing event to EventBridge: "
+                f"messageId={detail.get('originalMessageId', 'unknown')}, "
+                f"forward-to-gmail={actions.get('forward-to-gmail', {}).get('count', 0)}, "
+                f"bounce={actions.get('bounce', {}).get('count', 0)}, "
+                f"store={actions.get('store', {}).get('count', 0)}"
+            )
+
         try:
             response = eventbridge.put_events(Entries=events_to_publish)
 
@@ -217,7 +229,7 @@ def decide_action(ses_message: Dict[str, Any]) -> List[Tuple[str, Optional[Any]]
 
     subsegment.put_annotation('recipient_count', len(results))
     for key, value in counts.items():
-        subsegment.put_annotation(key, value)
+        subsegment.put_annotation(key.replace('-', '_'), value)
     xray_recorder.end_subsegment()
     return results
 
