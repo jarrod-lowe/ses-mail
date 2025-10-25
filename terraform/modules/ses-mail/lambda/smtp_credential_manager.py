@@ -636,6 +636,7 @@ def create_iam_user_and_credentials(
             username=username,
             encrypted_credentials=encryption_result['encrypted_credentials'],
             iam_user_arn=iam_user_arn,
+            access_key_id=access_key_id,
             correlation_id=correlation_id
         )
 
@@ -1325,6 +1326,7 @@ def store_credentials_in_dynamodb(
     username: str,
     encrypted_credentials: str,
     iam_user_arn: str,
+    access_key_id: str,
     correlation_id: str
 ) -> Dict[str, Any]:
     """
@@ -1334,6 +1336,7 @@ def store_credentials_in_dynamodb(
         username: Username from DynamoDB SK (USER#{username})
         encrypted_credentials: KMS-encrypted credentials blob (base64)
         iam_user_arn: ARN of the created IAM user
+        access_key_id: IAM access key ID (SMTP username, stored unencrypted for visibility)
         correlation_id: Correlation ID for tracing
 
     Returns:
@@ -1365,7 +1368,7 @@ def store_credentials_in_dynamodb(
                     'PK': {'S': 'SMTP_USER'},
                     'SK': {'S': f'USER#{username}'}
                 },
-                UpdateExpression='SET #status = :status, encrypted_credentials = :creds, iam_user_arn = :arn, updated_at = :updated',
+                UpdateExpression='SET #status = :status, encrypted_credentials = :creds, iam_user_arn = :arn, smtp_username = :smtp_user, updated_at = :updated',
                 ExpressionAttributeNames={
                     '#status': 'status'
                 },
@@ -1373,6 +1376,7 @@ def store_credentials_in_dynamodb(
                     ':status': {'S': 'active'},
                     ':creds': {'S': encrypted_credentials},
                     ':arn': {'S': iam_user_arn},
+                    ':smtp_user': {'S': access_key_id},
                     ':updated': {'S': updated_at}
                 },
                 ReturnValues='ALL_NEW'
