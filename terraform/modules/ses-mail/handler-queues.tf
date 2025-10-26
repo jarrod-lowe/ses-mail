@@ -53,6 +53,7 @@ resource "aws_cloudwatch_metric_alarm" "gmail_forwarder_dlq_alarm" {
   threshold           = 0
   alarm_description   = "Alert when messages appear in Gmail forwarder DLQ"
   alarm_actions       = [var.alarm_sns_topic_arn]
+  ok_actions          = [var.alarm_sns_topic_arn]
 
   dimensions = {
     QueueName = aws_sqs_queue.gmail_forwarder_dlq.name
@@ -77,6 +78,7 @@ resource "aws_cloudwatch_metric_alarm" "gmail_forwarder_queue_age_alarm" {
   threshold           = 300 # 5 minutes
   alarm_description   = "Alert when messages in Gmail forwarder queue are older than 5 minutes"
   alarm_actions       = [var.alarm_sns_topic_arn]
+  ok_actions          = [var.alarm_sns_topic_arn]
 
   dimensions = {
     QueueName = aws_sqs_queue.gmail_forwarder.name
@@ -144,6 +146,7 @@ resource "aws_cloudwatch_metric_alarm" "bouncer_dlq_alarm" {
   threshold           = 0
   alarm_description   = "Alert when messages appear in bouncer DLQ"
   alarm_actions       = [var.alarm_sns_topic_arn]
+  ok_actions          = [var.alarm_sns_topic_arn]
 
   dimensions = {
     QueueName = aws_sqs_queue.bouncer_dlq.name
@@ -168,6 +171,7 @@ resource "aws_cloudwatch_metric_alarm" "bouncer_queue_age_alarm" {
   threshold           = 300 # 5 minutes
   alarm_description   = "Alert when messages in bouncer queue are older than 5 minutes"
   alarm_actions       = [var.alarm_sns_topic_arn]
+  ok_actions          = [var.alarm_sns_topic_arn]
 
   dimensions = {
     QueueName = aws_sqs_queue.bouncer.name
