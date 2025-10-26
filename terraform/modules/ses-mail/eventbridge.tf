@@ -327,6 +327,7 @@ resource "aws_cloudwatch_metric_alarm" "eventbridge_gmail_failures" {
   alarm_description   = "Alert when EventBridge Gmail forwarder rule fails to deliver events"
   alarm_actions       = [var.alarm_sns_topic_arn]
   ok_actions          = [var.alarm_sns_topic_arn]
+  treat_missing_data  = "notBreaching"
 
   tags = {
     Name        = "eventbridge-gmail-failures-${var.environment}"
@@ -363,6 +364,7 @@ resource "aws_cloudwatch_metric_alarm" "eventbridge_bouncer_failures" {
   alarm_description   = "Alert when EventBridge bouncer rule fails to deliver events"
   alarm_actions       = [var.alarm_sns_topic_arn]
   ok_actions          = [var.alarm_sns_topic_arn]
+  treat_missing_data  = "notBreaching"
 
   tags = {
     Name        = "eventbridge-bouncer-failures-${var.environment}"

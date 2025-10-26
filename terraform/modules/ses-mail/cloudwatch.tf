@@ -315,7 +315,7 @@ resource "aws_cloudwatch_metric_alarm" "lambda_errors" {
   namespace           = "AWS/Lambda"
   period              = 300
   statistic           = "Sum"
-  threshold           = 5
+  threshold           = 0
   alarm_description   = "Alert when Lambda function has errors (${var.environment})"
   treat_missing_data  = "notBreaching"
 
@@ -336,7 +336,7 @@ resource "aws_cloudwatch_metric_alarm" "lambda_router_errors" {
   namespace           = "AWS/Lambda"
   period              = 300
   statistic           = "Sum"
-  threshold           = 5
+  threshold           = 0
   alarm_description   = "Alert when router enrichment Lambda function has errors (${var.environment})"
   treat_missing_data  = "notBreaching"
 
@@ -357,7 +357,7 @@ resource "aws_cloudwatch_metric_alarm" "lambda_gmail_forwarder_errors" {
   namespace           = "AWS/Lambda"
   period              = 300
   statistic           = "Sum"
-  threshold           = 5
+  threshold           = 0
   alarm_description   = "Alert when Gmail forwarder Lambda function has errors (${var.environment})"
   treat_missing_data  = "notBreaching"
 
@@ -378,7 +378,7 @@ resource "aws_cloudwatch_metric_alarm" "lambda_bouncer_errors" {
   namespace           = "AWS/Lambda"
   period              = 300
   statistic           = "Sum"
-  threshold           = 5
+  threshold           = 0
   alarm_description   = "Alert when bouncer Lambda function has errors (${var.environment})"
   treat_missing_data  = "notBreaching"
 
