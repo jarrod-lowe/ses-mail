@@ -9,16 +9,15 @@ from the EventBridge Event Bus router.
 """
 
 import json
-import logging
 import os
 from typing import Dict, Any, List
 
 import boto3
 from botocore.exceptions import ClientError
+from aws_lambda_powertools import Logger
 
-# Configure logging
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+# Configure structured JSON logging
+logger = Logger(service="ses-mail-bouncer")
 
 # Environment configuration
 BOUNCE_SENDER = os.environ.get('BOUNCE_SENDER', 'mailer-daemon@example.com')
@@ -48,7 +47,7 @@ def lambda_handler(event, context):
     Returns:
         dict: Response with batch item failures for SQS partial batch processing
     """
-    logger.info(f"Received SQS event with {len(event.get('Records', []))} records")
+    logger.info("Received SQS event", extra={"recordCount": len(event.get('Records', []))})
 
     # Track failed messages for SQS partial batch response
     batch_item_failures = []
@@ -66,11 +65,14 @@ def lambda_handler(event, context):
             # Process the bounce request
             process_bounce_request(body, message_id)
 
-            logger.info(f"Successfully processed bounce request: {message_id}")
+            logger.info("Successfully processed bounce request", extra={"messageId": message_id})
             success_count += 1
 
         except Exception as e:
-            logger.error(f"Error processing bounce request {message_id}: {str(e)}", exc_info=True)
+            logger.exception("Error processing bounce request", extra={
+                "messageId": message_id,
+                "error": str(e)
+            })
 
             # Add to batch item failures for SQS retry
             batch_item_failures.append({
@@ -81,7 +83,11 @@ def lambda_handler(event, context):
     # Publish custom metrics
     publish_metrics(success_count, failure_count)
 
-    logger.info(f"Processed {len(event.get('Records', []))} bounce requests (success: {success_count}, failures: {failure_count})")
+    logger.info("Processed bounce requests", extra={
+        "totalCount": len(event.get('Records', [])),
+        "successCount": success_count,
+        "failureCount": failure_count
+    })
 
     # Return partial batch response for SQS
     # Messages not in failures list will be deleted from queue
@@ -115,7 +121,7 @@ def process_bounce_request(message: Dict[str, Any], sqs_message_id: str):
         targets = bounce_action.get('targets', [])
 
         if not targets:
-            logger.warning(f"No bounce targets found in message {sqs_message_id}")
+            logger.warning("No bounce targets found in message", extra={"sqsMessageId": sqs_message_id})
             return
 
         # Extract SES mail metadata from the router-enriched EventBridge message
@@ -139,10 +145,12 @@ def process_bounce_request(message: Dict[str, Any], sqs_message_id: str):
 
         # Validate that we successfully extracted a sender address
         if not source or '@' not in source:
-            logger.error(
-                f"Failed to extract valid sender address from message {sqs_message_id}. "
-                f"ses_mail structure: {json.dumps(ses_mail, default=str)}"
-            )
+            logger.error("Failed to extract valid sender address", extra={
+                "sqsMessageId": sqs_message_id,
+                "sesMailStructure": json.dumps(ses_mail, default=str),
+                "fromHeaders": from_addresses,
+                "envelopeSender": ses_mail.get('source')
+            })
             raise ValueError(
                 f"Cannot process bounce: unable to extract valid sender address. "
                 f"From headers: {from_addresses}, source: {ses_mail.get('source')}"
@@ -151,7 +159,11 @@ def process_bounce_request(message: Dict[str, Any], sqs_message_id: str):
         subject = common_headers.get('subject', 'No Subject')
         timestamp = ses_mail.get('timestamp', '')
 
-        logger.info(f"Processing bounce - Message ID: {message_id}, From: {source}")
+        logger.info("Processing bounce", extra={
+            "messageId": message_id,
+            "from": source,
+            "subject": subject
+        })
 
         # Add X-Ray annotations for searchability
         if subsegment:
@@ -174,7 +186,10 @@ def process_bounce_request(message: Dict[str, Any], sqs_message_id: str):
             recipient = target_info.get('target')
             bounce_reason = target_info.get('reason', 'policy')  # Default to policy if not specified
 
-            logger.info(f"Sending bounce for recipient: {recipient}, reason: {bounce_reason}")
+            logger.info("Sending bounce for recipient", extra={
+                "recipient": recipient,
+                "bounceReason": bounce_reason
+            })
 
             send_bounce_notification(
                 recipient=recipient,
@@ -184,9 +199,9 @@ def process_bounce_request(message: Dict[str, Any], sqs_message_id: str):
                 bounce_reason=bounce_reason
             )
 
-            logger.info(f"Bounce sent successfully for recipient: {recipient}")
+            logger.info("Bounce sent successfully", extra={"recipient": recipient})
 
-        logger.info(f"Bounce processing complete for message: {message_id}")
+        logger.info("Bounce processing complete", extra={"messageId": message_id})
 
     finally:
         # Always end the subsegment
@@ -298,7 +313,7 @@ This is an automated message. Please do not reply to this email.
         )
 
         bounce_message_id = response['MessageId']
-        logger.info(f"Bounce notification sent - MessageId: {bounce_message_id}")
+        logger.info("Bounce notification sent", extra={"bounceMessageId": bounce_message_id})
 
         # Add bounce message ID to X-Ray for traceability
         subsegment = xray_recorder.current_subsegment()
@@ -308,7 +323,10 @@ This is an automated message. Please do not reply to this email.
     except ClientError as e:
         error_code = e.response.get('Error', {}).get('Code')
         error_message = e.response.get('Error', {}).get('Message')
-        logger.error(f"SES error sending bounce: {error_code} - {error_message}")
+        logger.error("SES error sending bounce", extra={
+            "errorCode": error_code,
+            "errorMessage": error_message
+        })
         raise RuntimeError(f"Failed to send bounce notification: {error_message}")
 
 
@@ -344,8 +362,11 @@ def publish_metrics(success_count: int, failure_count: int) -> None:
                 Namespace=f'SESMail/{ENVIRONMENT}',
                 MetricData=metric_data
             )
-            logger.info(f"Published metrics: success={success_count}, failure={failure_count}")
+            logger.info("Published metrics", extra={
+                "successCount": success_count,
+                "failureCount": failure_count
+            })
 
     except Exception as e:
         # Don't fail the lambda if metrics publishing fails
-        logger.error(f"Error publishing metrics: {str(e)}", exc_info=True)
+        logger.exception("Error publishing metrics", extra={"error": str(e)})

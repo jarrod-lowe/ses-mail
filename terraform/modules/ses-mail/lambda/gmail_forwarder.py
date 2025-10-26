@@ -7,7 +7,6 @@ It processes enriched email events from EventBridge and imports emails into Gmai
 
 import base64
 import json
-import logging
 import os
 from typing import Dict, Any, List
 
@@ -21,11 +20,12 @@ from google.oauth2.credentials import Credentials
 # X-Ray SDK for distributed tracing
 from aws_xray_sdk.core import xray_recorder
 from aws_xray_sdk.core import patch_all
+from aws_xray_sdk.core.models import http
 patch_all()
 
-# Configure logging
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+# Configure structured JSON logging
+from aws_lambda_powertools import Logger
+logger = Logger(service="ses-mail-gmail-forwarder")
 
 # Environment configuration
 GMAIL_TOKEN_PARAMETER = os.environ.get('GMAIL_TOKEN_PARAMETER', '/ses-mail/gmail-token')
@@ -54,7 +54,7 @@ def lambda_handler(event, context):
         dict: Response with results for each processed message
     """
     _ = context  # Unused but required by Lambda handler signature
-    logger.info(f"Received SQS event with {len(event.get('Records', []))} messages")
+    logger.info("Received SQS event", extra={"messageCount": len(event.get('Records', []))})
 
     results = []
     token_info = None
@@ -87,7 +87,11 @@ def lambda_handler(event, context):
         # Publish custom metrics
         publish_metrics(success_count, failure_count)
 
-        logger.info(f"Processed {len(results)} messages (success: {success_count}, failures: {failure_count})")
+        logger.info("Processed messages", extra={
+            "totalCount": len(results),
+            "successCount": success_count,
+            "failureCount": failure_count
+        })
 
         return {
             'statusCode': 200,
@@ -99,7 +103,7 @@ def lambda_handler(event, context):
         }
 
     except Exception as e:
-        logger.error(f"Error processing SQS messages: {str(e)}", exc_info=True)
+        logger.exception("Error processing SQS messages", extra={"error": str(e)})
         raise
 
 
@@ -138,16 +142,11 @@ def process_sqs_record(record, service):
         if not targets:
             raise ValueError("No forward-to-gmail targets found in enriched message")
 
-        # Parse the original SES event from the body field to get email metadata
-        ses_event_body = json.loads(detail.get('body', '{}'))
-        ses_message = ses_event_body.get('Message')
-        if ses_message:
-            ses_event = json.loads(ses_message)
-        else:
-            ses_event = ses_event_body
+        logger.info("Decision Info", extra=detail)
+        ses_message = detail.get('ses')
 
         # Extract SES mail metadata
-        ses_mail = ses_event.get('mail', {})
+        ses_mail = ses_message.get('mail', {})
         source = ses_mail.get('source', 'unknown@unknown.com')
         subject = ses_mail.get('commonHeaders', {}).get('subject', '(no subject)')
 
@@ -156,7 +155,10 @@ def process_sqs_record(record, service):
 
         # Fetch raw email from S3 once before processing targets
         raw_eml = fetch_raw_email_from_s3(message_id)
-        logger.info(f"Fetched {len(raw_eml)} bytes from S3")
+        logger.info("Fetched email from S3", extra={
+            "messageId": message_id,
+            "byteCount": len(raw_eml)
+        })
 
         # Process each target (typically one, but could be multiple)
         results = []
@@ -171,24 +173,24 @@ def process_sqs_record(record, service):
                 subsegment.put_annotation('action', 'forward-to-gmail')
                 subsegment.put_annotation('recipient', recipient)
                 subsegment.put_annotation('target', destination)
+                subsegment.put_annotation('subject', subject[0:64])
 
             # Log email metadata
-            logger.info(f"Processing email forward to Gmail:")
-            logger.info(f"  Message ID: {message_id}")
-            logger.info(f"  From: {source}")
-            logger.info(f"  To: {recipient}")
-            logger.info(f"  Subject: {subject}")
-            logger.info(f"  Target Gmail: {destination}")
+            logger.info("Processing email forward to Gmail", extra={
+                "messageId": message_id,
+                "from": source,
+                "to": recipient,
+                "subject": subject,
+                "targetGmail": destination
+            })
 
             # Import into Gmail with INBOX and UNREAD labels
             gmail_response = gmail_import(service, raw_eml, DEFAULT_LABEL_IDS)
 
-            logger.info(f"  Successfully imported to Gmail: {gmail_response.get('id')}")
-
-            # Add Gmail response details to X-Ray subsegment
-            if subsegment:
-                subsegment.put_annotation('gmail_message_id', gmail_response.get('id', 'unknown'))
-                subsegment.put_annotation('import_status', 'success')
+            logger.info("Successfully imported to Gmail", extra={
+                "messageId": message_id,
+                "gmailId": gmail_response.get('id')
+            })
 
             results.append({
                 'recipient': recipient,
@@ -200,7 +202,7 @@ def process_sqs_record(record, service):
 
         # Delete email from S3 after successful import of all targets
         delete_email_from_s3(message_id)
-        logger.info(f"  Deleted email from S3")
+        logger.info("Deleted email from S3", extra={"messageId": message_id})
 
         return {
             'messageId': message_id,
@@ -210,7 +212,7 @@ def process_sqs_record(record, service):
         }
 
     except (RuntimeError, ValueError, HttpError, ClientError, json.JSONDecodeError) as e:
-        logger.error(f"  Error processing SQS message: {str(e)}", exc_info=True)
+        logger.exception("Error processing SQS message", extra={"error": str(e)})
 
         # Add error details to X-Ray subsegment
         if subsegment:
@@ -241,7 +243,7 @@ def load_token_from_ssm() -> Dict[str, Any]:
         )
         return json.loads(response['Parameter']['Value'])
     except ClientError as e:
-        logger.error(f"Error retrieving Gmail token from SSM: {str(e)}")
+        logger.error("Error retrieving Gmail token from SSM", extra={"error": str(e)})
         raise RuntimeError(f"Failed to load token from SSM: {e}")
 
 
@@ -261,7 +263,7 @@ def save_token_to_ssm(token_dict: Dict[str, Any]) -> None:
         )
         logger.info("Updated Gmail token in SSM")
     except ClientError as e:
-        logger.error(f"Error saving token to SSM: {str(e)}")
+        logger.error("Error saving token to SSM", extra={"error": str(e)})
         raise
 
 
@@ -280,7 +282,7 @@ def build_gmail_service(token_info: Dict[str, Any]):
         service = build('gmail', 'v1', credentials=creds, cache_discovery=False)
         return service, creds
     except Exception as e:
-        logger.error(f"Error building Gmail service: {str(e)}")
+        logger.error("Error building Gmail service", extra={"error": str(e)})
         raise
 
 
@@ -298,7 +300,7 @@ def maybe_update_token(creds: Credentials, original: Dict[str, Any]) -> None:
             updated.get('expiry') != original.get('expiry')):
             save_token_to_ssm(updated)
     except Exception as e:
-        logger.error(f"Error checking/updating token: {str(e)}")
+        logger.error("Error checking/updating token", extra={"error": str(e)})
 
 
 def fetch_raw_email_from_s3(message_id: str) -> bytes:
@@ -318,7 +320,10 @@ def fetch_raw_email_from_s3(message_id: str) -> bytes:
     s3_key = f"{S3_PREFIX}/{message_id}"
 
     try:
-        logger.info(f"Fetching from s3://{EMAIL_BUCKET}/{s3_key}")
+        logger.info("Fetching email from S3", extra={
+            "bucket": EMAIL_BUCKET,
+            "key": s3_key
+        })
         obj = s3_client.get_object(Bucket=EMAIL_BUCKET, Key=s3_key)
         return obj['Body'].read()
     except ClientError as e:
@@ -340,11 +345,18 @@ def delete_email_from_s3(message_id: str) -> None:
 
     try:
         s3_client.delete_object(Bucket=EMAIL_BUCKET, Key=s3_key)
-        logger.info(f"Deleted s3://{EMAIL_BUCKET}/{s3_key}")
+        logger.info("Deleted email from S3", extra={
+            "bucket": EMAIL_BUCKET,
+            "key": s3_key
+        })
     except ClientError as e:
         # Log error but don't fail the whole operation
         # Email is already in Gmail, so S3 cleanup failure is not critical
-        logger.error(f"Failed to delete email from S3: {e}")
+        logger.error("Failed to delete email from S3", extra={
+            "bucket": EMAIL_BUCKET,
+            "key": s3_key,
+            "error": str(e)
+        })
 
 
 def gmail_import(service, raw_bytes: bytes, label_ids: List[str]) -> Dict[str, Any]:
@@ -359,17 +371,110 @@ def gmail_import(service, raw_bytes: bytes, label_ids: List[str]) -> Dict[str, A
     Returns:
         dict: Gmail API response with id, threadId, labelIds
     """
+    # Create X-Ray subsegment for Gmail API HTTP call
+    subsegment = xray_recorder.begin_subsegment('gmail.googleapis.com')
+
     try:
+        # Mark as external HTTP service
+        subsegment.namespace = 'remote'
+
+        # Prepare request body
+        encoded_email = base64.urlsafe_b64encode(raw_bytes).decode('utf-8')
         body = {
-            'raw': base64.urlsafe_b64encode(raw_bytes).decode('utf-8'),
+            'raw': encoded_email,
             'labelIds': label_ids or None
         }
-        return service.users().messages().import_(
+
+        # Set HTTP request metadata
+        api_url = f'https://gmail.googleapis.com/gmail/v1/users/{GMAIL_USER_ID}/messages/import'
+        subsegment.put_http_meta(http.URL, api_url)
+        subsegment.put_http_meta(http.METHOD, 'POST')
+
+        # Add annotations for tracing
+        subsegment.put_annotation('email_size_bytes', len(raw_bytes))
+        subsegment.put_annotation('email_size_base64', len(encoded_email))
+        subsegment.put_annotation('label_count', len(label_ids) if label_ids else 0)
+
+        # Execute Gmail API call
+        response = service.users().messages().import_(
             userId=GMAIL_USER_ID,
-            body=body
+            body=body,
+            internalDateSource='receivedTime',
         ).execute()
+
+        # Set HTTP response metadata
+        subsegment.put_http_meta(http.STATUS, 200)
+
+        # Add response annotations
+        subsegment.put_annotation('gmail_message_id', response.get('id', 'unknown'))
+        subsegment.put_annotation('gmail_thread_id', response.get('threadId', 'unknown'))
+
+        return response
+
     except HttpError as e:
+        # Capture HTTP error details
+        status_code = e.resp.status if hasattr(e, 'resp') else 500
+        subsegment.put_http_meta(http.STATUS, status_code)
+        subsegment.put_annotation('error', True)
+        subsegment.put_annotation('error_message', str(e))
         raise RuntimeError(f"Gmail API error: {e}")
+    finally:
+        # Always end the subsegment
+        xray_recorder.end_subsegment()
+
+
+def get_message_details(service, message_id: str) -> Dict[str, Any]:
+    """
+    Get message details from Gmail to verify label assignment.
+
+    Args:
+        service: Gmail API service
+        message_id: Gmail message ID
+
+    Returns:
+        dict: Gmail API response with id, labelIds, threadId
+    """
+    # Create X-Ray subsegment for Gmail API HTTP call
+    subsegment = xray_recorder.begin_subsegment('gmail.googleapis.com/get')
+
+    try:
+        # Mark as external HTTP service
+        subsegment.namespace = 'remote'
+
+        # Set HTTP request metadata
+        api_url = f'https://gmail.googleapis.com/gmail/v1/users/{GMAIL_USER_ID}/messages/{message_id}'
+        subsegment.put_http_meta(http.URL, api_url)
+        subsegment.put_http_meta(http.METHOD, 'GET')
+
+        # Add annotations for tracing
+        subsegment.put_annotation('gmail_message_id', message_id)
+
+        # Execute Gmail API call
+        response = service.users().messages().get(
+            userId=GMAIL_USER_ID,
+            id=message_id,
+            format='minimal'
+        ).execute()
+
+        # Set HTTP response metadata
+        subsegment.put_http_meta(http.STATUS, 200)
+
+        # Add response annotations
+        label_count = len(response.get('labelIds', []))
+        subsegment.put_annotation('label_count', label_count)
+
+        return response
+
+    except HttpError as e:
+        # Capture HTTP error details
+        status_code = e.resp.status if hasattr(e, 'resp') else 500
+        subsegment.put_http_meta(http.STATUS, status_code)
+        subsegment.put_annotation('error', True)
+        subsegment.put_annotation('error_message', str(e))
+        raise RuntimeError(f"Gmail API get error: {e}")
+    finally:
+        # Always end the subsegment
+        xray_recorder.end_subsegment()
 
 
 def publish_metrics(success_count: int, failure_count: int) -> None:
@@ -404,8 +509,11 @@ def publish_metrics(success_count: int, failure_count: int) -> None:
                 Namespace=f'SESMail/{ENVIRONMENT}',
                 MetricData=metric_data
             )
-            logger.info(f"Published metrics: success={success_count}, failure={failure_count}")
+            logger.info("Published metrics", extra={
+                "successCount": success_count,
+                "failureCount": failure_count
+            })
 
     except Exception as e:
         # Don't fail the lambda if metrics publishing fails
-        logger.error(f"Error publishing metrics: {str(e)}", exc_info=True)
+        logger.exception("Error publishing metrics", extra={"error": str(e)})

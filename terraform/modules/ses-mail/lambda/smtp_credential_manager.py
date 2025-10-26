@@ -17,7 +17,6 @@ import base64
 import hashlib
 import hmac
 import json
-import logging
 import os
 import time
 from typing import Dict, Any, List
@@ -25,10 +24,10 @@ import uuid
 
 import boto3
 from botocore.exceptions import ClientError
+from aws_lambda_powertools import Logger
 
-# Configure logging
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+# Configure structured JSON logging
+logger = Logger(service="ses-mail-smtp-credential-manager")
 
 # Environment configuration
 DYNAMODB_TABLE_NAME = os.environ.get('DYNAMODB_TABLE_NAME')

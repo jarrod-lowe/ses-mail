@@ -13,16 +13,15 @@ Invoked by SNS topic subscription (preserves X-Ray tracing context).
 
 from functools import lru_cache
 import json
-import logging
 import os
 from typing import Dict, Any, List, Optional, Tuple
 
 import boto3
 from botocore.exceptions import ClientError
+from aws_lambda_powertools import Logger
 
-# Configure logging
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+# Configure structured JSON logging
+logger = Logger(service="ses-mail-router-enrichment")
 
 # Environment configuration
 DYNAMODB_TABLE_NAME = os.environ.get('DYNAMODB_TABLE_NAME')
@@ -66,7 +65,7 @@ def _load_integration_test_token() -> Optional[str]:
         logger.info("Loaded integration test token from SSM")
         return _integration_test_token
     except Exception as e:
-        logger.error(f"Failed to load integration test token: {e}")
+        logger.error("Failed to load integration test token", extra={"error": str(e)})
         return None
 
 
@@ -85,7 +84,7 @@ def lambda_handler(event, context):
     Returns:
         dict: Success response
     """
-    logger.info(f"Received SNS event for enrichment: {json.dumps(event)}")
+    logger.info("Received SNS event for enrichment", extra={"event": event})
 
     if not DYNAMODB_TABLE_NAME:
         raise ValueError("DYNAMODB_TABLE_NAME environment variable must be set")
@@ -97,7 +96,7 @@ def lambda_handler(event, context):
     # SNS sends events as Records array
     for record in event.get('Records', []):
         if record.get('EventSource') != 'aws:sns':
-            logger.warning(f"Skipping non-SNS record: {record.get('EventSource')}")
+            logger.warning("Skipping non-SNS record", extra={"eventSource": record.get('EventSource')})
             continue
 
         try:
@@ -105,7 +104,7 @@ def lambda_handler(event, context):
             sns_message = json.loads(record['Sns']['Message'])
             ses_message_id = sns_message.get('mail', {}).get('messageId', 'unknown')
 
-            logger.info(f"Processing SES message: {ses_message_id}")
+            logger.info("Processing SES message", extra={"messageId": ses_message_id})
 
             # Determine routing actions for all recipients
             routing_results = decide_action(sns_message)
@@ -138,7 +137,7 @@ def lambda_handler(event, context):
             success_count += 1
 
         except Exception as e:
-            logger.error(f"Error enriching SNS record: {str(e)}", exc_info=True)
+            logger.exception("Error enriching SNS record", extra={"error": str(e)})
             failure_count += 1
 
     # Publish enriched events to EventBridge Event Bus
@@ -147,36 +146,48 @@ def lambda_handler(event, context):
         for event in events_to_publish:
             detail = json.loads(event['Detail'])
             actions = detail.get('actions', {})
-            logger.info(
-                f"Publishing event to EventBridge: "
-                f"messageId={detail.get('originalMessageId', 'unknown')}, "
-                f"forward-to-gmail={actions.get('forward-to-gmail', {}).get('count', 0)}, "
-                f"bounce={actions.get('bounce', {}).get('count', 0)}, "
-                f"store={actions.get('store', {}).get('count', 0)}"
-            )
+            logger.info("Publishing event to EventBridge", extra={
+                "messageId": detail.get('originalMessageId', 'unknown'),
+                "forward_to_gmail_count": actions.get('forward-to-gmail', {}).get('count', 0),
+                "bounce_count": actions.get('bounce', {}).get('count', 0),
+                "store_count": actions.get('store', {}).get('count', 0)
+            })
 
         try:
             response = eventbridge.put_events(Entries=events_to_publish)
 
             # Check for failed entries
             if response.get('FailedEntryCount', 0) > 0:
-                logger.error(f"Failed to publish {response['FailedEntryCount']} events to EventBridge")
+                logger.error("Failed to publish events to EventBridge", extra={
+                    "failedEntryCount": response['FailedEntryCount']
+                })
                 for entry in response.get('Entries', []):
                     if 'ErrorCode' in entry:
-                        logger.error(f"EventBridge error: {entry['ErrorCode']} - {entry.get('ErrorMessage', 'No message')}")
+                        logger.error("EventBridge entry error", extra={
+                            "errorCode": entry['ErrorCode'],
+                            "errorMessage": entry.get('ErrorMessage', 'No message')
+                        })
                 failure_count += response['FailedEntryCount']
             else:
-                logger.info(f"Successfully published {len(events_to_publish)} events to EventBridge")
+                logger.info("Successfully published events to EventBridge", extra={
+                    "eventCount": len(events_to_publish)
+                })
 
         except Exception as e:
-            logger.error(f"Error publishing events to EventBridge: {str(e)}", exc_info=True)
+            logger.exception("Error publishing events to EventBridge", extra={
+                "error": str(e),
+                "eventCount": len(events_to_publish)
+            })
             failure_count += len(events_to_publish)
             raise
 
     # Publish custom metrics for success/failure rates
     publish_metrics(success_count, failure_count)
 
-    logger.info(f"Completed enrichment: success={success_count}, failures={failure_count}")
+    logger.info("Completed enrichment", extra={
+        "successCount": success_count,
+        "failureCount": failure_count
+    })
 
     return {
         'statusCode': 200,
@@ -248,7 +259,7 @@ def get_routing_decision(recipient: str) -> Tuple[str, Optional[str]]:
     Returns:
         tuple: (routing action, target destination)
     """
-    logger.info(f"Looking up routing rule for recipient: {recipient}")
+    logger.info("Looking up routing rule for recipient", extra={"recipient": recipient})
 
     # Generate lookup keys in hierarchical order
     lookup_keys = generate_lookup_keys(recipient)
@@ -257,18 +268,24 @@ def get_routing_decision(recipient: str) -> Tuple[str, Optional[str]]:
     for lookup_key in lookup_keys:
         rule = lookup_routing_rule(lookup_key)
         if rule:
-            logger.info(f"Found matching rule: {lookup_key}")
+            logger.info("Found matching rule", extra={"lookupKey": lookup_key})
 
             # Check if rule is enabled
             if not rule.get('enabled', True):
-                logger.info(f"Rule {lookup_key} is disabled, continuing search")
+                logger.info("Rule is disabled, continuing search", extra={"lookupKey": lookup_key})
                 continue
 
-            logger.info(f"Routing decision: {rule.get('action', 'bounce')} (matched rule: {lookup_key})")
-            return rule.get('action', 'bounce'), rule.get('target', None)
+            action = rule.get('action', 'bounce')
+            target = rule.get('target', None)
+            logger.info("Routing decision", extra={
+                "action": action,
+                "lookupKey": lookup_key,
+                "target": target
+            })
+            return action, target
 
     # No rule found - default to store
-    logger.warning(f"No routing rule found for {recipient}, defaulting to store")
+    logger.warning("No routing rule found, defaulting to store", extra={"recipient": recipient})
     return 'store', None
 
 def check_spam(ses_message: Dict[str, Any]) -> bool:
@@ -410,14 +427,22 @@ def lookup_routing_rule(route_key: str) -> Optional[Dict[str, Any]]:
     except ClientError as e:
         error_code = e.response.get('Error', {}).get('Code')
         if error_code == 'ResourceNotFoundException':
-            logger.error(f"DynamoDB table {DYNAMODB_TABLE_NAME} not found")
+            logger.error("DynamoDB table not found", extra={
+                "tableName": DYNAMODB_TABLE_NAME
+            })
             raise
         else:
-            logger.error(f"DynamoDB error looking up {route_key}: {str(e)}")
+            logger.error("DynamoDB error looking up route", extra={
+                "routeKey": route_key,
+                "error": str(e)
+            })
             # On DynamoDB errors, return None to trigger fallback
             return None
     except Exception as e:
-        logger.error(f"Unexpected error looking up {route_key}: {str(e)}")
+        logger.error("Unexpected error looking up route", extra={
+            "routeKey": route_key,
+            "error": str(e)
+        })
         return None
 
 
@@ -453,8 +478,11 @@ def publish_metrics(success_count: int, failure_count: int) -> None:
                 Namespace=f'SESMail/{ENVIRONMENT}',
                 MetricData=metric_data
             )
-            logger.info(f"Published metrics: success={success_count}, failure={failure_count}")
+            logger.info("Published metrics", extra={
+                "successCount": success_count,
+                "failureCount": failure_count
+            })
 
     except Exception as e:
         # Don't fail the lambda if metrics publishing fails
-        logger.error(f"Error publishing metrics: {str(e)}", exc_info=True)
+        logger.exception("Error publishing metrics", extra={"error": str(e)})

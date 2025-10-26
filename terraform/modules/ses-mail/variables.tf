@@ -103,3 +103,9 @@ variable "backup_mx_records" {
   }))
   default = []
 }
+
+variable "mail_from_subdomain" {
+  description = "Subdomain to use for custom MAIL FROM domain (e.g., 'bounce' creates bounce.example.com)"
+  type        = string
+  default     = "bounce"
+}

@@ -240,6 +240,21 @@ output "dns_configuration_summary" {
             purpose = "DKIM authentication"
           }
         ],
+        [
+          {
+            name     = "${var.mail_from_subdomain}.${domain}"
+            type     = "MX"
+            priority = 10
+            value    = "feedback-smtp.${var.aws_region}.amazonses.com"
+            purpose  = "Custom MAIL FROM domain - handles bounce notifications"
+          },
+          {
+            name    = "${var.mail_from_subdomain}.${domain}"
+            type    = "TXT"
+            value   = "v=spf1 include:amazonses.com ${var.spf_policy == "fail" ? "-all" : "~all"}"
+            purpose = "SPF for custom MAIL FROM domain"
+          }
+        ],
         var.mta_sts_mode != "none" ? [
           {
             name    = "_mta-sts.${domain}"

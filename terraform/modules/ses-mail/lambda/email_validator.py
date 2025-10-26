@@ -10,15 +10,14 @@ Modify the validation logic as needed.
 """
 
 import json
-import logging
 import os
 
 import boto3
 from botocore.exceptions import ClientError
+from aws_lambda_powertools import Logger
 
-# Configure logging
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+# Configure structured JSON logging
+logger = Logger(service="ses-mail-email-validator")
 
 # Environment configuration
 BOUNCE_SENDER = os.environ.get('BOUNCE_SENDER', 'mailer-daemon@example.com')
@@ -44,7 +43,7 @@ def lambda_handler(event, context):
             - "STOP_RULE": Stop processing further actions in this rule
             - "STOP_RULE_SET": Stop processing all further rules
     """
-    logger.info(f"Received SES event: {json.dumps(event)}")
+    logger.info("Received SES event", extra={"event": event})
 
     try:
         # Process each SES record
@@ -57,12 +56,14 @@ def lambda_handler(event, context):
 
                 # Log email metadata
                 message_id = mail.get('messageId')
-                logger.info(f"Validating email {message_id}:")
-                logger.info(f"  From: {mail.get('source')}")
-                logger.info(f"  To: {mail.get('destination')}")
-                logger.info(f"  Subject: {mail.get('commonHeaders', {}).get('subject')}")
-                logger.info(f"  Spam verdict: {receipt.get('spamVerdict', {}).get('status')}")
-                logger.info(f"  Virus verdict: {receipt.get('virusVerdict', {}).get('status')}")
+                logger.info("Validating email", extra={
+                    "messageId": message_id,
+                    "from": mail.get('source'),
+                    "to": mail.get('destination'),
+                    "subject": mail.get('commonHeaders', {}).get('subject'),
+                    "spamVerdict": receipt.get('spamVerdict', {}).get('status'),
+                    "virusVerdict": receipt.get('virusVerdict', {}).get('status')
+                })
 
                 # TODO: Add validation logic here
                 # For example:
@@ -75,7 +76,11 @@ def lambda_handler(event, context):
                 destination = mail.get('destination', [])
                 source = mail.get('source')
 
-                logger.info(f"Bouncing email from {source} to {destination}")
+                logger.info("Bouncing email", extra={
+                    "messageId": message_id,
+                    "from": source,
+                    "to": destination
+                })
 
                 try:
                     bounce_response = ses_client.send_bounce(
@@ -90,9 +95,11 @@ def lambda_handler(event, context):
                         ],
                         Explanation='This email has been rejected by the recipient server.'
                     )
-                    logger.info(f"  Bounce sent successfully: {bounce_response.get('MessageId')}")
+                    logger.info("Bounce sent successfully", extra={
+                        "bounceMessageId": bounce_response.get('MessageId')
+                    })
                 except ClientError as bounce_error:
-                    logger.error(f"  Failed to send bounce: {str(bounce_error)}")
+                    logger.error("Failed to send bounce", extra={"error": str(bounce_error)})
                     # Continue even if bounce fails - we'll still stop processing
 
         # Stop all further processing (email will not be processed by email_processor)
@@ -100,7 +107,7 @@ def lambda_handler(event, context):
         return {"disposition": "STOP_RULE_SET"}
 
     except Exception as e:
-        logger.error(f"Error during validation: {str(e)}", exc_info=True)
+        logger.exception("Error during validation", extra={"error": str(e)})
         # On error, stop processing to be safe
         logger.warning("Error occurred - returning STOP_RULE_SET to prevent processing")
         return {"disposition": "STOP_RULE_SET"}

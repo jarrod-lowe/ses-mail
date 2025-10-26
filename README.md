@@ -51,6 +51,10 @@
 - After setting up the infrastructure, set the token parameter to the value of token.json
 - Delete the `client_secret.json` and `token.json` files from the local filesystem
 
+## Initial AWS Setup
+
+In the account, enable Production access in SES.
+
 ## Terraform Infrastructure Setup
 
 Once you have created your Gmail OAuth token (above), you can deploy the AWS infrastructure:

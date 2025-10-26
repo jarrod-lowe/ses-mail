@@ -10,6 +10,14 @@ resource "aws_ses_domain_dkim" "main" {
   domain   = each.value.domain
 }
 
+# Custom MAIL FROM domain for better email deliverability
+resource "aws_ses_domain_mail_from" "main" {
+  for_each               = aws_ses_domain_identity.main
+  domain                 = each.value.domain
+  mail_from_domain       = "${var.mail_from_subdomain}.${each.value.domain}"
+  behavior_on_mx_failure = "RejectMessage"
+}
+
 # SES receipt rule set
 resource "aws_ses_receipt_rule_set" "main" {
   rule_set_name = "ses-mail-receipt-rules-${var.environment}"

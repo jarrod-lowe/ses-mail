@@ -7,7 +7,6 @@ It processes the email from S3 and inserts it into Gmail via the API.
 
 import base64
 import json
-import logging
 import os
 from typing import Dict, Any, List
 
@@ -17,10 +16,10 @@ from botocore.exceptions import ClientError
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from google.oauth2.credentials import Credentials
+from aws_lambda_powertools import Logger
 
-# Configure logging
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+# Configure structured JSON logging
+logger = Logger(service="ses-mail-email-processor")
 
 # Environment configuration
 GMAIL_TOKEN_PARAMETER = os.environ.get('GMAIL_TOKEN_PARAMETER', '/ses-mail/gmail-token')
@@ -46,7 +45,7 @@ def lambda_handler(event, context):
     Returns:
         dict: Response with results for each processed email
     """
-    logger.info(f"Received SES event: {json.dumps(event)}")
+    logger.info("Received SES event", extra={"event": event})
 
     results = []
     token_info = None
@@ -72,7 +71,7 @@ def lambda_handler(event, context):
         return {'results': results}
 
     except Exception as e:
-        logger.error(f"Error processing emails: {str(e)}", exc_info=True)
+        logger.exception("Error processing emails", extra={"error": str(e)})
         raise
 
 
@@ -94,32 +93,39 @@ def process_ses_record(record, service):
 
     try:
         # Log email metadata
-        logger.info(f"Processing email:")
-        logger.info(f"  Message ID: {message_id}")
-        logger.info(f"  From: {mail.get('source')}")
-        logger.info(f"  To: {mail.get('destination')}")
-        logger.info(f"  Subject: {mail.get('commonHeaders', {}).get('subject')}")
-        logger.info(f"  Timestamp: {mail.get('timestamp')}")
-        logger.info(f"  Spam verdict: {receipt.get('spamVerdict', {}).get('status')}")
-        logger.info(f"  Virus verdict: {receipt.get('virusVerdict', {}).get('status')}")
-        logger.info(f"  DKIM verdict: {receipt.get('dkimVerdict', {}).get('status')}")
-        logger.info(f"  SPF verdict: {receipt.get('spfVerdict', {}).get('status')}")
+        logger.info("Processing email", extra={
+            "messageId": message_id,
+            "from": mail.get('source'),
+            "to": mail.get('destination'),
+            "subject": mail.get('commonHeaders', {}).get('subject'),
+            "timestamp": mail.get('timestamp'),
+            "spamVerdict": receipt.get('spamVerdict', {}).get('status'),
+            "virusVerdict": receipt.get('virusVerdict', {}).get('status'),
+            "dkimVerdict": receipt.get('dkimVerdict', {}).get('status'),
+            "spfVerdict": receipt.get('spfVerdict', {}).get('status')
+        })
 
         if not message_id:
             raise ValueError("Missing SES mail.messageId")
 
         # Fetch raw email from S3
         raw_eml = fetch_raw_email_from_s3(message_id)
-        logger.info(f"  Fetched {len(raw_eml)} bytes from S3")
+        logger.info("Fetched email from S3", extra={
+            "messageId": message_id,
+            "byteCount": len(raw_eml)
+        })
 
         # Import into Gmail with INBOX and UNREAD labels
         gmail_response = gmail_import(service, raw_eml, DEFAULT_LABEL_IDS)
 
-        logger.info(f"  Successfully imported to Gmail: {gmail_response.get('id')}")
+        logger.info("Successfully imported to Gmail", extra={
+            "messageId": message_id,
+            "gmailId": gmail_response.get('id')
+        })
 
         # Delete email from S3 after successful import
         delete_email_from_s3(message_id)
-        logger.info(f"  Deleted email from S3")
+        logger.info("Deleted email from S3", extra={"messageId": message_id})
 
         return {
             'messageId': message_id,
@@ -130,7 +136,10 @@ def process_ses_record(record, service):
         }
 
     except (RuntimeError, ValueError, HttpError, ClientError) as e:
-        logger.error(f"  Error processing message {message_id}: {str(e)}")
+        logger.error("Error processing message", extra={
+            "messageId": message_id,
+            "error": str(e)
+        })
         return {
             'messageId': message_id,
             'error': str(e),
@@ -152,7 +161,7 @@ def load_token_from_ssm() -> Dict[str, Any]:
         )
         return json.loads(response['Parameter']['Value'])
     except ClientError as e:
-        logger.error(f"Error retrieving Gmail token from SSM: {str(e)}")
+        logger.error("Error retrieving Gmail token from SSM", extra={"error": str(e)})
         raise RuntimeError(f"Failed to load token from SSM: {e}")
 
 
@@ -172,7 +181,7 @@ def save_token_to_ssm(token_dict: Dict[str, Any]) -> None:
         )
         logger.info("Updated Gmail token in SSM")
     except ClientError as e:
-        logger.error(f"Error saving token to SSM: {str(e)}")
+        logger.error("Error saving token to SSM", extra={"error": str(e)})
         raise
 
 
@@ -191,7 +200,7 @@ def build_gmail_service(token_info: Dict[str, Any]):
         service = build('gmail', 'v1', credentials=creds, cache_discovery=False)
         return service, creds
     except Exception as e:
-        logger.error(f"Error building Gmail service: {str(e)}")
+        logger.error("Error building Gmail service", extra={"error": str(e)})
         raise
 
 
@@ -209,7 +218,7 @@ def maybe_update_token(creds: Credentials, original: Dict[str, Any]) -> None:
             updated.get('expiry') != original.get('expiry')):
             save_token_to_ssm(updated)
     except Exception as e:
-        logger.error(f"Error checking/updating token: {str(e)}")
+        logger.error("Error checking/updating token", extra={"error": str(e)})
 
 
 def fetch_raw_email_from_s3(message_id: str) -> bytes:
@@ -229,7 +238,10 @@ def fetch_raw_email_from_s3(message_id: str) -> bytes:
     s3_key = f"{S3_PREFIX}/{message_id}"
 
     try:
-        logger.info(f"Fetching from s3://{EMAIL_BUCKET}/{s3_key}")
+        logger.info("Fetching email from S3", extra={
+            "bucket": EMAIL_BUCKET,
+            "key": s3_key
+        })
         obj = s3_client.get_object(Bucket=EMAIL_BUCKET, Key=s3_key)
         return obj['Body'].read()
     except ClientError as e:
@@ -251,11 +263,18 @@ def delete_email_from_s3(message_id: str) -> None:
 
     try:
         s3_client.delete_object(Bucket=EMAIL_BUCKET, Key=s3_key)
-        logger.info(f"Deleted s3://{EMAIL_BUCKET}/{s3_key}")
+        logger.info("Deleted email from S3", extra={
+            "bucket": EMAIL_BUCKET,
+            "key": s3_key
+        })
     except ClientError as e:
         # Log error but don't fail the whole operation
         # Email is already in Gmail, so S3 cleanup failure is not critical
-        logger.error(f"Failed to delete email from S3: {e}")
+        logger.error("Failed to delete email from S3", extra={
+            "bucket": EMAIL_BUCKET,
+            "key": s3_key,
+            "error": str(e)
+        })
 
 
 def gmail_import(service, raw_bytes: bytes, label_ids: List[str]) -> Dict[str, Any]:

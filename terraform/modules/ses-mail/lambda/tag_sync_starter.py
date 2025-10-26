@@ -4,6 +4,10 @@ Lambda function to start a tag-sync task for AWS Service Catalog AppRegistry.
 This function is invoked during Terraform deployment to automatically configure
 tag-sync for the AppRegistry application, allowing it to discover resources
 tagged with the Application tag.
+
+Note: This Lambda is packaged as a single file without dependencies.
+It uses print() for logging instead of aws-lambda-powertools to avoid
+needing to package external dependencies.
 """
 import json
 import os
