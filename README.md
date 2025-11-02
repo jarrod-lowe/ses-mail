@@ -1663,6 +1663,70 @@ The Cognito User Pool is configured with multiple callback URLs to support both 
 
 These URLs are automatically derived from the `domain` variable in `terraform.tfvars`.
 
+### Token Management API
+
+The system provides a REST API for managing Gmail OAuth refresh tokens. The API is secured with Cognito JWT authentication and accessible through API Gateway.
+
+**API Endpoint:**
+
+```bash
+# Get API endpoint from Terraform outputs
+cd terraform/environments/test  # or prod
+terraform output token_api_endpoint
+# Example: https://riol22p8n8.execute-api.ap-southeast-2.amazonaws.com
+```
+
+**Available Endpoints:**
+
+| Method | Path | Auth Required | Description |
+|--------|------|---------------|-------------|
+| GET | `/api/health` | No | Public health check endpoint |
+| GET | `/api/token/status` | Yes | Get refresh token status for authenticated user |
+| POST | `/api/token/renew` | Yes | Initiate OAuth renewal flow |
+| GET | `/api/token/callback` | Yes | OAuth callback handler |
+| GET | `/api/users/me` | Yes | Get current user information |
+
+**Testing the API:**
+
+```bash
+# Test public health check endpoint
+curl https://riol22p8n8.execute-api.ap-southeast-2.amazonaws.com/api/health
+
+# Authenticated endpoints require a valid Cognito JWT token
+# Without a token, you'll receive a 401 Unauthorized response:
+curl https://riol22p8n8.execute-api.ap-southeast-2.amazonaws.com/api/token/status
+# Returns: {"message":"Unauthorized"}
+```
+
+**API Features:**
+
+- **Cognito JWT Authorization**: All authenticated endpoints validate JWT tokens from the Cognito User Pool
+- **CORS Support**: Configured for both local development (`https://localhost:3000`) and production
+- **Rate Limiting**: Conservative limits (10 requests/second burst, 10 requests/second sustained)
+- **X-Ray Tracing**: Distributed tracing enabled for all API calls
+- **CloudWatch Logging**: All requests logged with user context for audit and debugging
+
+**Implementation Status:**
+
+The API Gateway infrastructure is fully deployed (Task 6.1 complete). Lambda handlers currently return placeholder responses. Full implementation will be completed in Task 6.2, including:
+
+- Gmail OAuth token storage and retrieval
+- Token expiration checking and renewal flows
+- Message queue management
+- Integration with DynamoDB single-table design
+
+**CloudWatch Logs:**
+
+```bash
+# View API Gateway access logs
+AWS_PROFILE=ses-mail aws logs tail /aws/apigateway/ses-mail-token-api-test --follow
+
+# View Lambda function logs
+AWS_PROFILE=ses-mail aws logs tail /aws/lambda/ses-mail-health-check-api-test --follow
+AWS_PROFILE=ses-mail aws logs tail /aws/lambda/ses-mail-token-status-api-test --follow
+AWS_PROFILE=ses-mail aws logs tail /aws/lambda/ses-mail-user-info-api-test --follow
+```
+
 ### Future Token Management Features
 
 The Cognito infrastructure supports the upcoming token management features:

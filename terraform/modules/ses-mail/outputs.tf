@@ -331,3 +331,22 @@ output "cognito_logout_urls" {
   description = "Configured logout URLs for OAuth"
   value       = local.cognito_logout_urls
 }
+
+# ==============================================================================
+# Token Management API Gateway Outputs (Task 6.1)
+# ==============================================================================
+
+output "token_api_endpoint" {
+  description = "API Gateway invoke URL for token management API"
+  value       = aws_apigatewayv2_api.token_management.api_endpoint
+}
+
+output "token_api_id" {
+  description = "API Gateway ID for token management API (for CloudFront integration)"
+  value       = aws_apigatewayv2_api.token_management.id
+}
+
+output "token_api_execution_arn" {
+  description = "Execution ARN for token management API (for permissions)"
+  value       = aws_apigatewayv2_api.token_management.execution_arn
+}

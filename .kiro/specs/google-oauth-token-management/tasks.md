@@ -88,7 +88,7 @@ A task is not complete until:
     - _Requirements: 6.2, 7.2_
 
 - [ ] 6. Create token management API with Cognito authentication
-  - [ ] 6.1 Implement API Gateway with Cognito authorizer
+  - [x] 6.1 Implement API Gateway with Cognito authorizer
     - Set up API Gateway with Cognito User Pool authorizer
     - Configure CORS for CloudFront integration
     - Add request validation and rate limiting

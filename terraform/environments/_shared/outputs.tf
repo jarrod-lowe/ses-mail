@@ -87,3 +87,15 @@ output "cognito_callback_urls" {
   description = "Configured callback URLs for OAuth authentication"
   value       = module.ses_mail.cognito_callback_urls
 }
+
+# Token Management API
+
+output "token_api_endpoint" {
+  description = "API Gateway endpoint URL for token management API"
+  value       = module.ses_mail.token_api_endpoint
+}
+
+output "token_api_id" {
+  description = "API Gateway ID for CloudFront integration"
+  value       = module.ses_mail.token_api_id
+}
