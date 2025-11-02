@@ -46,7 +46,7 @@ help:
 	@echo ""
 
 # Package Lambda functions with dependencies
-$(MODULE_DIR)/lambda/package: requirements.txt $(MODULE_DIR)/lambda/email_processor.py $(MODULE_DIR)/lambda/router_enrichment.py $(MODULE_DIR)/lambda/gmail_forwarder.py $(MODULE_DIR)/lambda/bouncer.py $(MODULE_DIR)/lambda/smtp_credential_manager.py
+$(MODULE_DIR)/lambda/package: requirements.txt $(MODULE_DIR)/lambda/email_processor.py $(MODULE_DIR)/lambda/router_enrichment.py $(MODULE_DIR)/lambda/gmail_forwarder.py $(MODULE_DIR)/lambda/bouncer.py $(MODULE_DIR)/lambda/smtp_credential_manager.py $(MODULE_DIR)/lambda/token_utils.py $(MODULE_DIR)/lambda/token_status_api.py $(MODULE_DIR)/lambda/token_renew_api.py $(MODULE_DIR)/lambda/oauth_callback_api.py $(MODULE_DIR)/lambda/user_info_api.py $(MODULE_DIR)/lambda/health_check_api.py
 	@echo "Packaging Lambda functions with dependencies..."
 	@rm -rf $(MODULE_DIR)/lambda/package
 	@mkdir -p $(MODULE_DIR)/lambda/package
@@ -56,6 +56,12 @@ $(MODULE_DIR)/lambda/package: requirements.txt $(MODULE_DIR)/lambda/email_proces
 	@cp $(MODULE_DIR)/lambda/gmail_forwarder.py $(MODULE_DIR)/lambda/package/
 	@cp $(MODULE_DIR)/lambda/bouncer.py $(MODULE_DIR)/lambda/package/
 	@cp $(MODULE_DIR)/lambda/smtp_credential_manager.py $(MODULE_DIR)/lambda/package/
+	@cp $(MODULE_DIR)/lambda/token_utils.py $(MODULE_DIR)/lambda/package/
+	@cp $(MODULE_DIR)/lambda/token_status_api.py $(MODULE_DIR)/lambda/package/
+	@cp $(MODULE_DIR)/lambda/token_renew_api.py $(MODULE_DIR)/lambda/package/
+	@cp $(MODULE_DIR)/lambda/oauth_callback_api.py $(MODULE_DIR)/lambda/package/
+	@cp $(MODULE_DIR)/lambda/user_info_api.py $(MODULE_DIR)/lambda/package/
+	@cp $(MODULE_DIR)/lambda/health_check_api.py $(MODULE_DIR)/lambda/package/
 	@echo "Lambda package created"
 
 package: $(MODULE_DIR)/lambda/package

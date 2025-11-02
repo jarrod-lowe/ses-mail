@@ -95,7 +95,7 @@ A task is not complete until:
     - Extract Cognito user ID from JWT tokens automatically
     - _Requirements: 6.1, 6.3_
   
-  - [ ] 6.2 Create token status and renewal API endpoints
+  - [x] 6.2 Create token status and renewal API endpoints
     - Implement GET /api/token/status endpoint (user ID from JWT)
     - Implement POST /api/token/renew for OAuth flow initiation
     - Implement GET /api/token/callback for OAuth callback handling

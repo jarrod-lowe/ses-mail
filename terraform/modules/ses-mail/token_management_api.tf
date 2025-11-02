@@ -134,15 +134,12 @@ resource "aws_lambda_function" "token_status_api" {
   }
 }
 
-# Package Lambda function
+# Package Lambda function from lambda/package directory
 data "archive_file" "token_status_api_package" {
   type        = "zip"
+  source_dir  = "${path.module}/lambda/package"
   output_path = "${path.module}/lambda/token_status_api_${var.environment}.zip"
-
-  source {
-    content  = file("${path.module}/lambda/token_status_api.py")
-    filename = "token_status_api.py"
-  }
+  excludes    = ["__pycache__", "*.pyc", ".DS_Store", "token_renew_api.py", "oauth_callback_api.py", "user_info_api.py", "health_check_api.py", "email_processor.py", "router_enrichment.py", "gmail_forwarder.py", "bouncer.py", "smtp_credential_manager.py", "tag_sync_starter.py", "email_validator.py"]
 }
 
 # CloudWatch Log Group
@@ -201,12 +198,9 @@ resource "aws_lambda_function" "token_renew_api" {
 
 data "archive_file" "token_renew_api_package" {
   type        = "zip"
+  source_dir  = "${path.module}/lambda/package"
   output_path = "${path.module}/lambda/token_renew_api_${var.environment}.zip"
-
-  source {
-    content  = file("${path.module}/lambda/token_renew_api.py")
-    filename = "token_renew_api.py"
-  }
+  excludes    = ["__pycache__", "*.pyc", ".DS_Store", "token_status_api.py", "oauth_callback_api.py", "user_info_api.py", "health_check_api.py", "email_processor.py", "router_enrichment.py", "gmail_forwarder.py", "bouncer.py", "smtp_credential_manager.py", "tag_sync_starter.py", "email_validator.py"]
 }
 
 resource "aws_cloudwatch_log_group" "token_renew_api_logs" {
@@ -263,12 +257,9 @@ resource "aws_lambda_function" "oauth_callback_api" {
 
 data "archive_file" "oauth_callback_api_package" {
   type        = "zip"
+  source_dir  = "${path.module}/lambda/package"
   output_path = "${path.module}/lambda/oauth_callback_api_${var.environment}.zip"
-
-  source {
-    content  = file("${path.module}/lambda/oauth_callback_api.py")
-    filename = "oauth_callback_api.py"
-  }
+  excludes    = ["__pycache__", "*.pyc", ".DS_Store", "token_status_api.py", "token_renew_api.py", "user_info_api.py", "health_check_api.py", "email_processor.py", "router_enrichment.py", "gmail_forwarder.py", "bouncer.py", "smtp_credential_manager.py", "tag_sync_starter.py", "email_validator.py"]
 }
 
 resource "aws_cloudwatch_log_group" "oauth_callback_api_logs" {
@@ -325,12 +316,9 @@ resource "aws_lambda_function" "user_info_api" {
 
 data "archive_file" "user_info_api_package" {
   type        = "zip"
+  source_dir  = "${path.module}/lambda/package"
   output_path = "${path.module}/lambda/user_info_api_${var.environment}.zip"
-
-  source {
-    content  = file("${path.module}/lambda/user_info_api.py")
-    filename = "user_info_api.py"
-  }
+  excludes    = ["__pycache__", "*.pyc", ".DS_Store", "token_status_api.py", "token_renew_api.py", "oauth_callback_api.py", "health_check_api.py", "email_processor.py", "router_enrichment.py", "gmail_forwarder.py", "bouncer.py", "smtp_credential_manager.py", "tag_sync_starter.py", "email_validator.py"]
 }
 
 resource "aws_cloudwatch_log_group" "user_info_api_logs" {
@@ -385,12 +373,9 @@ resource "aws_lambda_function" "health_check_api" {
 
 data "archive_file" "health_check_api_package" {
   type        = "zip"
+  source_dir  = "${path.module}/lambda/package"
   output_path = "${path.module}/lambda/health_check_api_${var.environment}.zip"
-
-  source {
-    content  = file("${path.module}/lambda/health_check_api.py")
-    filename = "health_check_api.py"
-  }
+  excludes    = ["__pycache__", "*.pyc", ".DS_Store", "token_status_api.py", "token_renew_api.py", "oauth_callback_api.py", "user_info_api.py", "email_processor.py", "router_enrichment.py", "gmail_forwarder.py", "bouncer.py", "smtp_credential_manager.py", "tag_sync_starter.py", "email_validator.py"]
 }
 
 resource "aws_cloudwatch_log_group" "health_check_api_logs" {
@@ -482,6 +467,27 @@ data "aws_iam_policy_document" "lambda_token_api_cognito_access" {
     ]
     resources = [
       aws_cognito_user_pool.main.arn
+    ]
+  }
+}
+
+# Custom policy for SSM Parameter Store access (Google OAuth credentials)
+resource "aws_iam_role_policy" "lambda_token_api_ssm_access" {
+  name   = "SSMParameterAccess"
+  role   = aws_iam_role.lambda_token_api_execution.id
+  policy = data.aws_iam_policy_document.lambda_token_api_ssm_access.json
+}
+
+data "aws_iam_policy_document" "lambda_token_api_ssm_access" {
+  statement {
+    sid    = "SSMGoogleOAuthParameters"
+    effect = "Allow"
+    actions = [
+      "ssm:GetParameter",
+      "ssm:GetParameters"
+    ]
+    resources = [
+      "arn:aws:ssm:${var.aws_region}:*:parameter/ses-mail/${var.environment}/google-oauth-*"
     ]
   }
 }

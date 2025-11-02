@@ -1,55 +1,134 @@
 # SES Mail System
 
-## Initial Google Cloud Setup
+## Google Cloud OAuth Setup for Multi-User Token Management
 
-- Go to <https://console.cloud.google.com>
-- Click the current project (top left next to "Google Cloud")
-- Click "New Project"
-- Name it "ses-mail"
-- Leave the organisation as "No organisation"
-- Create
-- ☰ -> APIs and services -> Library
-- Search for "Gmail API"
-- Select "Gmail API"
-- Click "Enable"
-- Select "OAuth consent screen" in the left-side menu
-- It will say "Google auth platform not configured yet" - Click "Get started"
-- App name: ses-mail
-- User support email: select your email address
-- Next
-- Select External
-- Next
-- Add your email address for the contact address
-- Next
-- Agree to the policy
-- Continue
-- Create
-- Audience -> Add users
-- Add your gmail address
-- Save
-- Clients -> Create client
-- Select "Create OAuth client"
-- Application type: Desktop app
-- Name: ses-mail
-- Create
-- Select "Download JSON" - and save it for later
-- OK
-- From the left menu -> Data Access -> Add or remove scopes
-- Add "Gmail API .../auth/gmail.insert"
-- Update
-- Save
-- Put the client secret file in this directory, named "client_secret.json"
-- `python3 -m venv .venv`
-- Either source the file mentioned, or let VSCode handle it and create a new terminal
-- `pip3 install -r requirements.txt`
-- `./scripts/create_refresh_token.py`
-- In the browser window that pops up, select your account
-- Continue
-- Continue
-- Close the tab
-- You can use the scripts in `scripts/` to test the token
-- After setting up the infrastructure, set the token parameter to the value of token.json
-- Delete the `client_secret.json` and `token.json` files from the local filesystem
+The system uses Google OAuth for managing Gmail refresh tokens on a per-user basis. This setup is required for the token management API to function.
+
+### Create Google Cloud OAuth Client
+
+1. **Create or Select Project**:
+   - Go to <https://console.cloud.google.com>
+   - Click the current project (top left next to "Google Cloud")
+   - Click "New Project" or select existing project
+   - Name it "ses-mail" (if creating new)
+   - Leave the organisation as "No organisation"
+   - Create
+
+2. **Enable Gmail API**:
+   - ☰ -> APIs and services -> Library
+   - Search for "Gmail API"
+   - Select "Gmail API"
+   - Click "Enable"
+
+3. **Configure OAuth Consent Screen**:
+   - Select "OAuth consent screen" in the left-side menu
+   - If not configured: Click "Get started"
+   - App name: `ses-mail`
+   - User support email: select your email address
+   - Select "External" (for testing with personal Gmail accounts)
+   - Add your email address for the contact address
+   - Agree to the policy
+   - Continue and Create
+
+4. **Add Test Users** (for testing mode):
+   - Audience -> Add users
+   - Add Gmail addresses for each user who will use the system
+   - Save
+   - Note: In testing mode, only added users can authorize the app
+
+5. **Configure OAuth Scopes**:
+   - From the left menu -> Data Access -> Add or remove scopes
+   - Add scope: `https://www.googleapis.com/auth/gmail.insert`
+   - Update and Save
+
+6. **Create OAuth Client Credentials**:
+   - Clients -> Create client
+   - Select "Create OAuth client"
+   - **Application type**: **Web application** (not Desktop app!)
+   - Name: `ses-mail-web-ui`
+   - **Authorized redirect URIs**: Add the following URIs:
+     - `https://localhost:3000/token-management/callback` (for local development)
+     - `https://mta-sts.{your-domain}/token-management/callback` (for production)
+       - Replace `{your-domain}` with your actual domain (e.g., `example.com`)
+   - Create
+   - **Download the credentials JSON** and note the `client_id` and `client_secret`
+   - OK
+
+### Store OAuth Credentials in AWS SSM Parameter Store
+
+After creating the OAuth client, store the credentials in AWS Systems Manager Parameter Store:
+
+```bash
+# Set your AWS profile
+export AWS_PROFILE=ses-mail
+
+# Store Google OAuth Client ID (SecureString for encryption)
+aws ssm put-parameter \
+  --name "/ses-mail/test/google-oauth-client-id" \
+  --value "YOUR_CLIENT_ID_HERE.apps.googleusercontent.com" \
+  --type SecureString \
+  --description "Google OAuth client ID for Gmail token management"
+
+# Store Google OAuth Client Secret (SecureString for encryption)
+aws ssm put-parameter \
+  --name "/ses-mail/test/google-oauth-client-secret" \
+  --value "YOUR_CLIENT_SECRET_HERE" \
+  --type SecureString \
+  --description "Google OAuth client secret for Gmail token management"
+
+# Store OAuth Redirect URI (String - not sensitive)
+aws ssm put-parameter \
+  --name "/ses-mail/test/google-oauth-redirect-uri" \
+  --value "https://localhost:3000/token-management/callback" \
+  --type String \
+  --description "OAuth redirect URI for token management (update for production)"
+```
+
+**For production environment**, repeat with `ENV=prod` and update the redirect URI:
+
+```bash
+aws ssm put-parameter \
+  --name "/ses-mail/prod/google-oauth-redirect-uri" \
+  --value "https://mta-sts.yourdomain.com/token-management/callback" \
+  --type String
+```
+
+### How OAuth Token Management Works
+
+1. **Each user authenticates individually**:
+   - Users log in via Cognito to access the token management web UI
+   - Users click "Renew Gmail Token" in the web UI
+   - API generates Google OAuth authorization URL with user-specific state parameter
+   - User is redirected to Google for authorization
+   - Google redirects back to the web UI with authorization code
+   - Web UI calls API with the code
+   - API exchanges code for refresh token and stores it in DynamoDB
+
+2. **Per-user token storage**:
+   - Each Cognito user has their own refresh token in DynamoDB
+   - Tokens expire after 7 days in testing mode
+   - Users can renew their own tokens independently
+
+3. **Security**:
+   - State parameter prevents CSRF attacks
+   - Tokens stored encrypted in DynamoDB
+   - OAuth credentials stored encrypted in SSM Parameter Store
+   - Users can only access their own tokens
+
+### Testing Token Management (Optional)
+
+If you want to test the OAuth flow locally before deploying the web UI:
+
+```bash
+# Get the API endpoint
+cd terraform/environments/test
+terraform output token_api_endpoint
+
+# The API endpoints require Cognito JWT authentication
+# Full testing requires the web UI (task 7.x)
+```
+
+**Note**: The old single-token approach (using `create_refresh_token.py` script) is deprecated in favor of the per-user token management system.
 
 ## Initial AWS Setup
 
