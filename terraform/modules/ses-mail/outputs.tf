@@ -289,3 +289,45 @@ output "dns_configuration_summary" {
     }
   }
 }
+
+# Cognito User Pool Outputs
+
+output "cognito_user_pool_id" {
+  description = "ID of the Cognito User Pool for token management authentication"
+  value       = aws_cognito_user_pool.main.id
+}
+
+output "cognito_user_pool_arn" {
+  description = "ARN of the Cognito User Pool"
+  value       = aws_cognito_user_pool.main.arn
+}
+
+output "cognito_user_pool_endpoint" {
+  description = "Endpoint name of the Cognito User Pool"
+  value       = aws_cognito_user_pool.main.endpoint
+}
+
+output "cognito_user_pool_client_id" {
+  description = "Client ID for the Cognito User Pool web UI application"
+  value       = aws_cognito_user_pool_client.main.id
+}
+
+output "cognito_user_pool_domain" {
+  description = "Cognito User Pool domain for hosted UI"
+  value       = aws_cognito_user_pool_domain.main.domain
+}
+
+output "cognito_hosted_ui_url" {
+  description = "URL for the Cognito hosted UI login page"
+  value       = "https://${aws_cognito_user_pool_domain.main.domain}.auth.${var.aws_region}.amazoncognito.com/login?client_id=${aws_cognito_user_pool_client.main.id}&response_type=code&redirect_uri=https://mta-sts.${var.domain[0]}/token-management/callback"
+}
+
+output "cognito_callback_urls" {
+  description = "Configured callback URLs for OAuth authentication"
+  value       = local.cognito_callback_urls
+}
+
+output "cognito_logout_urls" {
+  description = "Configured logout URLs for OAuth"
+  value       = local.cognito_logout_urls
+}

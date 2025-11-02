@@ -1512,6 +1512,168 @@ The backup MX records will automatically:
 - Verify KMS key permissions allow encryption/decryption
 - Check DynamoDB Streams are enabled and Lambda has read permissions
 
+## Token Management Web UI
+
+The system includes AWS Cognito User Pool authentication infrastructure for the upcoming token management web UI. This will enable secure, per-user management of Gmail OAuth refresh tokens.
+
+### Cognito User Pool Configuration
+
+The Cognito User Pool is configured for admin-only user management with optional MFA:
+
+**User Pool Details:**
+- **Name**: `ses-mail-user-pool-{environment}`
+- **Domain**: `ses-mail-{environment}.auth.ap-southeast-2.amazoncognito.com`
+- **Registration**: Admin-only (no self-registration)
+- **MFA**: Optional (TOTP authenticator apps supported)
+- **Password Policy**: Min 8 characters, requires uppercase, lowercase, numbers, symbols
+- **Email Verification**: Required for new users
+- **Deletion Protection**: Enabled
+
+**Getting Cognito Configuration:**
+
+```bash
+# Get Cognito User Pool details from Terraform outputs
+cd terraform/environments/test  # or prod
+terraform output cognito_user_pool_id
+terraform output cognito_user_pool_client_id
+terraform output cognito_hosted_ui_url
+terraform output cognito_callback_urls
+```
+
+### Managing Users
+
+As an administrator, you can create and manage users through the AWS Console or CLI:
+
+**Creating a New User (AWS Console):**
+
+1. Go to **Cognito** → **User Pools** → `ses-mail-user-pool-{environment}`
+2. Click **Users** → **Create user**
+3. Enter:
+   - **Email**: User's email address (will be their username)
+   - **Temporary password**: Generate or specify
+   - **Mark email as verified**: Check this box
+4. Click **Create user**
+5. User will receive invitation email with temporary password and sign-in URL
+
+**Creating a New User (AWS CLI):**
+
+```bash
+# Create a new user
+AWS_PROFILE=ses-mail aws cognito-idp admin-create-user \
+  --user-pool-id ap-southeast-2_Y0ba5EONC \
+  --username user@example.com \
+  --user-attributes Name=email,Value=user@example.com Name=email_verified,Value=true \
+  --desired-delivery-mediums EMAIL \
+  --message-action SUPPRESS
+
+# Set permanent password (if not using email invitation)
+AWS_PROFILE=ses-mail aws cognito-idp admin-set-user-password \
+  --user-pool-id ap-southeast-2_Y0ba5EONC \
+  --username user@example.com \
+  --password 'SecurePassword123!' \
+  --permanent
+```
+
+**Listing Users:**
+
+```bash
+# List all users in the pool
+AWS_PROFILE=ses-mail aws cognito-idp list-users \
+  --user-pool-id ap-southeast-2_Y0ba5EONC
+
+# Get specific user details
+AWS_PROFILE=ses-mail aws cognito-idp admin-get-user \
+  --user-pool-id ap-southeast-2_Y0ba5EONC \
+  --username user@example.com
+```
+
+**Disabling or Deleting Users:**
+
+```bash
+# Disable a user temporarily
+AWS_PROFILE=ses-mail aws cognito-idp admin-disable-user \
+  --user-pool-id ap-southeast-2_Y0ba5EONC \
+  --username user@example.com
+
+# Enable a disabled user
+AWS_PROFILE=ses-mail aws cognito-idp admin-enable-user \
+  --user-pool-id ap-southeast-2_Y0ba5EONC \
+  --username user@example.com
+
+# Permanently delete a user
+AWS_PROFILE=ses-mail aws cognito-idp admin-delete-user \
+  --user-pool-id ap-southeast-2_Y0ba5EONC \
+  --username user@example.com
+```
+
+### Cognito Hosted UI
+
+Users can sign in through the Cognito hosted UI to access the token management interface:
+
+```bash
+# Get the hosted UI URL
+cd terraform/environments/test
+terraform output cognito_hosted_ui_url
+
+# Example URL:
+# https://ses-mail-test.auth.ap-southeast-2.amazoncognito.com/login?client_id=...&response_type=code&redirect_uri=https://mta-sts.testmail.rrod.net/token-management/callback
+```
+
+### Multi-Factor Authentication (MFA)
+
+MFA is optional for all users. Users can enable TOTP-based MFA using authenticator apps (Google Authenticator, Authy, 1Password, etc.):
+
+**User MFA Setup:**
+1. Sign in to the web UI
+2. Go to **Profile** → **Security Settings**
+3. Click **Enable MFA**
+4. Scan QR code with authenticator app
+5. Enter verification code to confirm
+
+**Administrator MFA Management:**
+
+```bash
+# Check user's MFA status
+AWS_PROFILE=ses-mail aws cognito-idp admin-get-user \
+  --user-pool-id ap-southeast-2_Y0ba5EONC \
+  --username user@example.com \
+  --query 'UserMFASettingList'
+
+# Reset user's MFA (if they lose authenticator access)
+AWS_PROFILE=ses-mail aws cognito-idp admin-set-user-mfa-preference \
+  --user-pool-id ap-southeast-2_Y0ba5EONC \
+  --username user@example.com \
+  --software-token-mfa-settings Enabled=false
+```
+
+### Security Best Practices
+
+1. **Strong Passwords**: Enforce the configured password policy (8+ chars, mixed case, numbers, symbols)
+2. **Enable MFA**: Encourage all users to enable MFA for enhanced security
+3. **Regular Audits**: Periodically review user list and remove inactive accounts
+4. **Password Rotation**: Consider implementing password rotation policies for sensitive environments
+5. **Monitor Sign-Ins**: Review CloudWatch Logs for Cognito authentication events
+
+### OAuth Callback URLs
+
+The Cognito User Pool is configured with multiple callback URLs to support both local development and production:
+
+- `https://localhost:3000/callback` - Local development
+- `https://mta-sts.{domain}/token-management/callback` - Production (for each configured domain)
+
+These URLs are automatically derived from the `domain` variable in `terraform.tfvars`.
+
+### Future Token Management Features
+
+The Cognito infrastructure supports the upcoming token management features:
+
+- **Per-User Gmail Token Storage**: Each user will have their own Gmail OAuth refresh tokens
+- **Token Renewal Web UI**: Secure interface for manual token renewal when tokens expire
+- **Message Queue Management**: View and manage queued emails during token expiration periods
+- **Token Expiration Monitoring**: Automated alerts before refresh tokens expire (7-day testing mode limit)
+
+See `.kiro/specs/google-oauth-token-management/` for the complete design and implementation roadmap.
+
 ## Integration Testing
 
 The system includes comprehensive integration tests that validate the entire email processing pipeline end-to-end, from SES receipt through to final handler processing (Gmail forwarding or bouncing).

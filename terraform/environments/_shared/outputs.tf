@@ -65,3 +65,25 @@ output "myapplications_url" {
   description = "URL to view this application in AWS Console myApplications"
   value       = module.ses_mail.myapplications_url
 }
+
+# Cognito User Pool Configuration
+
+output "cognito_user_pool_id" {
+  description = "ID of the Cognito User Pool for token management authentication"
+  value       = module.ses_mail.cognito_user_pool_id
+}
+
+output "cognito_user_pool_client_id" {
+  description = "Client ID for the Cognito User Pool web UI application"
+  value       = module.ses_mail.cognito_user_pool_client_id
+}
+
+output "cognito_hosted_ui_url" {
+  description = "URL for the Cognito hosted UI login page"
+  value       = module.ses_mail.cognito_hosted_ui_url
+}
+
+output "cognito_callback_urls" {
+  description = "Configured callback URLs for OAuth authentication"
+  value       = module.ses_mail.cognito_callback_urls
+}
