@@ -289,3 +289,25 @@ output "dns_configuration_summary" {
     }
   }
 }
+
+# Step Function Outputs
+
+output "stepfunction_retry_processor_arn" {
+  description = "ARN of the Step Function for retry processing"
+  value       = aws_sfn_state_machine.retry_processor.arn
+}
+
+output "stepfunction_retry_processor_name" {
+  description = "Name of the Step Function for retry processing"
+  value       = aws_sfn_state_machine.retry_processor.name
+}
+
+output "gmail_forwarder_retry_queue_url" {
+  description = "URL of the Gmail forwarder retry queue"
+  value       = aws_sqs_queue.gmail_forwarder_retry.url
+}
+
+output "gmail_forwarder_retry_queue_arn" {
+  description = "ARN of the Gmail forwarder retry queue"
+  value       = aws_sqs_queue.gmail_forwarder_retry.arn
+}

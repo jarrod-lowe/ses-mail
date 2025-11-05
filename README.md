@@ -326,7 +326,7 @@ AWS_PROFILE=ses-mail python3 scripts/refresh_oauth_token.py --env test
 2. **Interactive OAuth Flow**: Opens your browser to Google consent screen, runs a temporary local web server on port 8080 to receive the authorization callback, and exchanges the authorization code for a new refresh token
 3. **Stores New Token**: Saves the new refresh token to SSM Parameter Store (to be implemented in Task 3.3)
 4. **Sets Up Monitoring**: Configures CloudWatch alarm for token expiration (to be implemented in Task 3.3)
-5. **Triggers Retry Processing**: Processes any queued messages that failed due to expired token (to be implemented in Task 3.4)
+5. **Triggers Retry Processing**: Automatically starts Step Function execution to process queued messages that failed due to expired token (to be implemented in Task 3.4)
 
 **Interactive OAuth Flow Details:**
 
@@ -406,9 +406,22 @@ The Gmail forwarder Lambda automatically detects OAuth token expiration errors a
    - The message is removed from the main processing queue to prevent immediate reprocessing
    - Structured logging records the retry queueing event in CloudWatch Logs
 
-3. **Retry Processing**: (To be implemented in Task 4.1-4.2)
-   - After refreshing the OAuth token, run the Step Function retry processor to process queued messages
-   - Messages will be retried up to 3 times before moving to the DLQ
+3. **Retry Processing**: After refreshing the OAuth token, manually trigger the Step Function retry processor to process queued messages:
+
+   ```bash
+   # Trigger Step Function retry processing
+   AWS_PROFILE=ses-mail aws stepfunctions start-execution \
+     --state-machine-arn arn:aws:states:ap-southeast-2:{account}:stateMachine:ses-mail-gmail-forwarder-retry-processor-test \
+     --input '{}'
+   ```
+
+   The Step Function automatically:
+   - Reads messages from the retry queue in batches of 10
+   - Invokes the Gmail Forwarder Lambda with original SES events for each message
+   - Implements exponential backoff retry logic (3 attempts max: 30s, 60s, 120s intervals)
+   - Deletes successfully processed messages from the queue
+   - Moves permanently failed messages to the dead letter queue
+   - Continues processing until the retry queue is empty
 
 **Example CloudWatch Log Entry:**
 

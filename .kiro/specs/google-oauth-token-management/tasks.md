@@ -15,7 +15,7 @@ A task is not complete until:
   - Create SNS topic for token expiration notifications
   - _Requirements: 4.1, 4.4, 5.1_
 
-- [ ] 2. Update Gmail Forwarder Lambda for token management
+- [x] 2. Update Gmail Forwarder Lambda for token management
   - [x] 2.1 Modify Gmail Forwarder to generate fresh access tokens for each session
     - Remove existing token caching/updating logic
     - Implement `generate_access_token()` function using refresh token
@@ -60,7 +60,7 @@ A task is not complete until:
     - _Requirements: 5.1, 5.2_
 
 - [ ] 4. Create Step Function definition for retry processing
-  - [ ] 4.1 Define Step Function state machine for message processing
+  - [x] 4.1 Define Step Function state machine for message processing
     - Create state machine to read messages from SQS retry queue
     - Define states for invoking Gmail Forwarder Lambda with original SES events
     - Implement error handling and retry logic with exponential backoff
