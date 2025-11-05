@@ -32,6 +32,25 @@ resource "aws_ssm_parameter" "gmail_token" {
   }
 }
 
+# SSM Parameter for storing Gmail OAuth client credentials
+resource "aws_ssm_parameter" "gmail_oauth_client_credentials" {
+  name        = "/ses-mail/${var.environment}/gmail-forwarder/oauth/client-credentials"
+  description = "Gmail OAuth client credentials JSON (client_secret.json contents) for ${var.environment}"
+  type        = "SecureString"
+  value       = "PLACEHOLDER - Upload the contents of client_secret.json after deployment"
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+
+  tags = {
+    Name        = "gmail-oauth-client-credentials-${var.environment}"
+    Environment = var.environment
+    Service     = "ses-mail"
+    Purpose     = "Gmail OAuth client credentials for refresh script"
+  }
+}
+
 # IAM policy document for Lambda assume role
 data "aws_iam_policy_document" "lambda_assume_role" {
   statement {
