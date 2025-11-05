@@ -86,7 +86,7 @@ A task is not complete until:
     - _Requirements: 5.4, 5.5_
 
 - [ ] 6. Update Terraform infrastructure
-  - [ ] 6.1 Add SQS resources for retry processing
+  - [x] 6.1 Add SQS resources for retry processing
     - Create retry queue with environment-specific naming
     - Create dead letter queue for permanently failed messages
     - Configure queue policies and visibility timeouts

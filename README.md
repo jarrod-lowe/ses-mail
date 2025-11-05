@@ -356,12 +356,47 @@ The system will automatically monitor refresh token expiration using CloudWatch 
 - **Action**: SNS notification to administrators
 - **Purpose**: Proactive reminder to run refresh script before token expires
 
+### Retry Queue Infrastructure
+
+The system includes dedicated SQS retry queues for handling Gmail token expiration failures during email processing:
+
+**Retry Queue Configuration:**
+
+- **Primary Queue**: `ses-mail-gmail-forwarder-retry-{environment}`
+- **Dead Letter Queue**: `ses-mail-gmail-forwarder-retry-dlq-{environment}`
+- **Visibility Timeout**: 15 minutes (900 seconds) - allows Step Function retry processing
+- **Message Retention**: 14 days (1,209,600 seconds) - extended retention for recovery scenarios
+- **Max Receive Count**: 3 attempts before moving to DLQ
+
+**CloudWatch Monitoring:**
+
+The retry queues include CloudWatch alarms for operational monitoring:
+
+- **DLQ Alarm**: `ses-mail-gmail-forwarder-retry-dlq-messages-{environment}` - Triggers when messages appear in retry DLQ
+- **Queue Age Alarm**: `ses-mail-gmail-forwarder-retry-queue-age-{environment}` - Triggers when messages are older than 15 minutes
+
+**Queue Access:**
+
+```bash
+# Check retry queue depth
+AWS_PROFILE=ses-mail aws sqs get-queue-attributes \
+  --queue-url https://sqs.ap-southeast-2.amazonaws.com/{account}/ses-mail-gmail-forwarder-retry-test \
+  --attribute-names ApproximateNumberOfMessages
+
+# View retry queue messages
+AWS_PROFILE=ses-mail aws sqs receive-message \
+  --queue-url https://sqs.ap-southeast-2.amazonaws.com/{account}/ses-mail-gmail-forwarder-retry-test \
+  --max-number-of-messages 1
+```
+
+The retry queue infrastructure enables graceful handling of token expiration failures by preserving failed messages for later processing after token refresh.
+
 ### Handling Token Expiration
 
 When a refresh token expires during email processing:
 
 1. **Detection**: Gmail forwarder Lambda detects OAuth expiration error (401/403)
-2. **Queueing**: Failed messages are placed in retry queue with original SES event
+2. **Queueing**: Failed messages are placed in retry queue with original SES event and error metadata
 3. **Alerting**: CloudWatch alarm triggers to notify administrators
 4. **Manual Refresh**: Administrator runs refresh script to obtain new token
 5. **Automatic Retry**: Refresh script triggers retry processing of queued messages
