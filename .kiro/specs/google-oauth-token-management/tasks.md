@@ -28,7 +28,7 @@ A task is not complete until:
     - Add error handling to queue messages when token expires
     - _Requirements: 4.1, 4.2_
 
-  - [ ] 2.3 Update SSM parameter access for new structure
+  - [x] 2.3 Update SSM parameter access for new structure
     - Change parameter paths to `/ses-mail/{environment}/gmail-forwarder/oauth/`
     - Update IAM policies to access new parameter structure
     - Read complete client credentials JSON instead of separate client ID/secret
