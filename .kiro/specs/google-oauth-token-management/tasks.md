@@ -66,7 +66,7 @@ A task is not complete until:
     - Implement error handling and retry logic with exponential backoff
     - _Requirements: 4.4, 5.2, 5.3_
 
-  - [ ] 4.2 Configure Step Function IAM permissions
+  - [x] 4.2 Configure Step Function IAM permissions
     - Grant permissions to read from SQS retry queue
     - Grant permissions to invoke Gmail Forwarder Lambda
     - Grant permissions to delete processed messages from queue
