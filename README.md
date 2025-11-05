@@ -1817,6 +1817,101 @@ The Cognito infrastructure supports the upcoming token management features:
 
 See `.kiro/specs/google-oauth-token-management/` for the complete design and implementation roadmap.
 
+### Web UI for Token Management
+
+The system includes a React-based web application for managing Gmail OAuth tokens. The web UI provides a secure, user-friendly interface for viewing token status and renewing expired refresh tokens.
+
+**Current Implementation Status:**
+
+- ✅ **Task 7.1 Complete**: React application with Cognito authentication
+- ⏳ **Task 7.2**: Token status dashboard (upcoming)
+- ⏳ **Task 7.3**: Google OAuth renewal flow interface (upcoming)
+
+**Technology Stack:**
+
+- **Framework**: React 18 with TypeScript
+- **Build Tool**: Vite (fast development and optimized production builds)
+- **Authentication**: AWS Amplify with Cognito User Pool integration
+- **Routing**: React Router for client-side routing
+- **Styling**: Inline styles (AWS-themed color scheme)
+
+**Running the Web UI Locally:**
+
+```bash
+# Navigate to the web-ui directory
+cd web-ui
+
+# Install dependencies (first time only)
+npm install
+
+# Set up environment variables from Terraform outputs
+./setup-env.sh
+
+# Or manually create .env file:
+cp .env.example .env
+# Edit .env and fill in values from: AWS_PROFILE=ses-mail make outputs ENV=test
+
+# Start development server
+npm run dev
+
+# Application will be available at http://localhost:3000
+```
+
+**Environment Variables Required:**
+
+The web UI requires the following environment variables (all prefixed with `VITE_`):
+
+- `VITE_AWS_REGION`: AWS region (e.g., `ap-southeast-2`)
+- `VITE_COGNITO_USER_POOL_ID`: Cognito User Pool ID (from terraform outputs)
+- `VITE_COGNITO_USER_POOL_CLIENT_ID`: Cognito User Pool Client ID (from terraform outputs)
+- `VITE_COGNITO_DOMAIN`: Cognito domain (e.g., `ses-mail-test.auth.ap-southeast-2.amazoncognito.com`)
+- `VITE_API_ENDPOINT`: API Gateway endpoint URL (from terraform outputs)
+- `VITE_OAUTH_REDIRECT_SIGN_IN`: OAuth redirect for login (local: `http://localhost:3000/callback`)
+- `VITE_OAUTH_REDIRECT_SIGN_OUT`: OAuth redirect for logout (local: `http://localhost:3000`)
+
+**Available Routes:**
+
+- `/` - Redirects to dashboard
+- `/login` - Cognito login page
+- `/dashboard` - Main token management dashboard (protected)
+- `/callback` - OAuth callback handler
+
+**Authentication Flow:**
+
+1. User navigates to the application
+2. If not authenticated, automatically redirected to `/login`
+3. AWS Amplify Authenticator component handles Cognito authentication
+4. On successful login, user is redirected to `/dashboard`
+5. All API calls automatically include Cognito JWT token in Authorization header
+6. Session persists across page reloads via localStorage
+7. Auto-logout on token expiration
+
+**Building for Production:**
+
+```bash
+cd web-ui
+npm run build
+
+# Production build output in dist/ directory
+# Ready for deployment to S3 (Task 8.1)
+```
+
+**Production Deployment:**
+
+Production deployment to S3 and CloudFront will be configured in:
+- **Task 8.1**: S3 bucket for web UI hosting
+- **Task 8.2**: CloudFront distribution with `/token-management/*` behavior
+
+**Development Notes:**
+
+- The application uses AWS Amplify UI React components for authentication
+- All state management handled through React Context (AuthProvider)
+- Protected routes automatically redirect unauthenticated users to login
+- Session management includes token refresh and auto-logout
+- Error boundaries handle authentication and API errors gracefully
+
+For detailed web UI documentation, see `web-ui/README.md`.
+
 ## Integration Testing
 
 The system includes comprehensive integration tests that validate the entire email processing pipeline end-to-end, from SES receipt through to final handler processing (Gmail forwarding or bouncing).

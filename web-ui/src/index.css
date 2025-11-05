@@ -1,0 +1,38 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* Override Amplify UI styles to match our design */
+[data-amplify-authenticator] {
+  --amplify-colors-brand-primary-10: #232f3e;
+  --amplify-colors-brand-primary-80: #ff9900;
+  --amplify-colors-brand-primary-90: #ffac31;
+  --amplify-colors-brand-primary-100: #ffac31;
+}
+
+button:hover {
+  opacity: 0.9;
+  transition: opacity 0.2s ease-in-out;
+}
+
+button:active {
+  opacity: 0.8;
+}
