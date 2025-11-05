@@ -27,6 +27,8 @@ from typing import Dict, Any, List
 
 import boto3
 from botocore.exceptions import ClientError, NoCredentialsError
+from google_auth_oauthlib.flow import InstalledAppFlow
+from google.oauth2.credentials import Credentials
 
 # Configure logging
 logging.basicConfig(
@@ -34,6 +36,9 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Gmail API scope for importing/inserting messages
+GMAIL_SCOPES = ['https://www.googleapis.com/auth/gmail.insert']
 
 
 @dataclass
@@ -216,6 +221,132 @@ def retrieve_oauth_credentials(environment: str) -> OAuthCredentials:
         raise RuntimeError(f"Unexpected error: {e}")
 
 
+def perform_interactive_oauth_flow(credentials: OAuthCredentials) -> Credentials:
+    """
+    Perform interactive OAuth authorization flow with browser interaction.
+
+    Opens the user's default browser to Google's OAuth consent screen, runs a
+    temporary local web server to receive the authorization callback, and exchanges
+    the authorization code for OAuth tokens (access token and refresh token).
+
+    Args:
+        credentials: OAuthCredentials instance containing client ID, secret, and URIs
+
+    Returns:
+        Credentials object containing access token, refresh token, and metadata
+
+    Raises:
+        RuntimeError: If OAuth flow fails or user denies consent
+    """
+    logger.info("Starting interactive OAuth authorization flow")
+
+    # Build client configuration dict from OAuthCredentials
+    # This matches the format expected by InstalledAppFlow.from_client_config()
+    client_config = {
+        "installed": {
+            "client_id": credentials.client_id,
+            "client_secret": credentials.client_secret,
+            "redirect_uris": credentials.redirect_uris,
+            "auth_uri": credentials.auth_uri,
+            "token_uri": credentials.token_uri,
+            "auth_provider_x509_cert_url": credentials.auth_provider_x509_cert_url
+        }
+    }
+
+    try:
+        # Create OAuth flow with Gmail API scopes
+        flow = InstalledAppFlow.from_client_config(
+            client_config,
+            scopes=GMAIL_SCOPES
+        )
+
+        logger.info(
+            "Opening browser for OAuth consent. "
+            "Please authorize the application to access Gmail."
+        )
+        print("\n" + "="*70)
+        print("OAUTH AUTHORIZATION REQUIRED")
+        print("="*70)
+        print("\nYour browser will open automatically to Google's consent screen.")
+        print("Please:")
+        print("  1. Review the requested permissions")
+        print("  2. Click 'Allow' to grant access")
+        print("  3. Return to this terminal after authorization")
+        print("\nIf your browser doesn't open automatically, copy the URL from below.")
+        print("="*70 + "\n")
+
+        # Run local server to handle OAuth callback
+        # This will:
+        # 1. Open the user's browser to Google's OAuth consent page
+        # 2. Start a temporary HTTP server on localhost:8080
+        # 3. Wait for Google to redirect back with authorization code
+        # 4. Exchange authorization code for tokens
+        # 5. Return Credentials object with access_token and refresh_token
+        creds = flow.run_local_server(
+            port=8080,
+            authorization_prompt_message='Please visit this URL to authorize: {url}',
+            success_message='Authorization successful! You may close this browser window and return to the terminal.',
+            open_browser=True
+        )
+
+        logger.info("OAuth authorization flow completed successfully")
+        logger.info(
+            "Obtained OAuth tokens",
+            extra={
+                'has_refresh_token': creds.refresh_token is not None,
+                'scopes': creds.scopes,
+                'token_expiry': creds.expiry.isoformat() if creds.expiry else None
+            }
+        )
+
+        if not creds.refresh_token:
+            raise RuntimeError(
+                "OAuth flow succeeded but did not return a refresh token.\n"
+                "This can happen if the application was already authorized.\n"
+                "To fix this:\n"
+                "  1. Visit https://myaccount.google.com/permissions\n"
+                "  2. Remove this application's access\n"
+                "  3. Re-run this script to re-authorize"
+            )
+
+        return creds
+
+    except Exception as e:
+        # Catch various errors that can occur during OAuth flow
+        error_message = str(e)
+
+        if "invalid_client" in error_message.lower():
+            raise RuntimeError(
+                "OAuth client credentials are invalid.\n"
+                "Please verify that the client_id and client_secret in SSM are correct.\n"
+                f"Error details: {e}"
+            )
+        elif "access_denied" in error_message.lower():
+            raise RuntimeError(
+                "OAuth authorization denied by user.\n"
+                "You must click 'Allow' on the consent screen to proceed.\n"
+                "Re-run this script to try again."
+            )
+        elif "redirect_uri_mismatch" in error_message.lower():
+            raise RuntimeError(
+                "OAuth redirect URI mismatch.\n"
+                "The redirect URI in your OAuth client configuration must include:\n"
+                "  http://localhost:8080\n"
+                f"Current redirect URIs: {credentials.redirect_uris}\n"
+                f"Error details: {e}"
+            )
+        else:
+            logger.exception("Unexpected error during OAuth flow")
+            raise RuntimeError(
+                f"OAuth authorization flow failed.\n"
+                f"Error: {e}\n\n"
+                "Common issues:\n"
+                "  - Port 8080 is already in use (close other applications)\n"
+                "  - Firewall blocking localhost connections\n"
+                "  - Browser popup blockers preventing OAuth page from opening"
+            )
+
+
 def main():
     """Main entry point for the OAuth token refresh script."""
     parser = argparse.ArgumentParser(
@@ -236,11 +367,12 @@ def main():
         logger.info(f"Starting OAuth token refresh for environment: {args.env}")
 
         # Task 3.1: Retrieve OAuth credentials from SSM
-        credentials = retrieve_oauth_credentials(args.env)
+        oauth_credentials = retrieve_oauth_credentials(args.env)
         logger.info("OAuth client credentials retrieved successfully")
 
-        # TODO: Task 3.2 - Implement interactive OAuth flow
-        logger.warning("Interactive OAuth flow not yet implemented (Task 3.2)")
+        # Task 3.2: Perform interactive OAuth flow
+        gmail_credentials = perform_interactive_oauth_flow(oauth_credentials)
+        logger.info("OAuth authorization completed - obtained refresh token")
 
         # TODO: Task 3.3 - Store refresh token and setup expiration monitoring
         logger.warning("Token storage and expiration monitoring not yet implemented (Task 3.3)")

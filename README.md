@@ -316,10 +316,27 @@ AWS_PROFILE=ses-mail python3 scripts/refresh_oauth_token.py --env test
 **What the script does:**
 
 1. **Retrieves Client Credentials**: Fetches OAuth client credentials from SSM Parameter Store (`/ses-mail/{environment}/gmail-forwarder/oauth/client-credentials`)
-2. **Interactive OAuth Flow**: Opens your browser to Google consent screen (to be implemented in Task 3.2)
-3. **Stores New Token**: Saves the new refresh token to SSM Parameter Store
+2. **Interactive OAuth Flow**: Opens your browser to Google consent screen, runs a temporary local web server on port 8080 to receive the authorization callback, and exchanges the authorization code for a new refresh token
+3. **Stores New Token**: Saves the new refresh token to SSM Parameter Store (to be implemented in Task 3.3)
 4. **Sets Up Monitoring**: Configures CloudWatch alarm for token expiration (to be implemented in Task 3.3)
 5. **Triggers Retry Processing**: Processes any queued messages that failed due to expired token (to be implemented in Task 3.4)
+
+**Interactive OAuth Flow Details:**
+
+When you run the refresh script, it will:
+- Display instructions in your terminal about the OAuth consent process
+- Automatically open your default web browser to Google's OAuth consent screen
+- Show the permissions being requested (Gmail API access for inserting/importing messages)
+- Wait for you to review and approve the consent
+- Capture the authorization callback on `http://localhost:8080/callback`
+- Exchange the authorization code for OAuth tokens (access token + refresh token)
+- Return control to the script for token storage
+
+**Important Notes:**
+- Ensure port 8080 is not in use by another application
+- The browser must be able to connect to `localhost:8080`
+- You must click "Allow" on the consent screen to proceed
+- If you've already authorized the app, you may need to revoke access first to get a new refresh token
 
 ### Token Expiration Monitoring
 
@@ -348,14 +365,35 @@ When a refresh token expires during email processing:
 You can test that the OAuth client credentials are properly configured:
 
 ```bash
-# Test credential retrieval for test environment
+# Test the full OAuth refresh flow for test environment
 AWS_PROFILE=ses-mail python3 scripts/refresh_oauth_token.py --env test
 
 # Expected output (if credentials are configured):
 # INFO - Starting OAuth token refresh for environment: test
 # INFO - Retrieving OAuth client credentials from SSM: /ses-mail/test/gmail-forwarder/oauth/client-credentials
 # INFO - Successfully retrieved OAuth credentials
-# WARNING - Interactive OAuth flow not yet implemented (Task 3.2)
+# INFO - Starting interactive OAuth authorization flow
+# INFO - Opening browser for OAuth consent. Please authorize the application to access Gmail.
+#
+# ======================================================================
+# OAUTH AUTHORIZATION REQUIRED
+# ======================================================================
+#
+# Your browser will open automatically to Google's consent screen.
+# Please:
+#   1. Review the requested permissions
+#   2. Click 'Allow' to grant access
+#   3. Return to this terminal after authorization
+#
+# ======================================================================
+#
+# [Browser opens to Google OAuth consent screen]
+# [After you approve...]
+#
+# INFO - OAuth authorization flow completed successfully
+# INFO - OAuth authorization completed - obtained refresh token
+# WARNING - Token storage and expiration monitoring not yet implemented (Task 3.3)
+# WARNING - Retry processing trigger not yet implemented (Task 3.4)
 ```
 
 If credentials are not yet configured, you'll see detailed instructions on how to upload them.
@@ -405,6 +443,44 @@ The JSON should have this structure:
   }
 }
 ```
+
+**Error: "OAuth authorization flow failed" or "Port 8080 is already in use"**
+
+Ensure port 8080 is available:
+
+```bash
+# Check if port 8080 is in use
+lsof -i :8080
+
+# If another process is using port 8080, stop it or use a different port
+# The script currently uses a fixed port (8080) - this may be configurable in future versions
+```
+
+**Error: "OAuth flow succeeded but did not return a refresh token"**
+
+This happens if you've already authorized the application. To fix:
+
+1. Visit https://myaccount.google.com/permissions
+2. Find the "ses-mail" application in the list
+3. Click "Remove access"
+4. Re-run the refresh script to re-authorize
+
+**Error: "OAuth redirect URI mismatch"**
+
+The OAuth client configuration in Google Cloud Console must include `http://localhost:8080` in redirect URIs:
+
+1. Go to Google Cloud Console → APIs & Services → Credentials
+2. Click on your OAuth client ID
+3. Add `http://localhost:8080` to "Authorized redirect URIs"
+4. Save and retry
+
+**Error: "Browser didn't open automatically"**
+
+If your browser doesn't open:
+1. Look for the authorization URL in the terminal output
+2. Copy the URL and paste it into your browser manually
+3. Complete the authorization in the browser
+4. The script will detect the callback automatically
 
 ### Production OAuth Mode
 
