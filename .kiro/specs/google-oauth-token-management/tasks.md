@@ -22,7 +22,7 @@ A task is not complete until:
     - Update SSM parameter path to use new environment-specific structure
     - _Requirements: 2.1, 2.2, 2.4_
 
-  - [ ] 2.2 Add retry queue integration for token expiration failures
+  - [x] 2.2 Add retry queue integration for token expiration failures
     - Implement `queue_for_retry()` function to store failed SES events in SQS
     - Implement `is_token_expired_error()` function to detect OAuth expiration errors
     - Add error handling to queue messages when token expires

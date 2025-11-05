@@ -436,6 +436,16 @@ data "aws_iam_policy_document" "lambda_gmail_forwarder_sqs_access" {
   statement {
     effect = "Allow"
     actions = [
+      "sqs:SendMessage"
+    ]
+    resources = [
+      aws_sqs_queue.gmail_forwarder_retry.arn
+    ]
+  }
+
+  statement {
+    effect = "Allow"
+    actions = [
       "cloudwatch:PutMetricData"
     ]
     resources = ["*"]

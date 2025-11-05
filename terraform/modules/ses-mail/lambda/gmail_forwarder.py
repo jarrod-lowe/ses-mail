@@ -17,6 +17,7 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
+from google.auth.exceptions import RefreshError
 
 # X-Ray SDK for distributed tracing
 from aws_xray_sdk.core import xray_recorder
@@ -32,6 +33,7 @@ logger = Logger(service="ses-mail-gmail-forwarder")
 GMAIL_REFRESH_TOKEN_PARAMETER = os.environ.get('GMAIL_REFRESH_TOKEN_PARAMETER')
 GMAIL_CLIENT_CREDENTIALS_PARAMETER = os.environ.get('GMAIL_CLIENT_CREDENTIALS_PARAMETER')
 EMAIL_BUCKET = os.environ.get('EMAIL_BUCKET')
+RETRY_QUEUE_URL = os.environ.get('RETRY_QUEUE_URL')
 ENVIRONMENT = os.environ.get('ENVIRONMENT', 'unknown')
 S3_PREFIX = 'emails'  # Hardcoded to match ses.tf configuration
 GMAIL_USER_ID = 'me'
@@ -40,6 +42,7 @@ DEFAULT_LABEL_IDS = ['INBOX', 'UNREAD']
 # Initialize AWS clients
 s3_client = boto3.client('s3')
 ssm_client = boto3.client('ssm')
+sqs_client = boto3.client('sqs')
 cloudwatch = boto3.client('cloudwatch')
 
 
@@ -98,8 +101,169 @@ def lambda_handler(event, context):
         }
 
     except Exception as e:
+        # Check if this is a token expiration error during service creation
+        if is_token_expired_error(e):
+            logger.warning("Token expired during service creation - queueing all records for retry", extra={
+                "error": str(e),
+                "recordCount": len(event.get('Records', []))
+            })
+
+            # Queue all SQS records for retry
+            from datetime import datetime
+            error_context = {
+                'timestamp': datetime.utcnow().isoformat() + 'Z',
+                'error_type': 'token_expired',
+                'request_id': context.aws_request_id if context else 'unknown',
+                'attempt_count': 1
+            }
+
+            batch_item_failures = []
+            records = event.get('Records', [])
+            for record in records:
+                receipt_handle = record.get('receiptHandle')
+                try:
+                    queue_for_retry(record, error_context)
+                    # Mark as failure so SQS removes it from original queue
+                    batch_item_failures.append({'itemIdentifier': receipt_handle})
+                except Exception as queue_error:
+                    logger.error("Failed to queue message for retry", extra={
+                        "receiptHandle": receipt_handle,
+                        "queueError": str(queue_error)
+                    })
+                    # Still mark as failure to avoid reprocessing immediately
+                    batch_item_failures.append({'itemIdentifier': receipt_handle})
+
+            return {
+                'statusCode': 200,
+                'batchItemFailures': batch_item_failures
+            }
+
+        # Not a token expiration error - log and re-raise
         logger.exception("Error processing SQS messages", extra={"error": str(e)})
         raise
+
+
+def is_token_expired_error(exception: Exception) -> bool:
+    """
+    Detect if an exception is caused by OAuth token expiration.
+
+    Checks for various error types and messages that indicate the Gmail OAuth
+    token has expired or is invalid:
+    - HTTP 401 (Unauthorized) or 403 (Forbidden) errors
+    - RefreshError from Google Auth library
+    - Error messages containing token expiration keywords
+
+    Args:
+        exception: The exception to check
+
+    Returns:
+        bool: True if the error is a token expiration error, False otherwise
+    """
+    # Check for RefreshError from Google Auth library
+    if isinstance(exception, RefreshError):
+        logger.info("Detected RefreshError - token has expired")
+        return True
+
+    # Check for HTTP errors with 401/403 status codes
+    if isinstance(exception, HttpError):
+        status_code = exception.resp.status
+        if status_code in (401, 403):
+            logger.info("Detected HTTP 401/403 error - token may be expired", extra={
+                "status_code": status_code,
+                "error": str(exception)
+            })
+            return True
+
+    # Check error message for token expiration keywords
+    error_message = str(exception).lower()
+    expiration_keywords = [
+        'invalid_grant',
+        'token has been expired',
+        'token expired',
+        'invalid credentials',
+        'credentials have expired',
+        'unauthorized',
+        'authentication failed'
+    ]
+
+    for keyword in expiration_keywords:
+        if keyword in error_message:
+            logger.info("Detected token expiration keyword in error message", extra={
+                "keyword": keyword,
+                "error": str(exception)
+            })
+            return True
+
+    return False
+
+
+def queue_for_retry(sqs_record: Dict[str, Any], error_context: Dict[str, Any]) -> None:
+    """
+    Queue a failed SQS record to the retry queue for later processing.
+
+    This function is called when a token expiration error is detected.
+    It stores the original SQS message body in SQS retry queue with metadata.
+
+    Args:
+        sqs_record: The original SQS record from the Lambda event
+        error_context: Additional error information (error_type, timestamp, etc.)
+
+    Raises:
+        RuntimeError: If queueing fails
+    """
+    if not RETRY_QUEUE_URL:
+        raise RuntimeError("RETRY_QUEUE_URL environment variable must be set")
+
+    try:
+        # Parse the SQS message body to extract message ID for logging
+        body = json.loads(sqs_record.get('body', '{}'))
+        detail = body.get('detail', body)
+        message_id = detail.get('originalMessageId', 'unknown')
+
+        # Prepare SQS message with original SQS message body
+        message_body = sqs_record.get('body', '{}')
+
+        # Add message attributes for filtering and monitoring
+        message_attributes = {
+            'original_timestamp': {
+                'StringValue': error_context.get('timestamp', ''),
+                'DataType': 'String'
+            },
+            'error_type': {
+                'StringValue': error_context.get('error_type', 'token_expired'),
+                'DataType': 'String'
+            },
+            'original_lambda_request_id': {
+                'StringValue': error_context.get('request_id', ''),
+                'DataType': 'String'
+            },
+            'attempt_count': {
+                'StringValue': str(error_context.get('attempt_count', 1)),
+                'DataType': 'Number'
+            }
+        }
+
+        # Send message to retry queue
+        response = sqs_client.send_message(
+            QueueUrl=RETRY_QUEUE_URL,
+            MessageBody=message_body,
+            MessageAttributes=message_attributes
+        )
+
+        logger.info("Queued message for retry", extra={
+            "messageId": message_id,
+            "sqsMessageId": response.get('MessageId'),
+            "errorType": error_context.get('error_type'),
+            "attemptCount": error_context.get('attempt_count', 1)
+        })
+
+    except ClientError as e:
+        logger.error("Failed to queue message for retry", extra={
+            "messageId": message_id,
+            "error": str(e),
+            "errorCode": e.response.get('Error', {}).get('Code')
+        })
+        raise RuntimeError(f"Failed to queue message for retry: {e}")
 
 
 def process_sqs_record(record, service):
@@ -206,7 +370,53 @@ def process_sqs_record(record, service):
             'receiptHandle': receipt_handle
         }
 
-    except (RuntimeError, ValueError, HttpError, ClientError, json.JSONDecodeError) as e:
+    except (RuntimeError, ValueError, HttpError, ClientError, json.JSONDecodeError, RefreshError) as e:
+        # Check if this is a token expiration error
+        if is_token_expired_error(e):
+            logger.warning("Token expired while processing message - queueing for retry", extra={
+                "error": str(e)
+            })
+
+            # Queue the message for retry with error context
+            from datetime import datetime
+            error_context = {
+                'timestamp': datetime.utcnow().isoformat() + 'Z',
+                'error_type': 'token_expired',
+                'request_id': 'unknown',  # Not available at this level
+                'attempt_count': 1
+            }
+
+            try:
+                queue_for_retry(record, error_context)
+
+                # Add error details to X-Ray subsegment
+                if subsegment:
+                    subsegment.put_annotation('import_status', 'queued_for_retry')
+                    subsegment.put_annotation('error_type', 'token_expired')
+
+                return {
+                    'status': 'error',  # Return error so Lambda removes from original queue
+                    'error': 'Token expired - queued for retry',
+                    'receiptHandle': receipt_handle
+                }
+            except Exception as queue_error:
+                logger.error("Failed to queue message for retry", extra={
+                    "originalError": str(e),
+                    "queueError": str(queue_error)
+                })
+
+                # Add error details to X-Ray subsegment
+                if subsegment:
+                    subsegment.put_annotation('import_status', 'error')
+                    subsegment.put_annotation('error_type', 'failed_to_queue')
+
+                return {
+                    'error': f"Token expired and failed to queue: {queue_error}",
+                    'status': 'error',
+                    'receiptHandle': receipt_handle
+                }
+
+        # Not a token expiration error - log and return error
         logger.exception("Error processing SQS message", extra={"error": str(e)})
 
         # Add error details to X-Ray subsegment

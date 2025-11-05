@@ -116,6 +116,7 @@ resource "aws_lambda_function" "gmail_forwarder" {
       GMAIL_REFRESH_TOKEN_PARAMETER      = aws_ssm_parameter.gmail_oauth_refresh_token.name
       GMAIL_CLIENT_CREDENTIALS_PARAMETER = aws_ssm_parameter.gmail_oauth_client_credentials.name
       EMAIL_BUCKET                       = aws_s3_bucket.email_storage.id
+      RETRY_QUEUE_URL                    = aws_sqs_queue.gmail_forwarder_retry.url
       ENVIRONMENT                        = var.environment
     }
   }

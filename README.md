@@ -389,6 +389,53 @@ AWS_PROFILE=ses-mail aws sqs receive-message \
   --max-number-of-messages 1
 ```
 
+### Automatic Retry Queueing on Token Expiration
+
+The Gmail forwarder Lambda automatically detects OAuth token expiration errors and queues failed messages for retry instead of losing them. This ensures no emails are lost when tokens expire.
+
+**How It Works:**
+
+1. **Error Detection**: The Lambda checks for token expiration errors including:
+   - `RefreshError` from Google Auth library
+   - HTTP 401/403 status codes from Gmail API
+   - Error messages containing keywords: `invalid_grant`, `token has been expired`, `token expired`, `invalid credentials`, `credentials have expired`, `unauthorized`, `authentication failed`
+
+2. **Automatic Queuing**: When a token expiration error is detected:
+   - The original SQS message is automatically queued to the retry queue (`ses-mail-gmail-forwarder-retry-{environment}`)
+   - Message attributes are added for tracking: `original_timestamp`, `error_type`, `original_lambda_request_id`, `attempt_count`
+   - The message is removed from the main processing queue to prevent immediate reprocessing
+   - Structured logging records the retry queueing event in CloudWatch Logs
+
+3. **Retry Processing**: (To be implemented in Task 4.1-4.2)
+   - After refreshing the OAuth token, run the Step Function retry processor to process queued messages
+   - Messages will be retried up to 3 times before moving to the DLQ
+
+**Example CloudWatch Log Entry:**
+
+```json
+{
+  "level": "WARNING",
+  "message": "Token expired during service creation - queueing all records for retry",
+  "error": "Failed to build Gmail service: Failed to generate access token: ('invalid_grant: Token has been expired or revoked.'...)",
+  "recordCount": 1
+}
+{
+  "level": "INFO",
+  "message": "Queued message for retry",
+  "messageId": "abc123...",
+  "sqsMessageId": "def456...",
+  "errorType": "token_expired",
+  "attemptCount": 1
+}
+```
+
+**Benefits:**
+
+- **Zero Data Loss**: Emails are never lost due to token expiration
+- **Automatic Recovery**: No manual intervention required during token expiration
+- **Visibility**: All retry events are logged and monitored via CloudWatch
+- **Graceful Degradation**: System continues accepting new emails while queuing failed ones for retry
+
 The retry queue infrastructure enables graceful handling of token expiration failures by preserving failed messages for later processing after token refresh.
 
 ### Handling Token Expiration
