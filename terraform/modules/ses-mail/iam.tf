@@ -122,10 +122,12 @@ data "aws_iam_policy_document" "lambda_ssm_access" {
     effect = "Allow"
     actions = [
       "ssm:GetParameter",
-      "ssm:GetParameters",
-      "ssm:PutParameter"
+      "ssm:GetParameters"
     ]
-    resources = [aws_ssm_parameter.gmail_token.arn]
+    resources = [
+      aws_ssm_parameter.gmail_oauth_refresh_token.arn,
+      aws_ssm_parameter.gmail_oauth_client_credentials.arn
+    ]
   }
 }
 

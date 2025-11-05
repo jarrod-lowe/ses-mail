@@ -16,7 +16,7 @@ A task is not complete until:
   - _Requirements: 4.1, 4.4, 5.1_
 
 - [ ] 2. Update Gmail Forwarder Lambda for token management
-  - [ ] 2.1 Modify Gmail Forwarder to generate fresh access tokens for each session
+  - [x] 2.1 Modify Gmail Forwarder to generate fresh access tokens for each session
     - Remove existing token caching/updating logic
     - Implement `generate_access_token()` function using refresh token
     - Update SSM parameter path to use new environment-specific structure

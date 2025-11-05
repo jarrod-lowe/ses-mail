@@ -21,8 +21,9 @@ resource "aws_lambda_function" "email_processor" {
 
   environment {
     variables = {
-      GMAIL_TOKEN_PARAMETER = aws_ssm_parameter.gmail_token.name
-      EMAIL_BUCKET          = aws_s3_bucket.email_storage.id
+      GMAIL_REFRESH_TOKEN_PARAMETER      = aws_ssm_parameter.gmail_oauth_refresh_token.name
+      GMAIL_CLIENT_CREDENTIALS_PARAMETER = aws_ssm_parameter.gmail_oauth_client_credentials.name
+      EMAIL_BUCKET                       = aws_s3_bucket.email_storage.id
     }
   }
 
@@ -112,9 +113,10 @@ resource "aws_lambda_function" "gmail_forwarder" {
 
   environment {
     variables = {
-      GMAIL_TOKEN_PARAMETER = aws_ssm_parameter.gmail_token.name
-      EMAIL_BUCKET          = aws_s3_bucket.email_storage.id
-      ENVIRONMENT           = var.environment
+      GMAIL_REFRESH_TOKEN_PARAMETER      = aws_ssm_parameter.gmail_oauth_refresh_token.name
+      GMAIL_CLIENT_CREDENTIALS_PARAMETER = aws_ssm_parameter.gmail_oauth_client_credentials.name
+      EMAIL_BUCKET                       = aws_s3_bucket.email_storage.id
+      ENVIRONMENT                        = var.environment
     }
   }
 

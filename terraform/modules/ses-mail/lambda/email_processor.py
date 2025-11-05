@@ -16,13 +16,15 @@ from botocore.exceptions import ClientError
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request
 from aws_lambda_powertools import Logger
 
 # Configure structured JSON logging
 logger = Logger(service="ses-mail-email-processor")
 
 # Environment configuration
-GMAIL_TOKEN_PARAMETER = os.environ.get('GMAIL_TOKEN_PARAMETER', '/ses-mail/gmail-token')
+GMAIL_REFRESH_TOKEN_PARAMETER = os.environ.get('GMAIL_REFRESH_TOKEN_PARAMETER')
+GMAIL_CLIENT_CREDENTIALS_PARAMETER = os.environ.get('GMAIL_CLIENT_CREDENTIALS_PARAMETER')
 EMAIL_BUCKET = os.environ.get('EMAIL_BUCKET')
 S3_PREFIX = 'emails'  # Hardcoded to match ses.tf configuration
 GMAIL_USER_ID = 'me'
@@ -48,14 +50,11 @@ def lambda_handler(event, context):
     logger.info("Received SES event", extra={"event": event})
 
     results = []
-    token_info = None
     service = None
-    creds = None
 
     try:
-        # Load Gmail token once for all records
-        token_info = load_token_from_ssm()
-        service, creds = build_gmail_service(token_info)
+        # Build Gmail service with fresh access token
+        service = build_gmail_service()
 
         # Process each SES record
         records = event.get('Records', [])
@@ -63,10 +62,6 @@ def lambda_handler(event, context):
             if record.get('eventSource') == 'aws:ses':
                 result = process_ses_record(record, service)
                 results.append(result)
-
-        # Update token if refreshed
-        if creds and token_info:
-            maybe_update_token(creds, token_info)
 
         return {'results': results}
 
@@ -147,78 +142,141 @@ def process_ses_record(record, service):
         }
 
 
-def load_token_from_ssm() -> Dict[str, Any]:
+def load_refresh_token_from_ssm() -> str:
     """
-    Load the Gmail OAuth token from SSM Parameter Store.
+    Load the Gmail OAuth refresh token from SSM Parameter Store.
 
     Returns:
-        dict: Gmail OAuth token as dictionary
+        str: Refresh token string
     """
+    if not GMAIL_REFRESH_TOKEN_PARAMETER:
+        raise RuntimeError("GMAIL_REFRESH_TOKEN_PARAMETER environment variable must be set")
+
     try:
         response = ssm_client.get_parameter(
-            Name=GMAIL_TOKEN_PARAMETER,
+            Name=GMAIL_REFRESH_TOKEN_PARAMETER,
             WithDecryption=True
         )
-        return json.loads(response['Parameter']['Value'])
+        token_data = json.loads(response['Parameter']['Value'])
+        return token_data['token']
     except ClientError as e:
-        logger.error("Error retrieving Gmail token from SSM", extra={"error": str(e)})
-        raise RuntimeError(f"Failed to load token from SSM: {e}")
+        logger.error("Error retrieving refresh token from SSM", extra={"error": str(e)})
+        raise RuntimeError(f"Failed to load refresh token from SSM: {e}")
+    except (KeyError, json.JSONDecodeError) as e:
+        logger.error("Invalid refresh token format in SSM", extra={"error": str(e)})
+        raise RuntimeError(f"Invalid refresh token format: {e}")
 
 
-def save_token_to_ssm(token_dict: Dict[str, Any]) -> None:
+def load_client_credentials_from_ssm() -> Dict[str, str]:
     """
-    Persist updated token back to SSM Parameter Store.
-
-    Args:
-        token_dict: Gmail OAuth token dictionary
-    """
-    try:
-        ssm_client.put_parameter(
-            Name=GMAIL_TOKEN_PARAMETER,
-            Type='SecureString',
-            Value=json.dumps(token_dict),
-            Overwrite=True
-        )
-        logger.info("Updated Gmail token in SSM")
-    except ClientError as e:
-        logger.error("Error saving token to SSM", extra={"error": str(e)})
-        raise
-
-
-def build_gmail_service(token_info: Dict[str, Any]):
-    """
-    Create Gmail API service from token info.
-
-    Args:
-        token_info: Gmail OAuth token dictionary
+    Load OAuth client credentials from SSM Parameter Store.
 
     Returns:
-        tuple: (gmail_service, credentials)
+        dict: Dictionary with client_id, client_secret, and token_uri
+    """
+    if not GMAIL_CLIENT_CREDENTIALS_PARAMETER:
+        raise RuntimeError("GMAIL_CLIENT_CREDENTIALS_PARAMETER environment variable must be set")
+
+    try:
+        response = ssm_client.get_parameter(
+            Name=GMAIL_CLIENT_CREDENTIALS_PARAMETER,
+            WithDecryption=True
+        )
+        credentials_json = response['Parameter']['Value']
+        credentials_data = json.loads(credentials_json)
+
+        # Handle Google's OAuth JSON format (may have 'installed' or 'web' wrapper)
+        if 'installed' in credentials_data:
+            creds = credentials_data['installed']
+        elif 'web' in credentials_data:
+            creds = credentials_data['web']
+        else:
+            raise ValueError("OAuth credentials must contain 'installed' or 'web' key")
+
+        return {
+            'client_id': creds['client_id'],
+            'client_secret': creds['client_secret'],
+            'token_uri': creds['token_uri']
+        }
+    except ClientError as e:
+        logger.error("Error retrieving client credentials from SSM", extra={"error": str(e)})
+        raise RuntimeError(f"Failed to load client credentials from SSM: {e}")
+    except (KeyError, json.JSONDecodeError, ValueError) as e:
+        logger.error("Invalid client credentials format in SSM", extra={"error": str(e)})
+        raise RuntimeError(f"Invalid client credentials format: {e}")
+
+
+def generate_access_token() -> Credentials:
+    """
+    Generate a fresh access token from the refresh token stored in SSM.
+
+    This function retrieves the refresh token and client credentials from SSM,
+    then uses them to generate a new access token via Google's OAuth API.
+    The refresh token is never modified - we simply use it to obtain a new
+    short-lived access token for this session.
+
+    Returns:
+        Credentials: Google OAuth credentials with fresh access token
+
+    Raises:
+        RuntimeError: If token generation fails
     """
     try:
-        creds = Credentials.from_authorized_user_info(token_info)
+        # Load refresh token and client credentials from SSM
+        refresh_token = load_refresh_token_from_ssm()
+        client_creds = load_client_credentials_from_ssm()
+
+        logger.info("Generating fresh access token from refresh token")
+
+        # Create credentials object with refresh token and client info
+        creds = Credentials(
+            token=None,  # No access token yet
+            refresh_token=refresh_token,
+            token_uri=client_creds['token_uri'],
+            client_id=client_creds['client_id'],
+            client_secret=client_creds['client_secret']
+        )
+
+        # Refresh to obtain new access token
+        creds.refresh(Request())
+
+        logger.info("Successfully generated fresh access token", extra={
+            "token_expiry": creds.expiry.isoformat() if creds.expiry else None
+        })
+
+        return creds
+
+    except Exception as e:
+        logger.error("Failed to generate access token", extra={"error": str(e)})
+        raise RuntimeError(f"Failed to generate access token: {e}")
+
+
+def build_gmail_service():
+    """
+    Create Gmail API service with a fresh access token.
+
+    Generates a new access token from the refresh token and builds the Gmail API service.
+    Each invocation creates a fresh access token, ensuring we always have valid credentials.
+
+    Returns:
+        Gmail API service object
+
+    Raises:
+        RuntimeError: If service creation fails
+    """
+    try:
+        # Generate fresh access token
+        creds = generate_access_token()
+
+        # Build Gmail service with the fresh credentials
         service = build('gmail', 'v1', credentials=creds, cache_discovery=False)
-        return service, creds
+
+        logger.info("Gmail service built successfully")
+        return service
+
     except Exception as e:
         logger.error("Error building Gmail service", extra={"error": str(e)})
-        raise
-
-
-def maybe_update_token(creds: Credentials, original: Dict[str, Any]) -> None:
-    """
-    If access token or expiry changed, write back to SSM.
-
-    Args:
-        creds: Current credentials
-        original: Original token dictionary
-    """
-    try:
-        updated = json.loads(creds.to_json())
-        if (updated.get('token') != original.get('token') or
-            updated.get('expiry') != original.get('expiry')):
-            save_token_to_ssm(updated)
-    except Exception as e:
-        logger.error("Error checking/updating token", extra={"error": str(e)})
+        raise RuntimeError(f"Failed to build Gmail service: {e}")
 
 
 def fetch_raw_email_from_s3(message_id: str) -> bytes:
