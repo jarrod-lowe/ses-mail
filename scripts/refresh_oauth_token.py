@@ -23,6 +23,7 @@ import json
 import logging
 import sys
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from typing import Dict, Any, List
 
 import boto3
@@ -347,6 +348,196 @@ def perform_interactive_oauth_flow(credentials: OAuthCredentials) -> Credentials
             )
 
 
+def store_refresh_token(environment: str, refresh_token: str) -> datetime:
+    """
+    Store refresh token with metadata in SSM Parameter Store.
+
+    Stores the refresh token along with creation and expiration timestamps in JSON format.
+    Google refresh tokens in testing mode expire after 7 days, so we calculate the
+    expiration time accordingly.
+
+    Args:
+        environment: Environment name (e.g., 'test', 'prod')
+        refresh_token: The OAuth refresh token string from Google
+
+    Returns:
+        datetime: The expiration time (created_at + 7 days)
+
+    Raises:
+        RuntimeError: If token cannot be stored in SSM
+    """
+    parameter_name = f"/ses-mail/{environment}/gmail-forwarder/oauth/refresh-token"
+
+    logger.info(f"Storing refresh token to SSM: {parameter_name}")
+
+    # Calculate timestamps
+    created_at = datetime.utcnow()
+    expires_at = created_at + timedelta(days=7)  # Google testing mode limitation
+
+    # Create JSON payload with token and metadata
+    token_data = {
+        "token": refresh_token,
+        "created_at": created_at.isoformat() + "Z",
+        "expires_at": expires_at.isoformat() + "Z"
+    }
+
+    try:
+        ssm_client = boto3.client('ssm')
+
+        ssm_client.put_parameter(
+            Name=parameter_name,
+            Value=json.dumps(token_data),
+            Type='SecureString',
+            Overwrite=True
+        )
+
+        logger.info(
+            "Successfully stored refresh token to SSM",
+            extra={
+                'parameter_name': parameter_name,
+                'created_at': token_data['created_at'],
+                'expires_at': token_data['expires_at'],
+                'days_until_expiration': 7
+            }
+        )
+
+        print("\n" + "="*70)
+        print("REFRESH TOKEN STORED SUCCESSFULLY")
+        print("="*70)
+        print(f"\nParameter: {parameter_name}")
+        print(f"Created:   {token_data['created_at']}")
+        print(f"Expires:   {token_data['expires_at']}")
+        print(f"Duration:  7 days (Google testing mode)")
+        print("\n" + "="*70 + "\n")
+
+        return expires_at
+
+    except ClientError as e:
+        error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+
+        if error_code == 'AccessDeniedException':
+            raise RuntimeError(
+                f"Permission denied writing to SSM parameter: {parameter_name}\n\n"
+                f"Ensure your AWS credentials have the following permissions:\n"
+                f"  - ssm:PutParameter\n"
+                f"  - kms:Encrypt (for SecureString parameters)\n\n"
+                f"Current AWS profile: {boto3.Session().profile_name or 'default'}"
+            )
+        elif error_code == 'ParameterNotFound':
+            raise RuntimeError(
+                f"SSM parameter does not exist: {parameter_name}\n\n"
+                f"This parameter should be created automatically by Terraform.\n"
+                f"Please run:\n\n"
+                f"   AWS_PROFILE=ses-mail make apply ENV={environment}\n\n"
+                f"Then re-run this script."
+            )
+        else:
+            raise RuntimeError(
+                f"AWS error storing refresh token to SSM: {error_code}\n"
+                f"Details: {e}"
+            )
+
+    except NoCredentialsError:
+        raise RuntimeError(
+            "No AWS credentials configured.\n\n"
+            "Configure AWS credentials using one of:\n"
+            "  - AWS_PROFILE=ses-mail environment variable\n"
+            "  - ~/.aws/credentials file\n"
+            "  - AWS IAM role (if running on EC2/Lambda)"
+        )
+
+    except Exception as e:
+        logger.exception("Unexpected error storing refresh token")
+        raise RuntimeError(f"Unexpected error storing token: {e}")
+
+
+def setup_expiration_alarm(environment: str, expires_at: datetime) -> None:
+    """
+    Publish CloudWatch metric for token expiration monitoring.
+
+    Publishes a metric showing the number of hours until the refresh token expires.
+    The CloudWatch alarm (created by Terraform) will trigger when this value falls
+    below 24 hours.
+
+    Args:
+        environment: Environment name (e.g., 'test', 'prod')
+        expires_at: The datetime when the refresh token will expire
+
+    Raises:
+        RuntimeError: If metric cannot be published to CloudWatch
+    """
+    logger.info("Publishing token expiration metric to CloudWatch")
+
+    # Calculate hours until expiration
+    now = datetime.utcnow()
+    time_until_expiration = expires_at - now
+    hours_until_expiration = time_until_expiration.total_seconds() / 3600
+
+    # Namespace for custom metrics
+    namespace = f"SESMail/{environment}"
+    metric_name = "TokenHoursUntilExpiration"
+
+    try:
+        cloudwatch_client = boto3.client('cloudwatch')
+
+        cloudwatch_client.put_metric_data(
+            Namespace=namespace,
+            MetricData=[
+                {
+                    'MetricName': metric_name,
+                    'Value': hours_until_expiration,
+                    'Unit': 'None',
+                    'Timestamp': now
+                }
+            ]
+        )
+
+        logger.info(
+            "Successfully published token expiration metric to CloudWatch",
+            extra={
+                'namespace': namespace,
+                'metric_name': metric_name,
+                'hours_until_expiration': round(hours_until_expiration, 2),
+                'expires_at': expires_at.isoformat()
+            }
+        )
+
+        print(f"Published CloudWatch metric:")
+        print(f"  Namespace: {namespace}")
+        print(f"  Metric:    {metric_name}")
+        print(f"  Value:     {round(hours_until_expiration, 2)} hours")
+        print(f"\nCloudWatch alarm will trigger when < 24 hours remaining.")
+
+    except ClientError as e:
+        error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+
+        if error_code == 'AccessDeniedException':
+            raise RuntimeError(
+                f"Permission denied publishing CloudWatch metric.\n\n"
+                f"Ensure your AWS credentials have the following permissions:\n"
+                f"  - cloudwatch:PutMetricData\n\n"
+                f"Current AWS profile: {boto3.Session().profile_name or 'default'}"
+            )
+        else:
+            raise RuntimeError(
+                f"AWS error publishing CloudWatch metric: {error_code}\n"
+                f"Details: {e}"
+            )
+
+    except NoCredentialsError:
+        raise RuntimeError(
+            "No AWS credentials configured.\n\n"
+            "Configure AWS credentials using one of:\n"
+            "  - AWS_PROFILE=ses-mail environment variable\n"
+            "  - ~/.aws/credentials file\n"
+            "  - AWS IAM role (if running on EC2/Lambda)"
+        )
+
+    except Exception as e:
+        logger.exception("Unexpected error publishing CloudWatch metric")
+        raise RuntimeError(f"Unexpected error publishing metric: {e}")
+
+
 def main():
     """Main entry point for the OAuth token refresh script."""
     parser = argparse.ArgumentParser(
@@ -374,8 +565,12 @@ def main():
         gmail_credentials = perform_interactive_oauth_flow(oauth_credentials)
         logger.info("OAuth authorization completed - obtained refresh token")
 
-        # TODO: Task 3.3 - Store refresh token and setup expiration monitoring
-        logger.warning("Token storage and expiration monitoring not yet implemented (Task 3.3)")
+        # Task 3.3: Store refresh token and setup expiration monitoring
+        expires_at = store_refresh_token(args.env, gmail_credentials.refresh_token)
+        logger.info("Refresh token stored successfully in SSM")
+
+        setup_expiration_alarm(args.env, expires_at)
+        logger.info("CloudWatch expiration metric published successfully")
 
         # TODO: Task 3.4 - Trigger retry processing
         logger.warning("Retry processing trigger not yet implemented (Task 3.4)")

@@ -51,6 +51,17 @@
 - After setting up the infrastructure, set the token parameter to the value of token.json
 - Delete the `client_secret.json` and `token.json` files from the local filesystem
 
+### Setup Service Account
+
+This section is still under testing.
+
+- Go into "APIs and Services", and enable the "Identity and Access Management (IAM) API"
+- Go into "IAM and Admin" -> "Service Accounts" -> "Create Service Account"
+  - Name: ses-mail-test
+  - ID: ses-mail-test
+  - Create and Continue
+  - 
+
 ## Initial AWS Setup
 
 In the account, enable Production access in SES.

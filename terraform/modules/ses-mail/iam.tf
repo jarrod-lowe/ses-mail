@@ -51,6 +51,29 @@ resource "aws_ssm_parameter" "gmail_oauth_client_credentials" {
   }
 }
 
+# SSM Parameter for storing Gmail OAuth refresh token with metadata
+resource "aws_ssm_parameter" "gmail_oauth_refresh_token" {
+  name        = "/ses-mail/${var.environment}/gmail-forwarder/oauth/refresh-token"
+  description = "Gmail OAuth refresh token with expiration metadata (JSON) for ${var.environment}"
+  type        = "SecureString"
+  value = jsonencode({
+    token      = "PLACEHOLDER - Will be set by refresh_oauth_token.py script"
+    created_at = "1970-01-01T00:00:00Z"
+    expires_at = "1970-01-01T00:00:00Z"
+  })
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+
+  tags = {
+    Name        = "gmail-oauth-refresh-token-${var.environment}"
+    Environment = var.environment
+    Service     = "ses-mail"
+    Purpose     = "Gmail OAuth refresh token with expiration tracking"
+  }
+}
+
 # IAM policy document for Lambda assume role
 data "aws_iam_policy_document" "lambda_assume_role" {
   statement {

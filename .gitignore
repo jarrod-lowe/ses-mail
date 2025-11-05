@@ -1,6 +1,3 @@
-client_secret.json
-token.json
-
 terraform/environments/*/terraform.tfvars
 terraform/environments/*/.terraform/
 terraform/environments/*/.terraform.lock.hcl

@@ -47,7 +47,7 @@ A task is not complete until:
     - Handle OAuth consent flow and authorization code exchange
     - _Requirements: 1.2, 1.3_
 
-  - [ ] 3.3 Implement token storage and expiration monitoring
+  - [x] 3.3 Implement token storage and expiration monitoring
     - Create `store_refresh_token()` function to save new token to SSM
     - Extract expiration time from refresh token JWT payload
     - Create `setup_expiration_alarm()` function to update CloudWatch alarm

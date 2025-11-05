@@ -389,3 +389,20 @@ resource "aws_cloudwatch_metric_alarm" "lambda_bouncer_errors" {
   alarm_actions = [var.alarm_sns_topic_arn]
   ok_actions    = [var.alarm_sns_topic_arn]
 }
+
+# CloudWatch Alarm for Gmail OAuth refresh token expiration
+resource "aws_cloudwatch_metric_alarm" "gmail_token_expiring" {
+  alarm_name          = "ses-mail-gmail-forwarder-token-expiring-${var.environment}"
+  comparison_operator = "LessThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "TokenHoursUntilExpiration"
+  namespace           = "SESMail/${var.environment}"
+  period              = 3600 # 1 hour
+  statistic           = "Minimum"
+  threshold           = 24 # Alert when < 24 hours remaining
+  alarm_description   = "Gmail OAuth refresh token expires in less than 24 hours (${var.environment})"
+  treat_missing_data  = "notBreaching"
+
+  alarm_actions = [var.alarm_sns_topic_arn]
+  ok_actions    = [var.alarm_sns_topic_arn]
+}
