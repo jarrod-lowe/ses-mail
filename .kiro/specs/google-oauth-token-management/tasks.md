@@ -9,7 +9,7 @@ A task is not complete until:
 - The task has been marked as done in this file
 - A `git commit` has been made
 
-- [ ] 1. Set up infrastructure for retry processing and monitoring
+- [x] 1. Set up infrastructure for retry processing and monitoring
   - Create SQS retry queue and dead letter queue with environment-specific naming
   - Create Step Function for retry processing with proper IAM roles
   - Create SNS topic for token expiration notifications
@@ -110,7 +110,7 @@ A task is not complete until:
     - Add permissions for refresh script to invoke Step Function
     - _Requirements: 1.1, 4.1, 5.1_
 
-- [ ] 7. Create comprehensive error handling and logging
+- [x] 7. Create comprehensive error handling and logging
   - [x] 7.1 Implement structured logging in Gmail Forwarder
     - Add detailed logging for token operations and retry queue actions
     - Implement CloudWatch Insights compatible log format
