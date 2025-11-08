@@ -1585,6 +1585,161 @@ fields @timestamp, successCount, failureCount, totalCount
 - **Parseable**: JSON format allows automated log processing and alerting
 - **Debuggable**: Detailed context for troubleshooting token expiration and retry scenarios
 
+### Step Function Retry Processing Monitoring
+
+The Gmail Forwarder retry processing uses AWS Step Functions to automatically process queued messages after OAuth token refresh. The Step Function includes comprehensive monitoring capabilities for tracking retry processing execution and outcomes.
+
+**Step Function State Machine:**
+
+- **Name**: `ses-mail-gmail-forwarder-retry-processor-{environment}`
+- **Purpose**: Process messages from retry queue after token expiration
+- **Trigger**: Automatically invoked by refresh script after token renewal
+- **Logging**: Full execution data logged to CloudWatch
+- **Tracing**: X-Ray Active tracing enabled for distributed correlation
+
+**Monitoring Capabilities:**
+
+1. **Execution History** - View all executions in AWS Console:
+   ```bash
+   # Get Step Function ARN from Terraform
+   cd terraform/environments/test
+   terraform output -json | jq -r '.stepfunction_retry_processor_arn.value'
+
+   # Access in AWS Console:
+   # Step Functions → State machines → ses-mail-gmail-forwarder-retry-processor-test
+   # → Executions tab for full history
+   ```
+
+2. **CloudWatch Metrics** - Automatic AWS/States namespace metrics:
+   - `ExecutionsStarted` - Count of retry processing executions started
+   - `ExecutionsSucceeded` - Count of successful completions
+   - `ExecutionsFailed` - Count of failures (alarmed)
+   - `ExecutionsTimedOut` - Count of timeouts (alarmed)
+   - `ExecutionThrottled` - Count of throttled executions (alarmed)
+   - `ExecutionTime` - Duration in milliseconds
+
+3. **Custom Metrics** - Published to `SESMail/{environment}` namespace:
+   - `RetryProcessingCompleted` - Count of successful retry processing completions
+
+   Query custom metrics:
+   ```bash
+   # Get retry processing completion count
+   AWS_PROFILE=ses-mail aws cloudwatch get-metric-statistics \
+     --namespace "SESMail/test" \
+     --metric-name RetryProcessingCompleted \
+     --start-time $(date -u -v-24H +%Y-%m-%dT%H:%M:%S) \
+     --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+     --period 3600 \
+     --statistics Sum
+   ```
+
+4. **CloudWatch Logs** - Full execution details:
+   - **Log Group**: `/aws/states/ses-mail-gmail-forwarder-retry-processor-{environment}`
+   - **Retention**: 30 days
+   - **Content**: Complete execution data including inputs, outputs, state transitions
+
+   View logs:
+   ```bash
+   # Tail Step Function execution logs
+   AWS_PROFILE=ses-mail aws logs tail \
+     /aws/states/ses-mail-gmail-forwarder-retry-processor-test --follow
+   ```
+
+**CloudWatch Insights Queries for Troubleshooting:**
+
+Find failed executions:
+
+```
+fields @timestamp, execution_arn, error.Error, error.Cause
+| filter type = "ExecutionFailed"
+| sort @timestamp desc
+| limit 20
+```
+
+Track message processing progress:
+
+```
+fields @timestamp, execution_arn, details.name as state, event_type
+| filter event_type like /StateEntered/
+| sort @timestamp desc
+| limit 50
+```
+
+Analyze execution duration:
+
+```
+fields @timestamp, execution_arn, event_timestamp
+| filter type = "ExecutionSucceeded"
+| sort @timestamp desc
+| limit 20
+```
+
+**CloudWatch Alarms:**
+
+The system includes alarms for Step Function failures:
+
+- **ExecutionsFailed** (`ses-mail-stepfunction-retry-processor-failed-{environment}`)
+  - Triggers when retry processing execution fails
+  - Notifications via SNS token alerts topic
+
+- **ExecutionsTimedOut** (`ses-mail-stepfunction-retry-processor-timeout-{environment}`)
+  - Triggers when retry processing times out
+  - Indicates processing taking too long or stuck
+
+- **ExecutionThrottled** (`ses-mail-stepfunction-retry-processor-throttled-{environment}`)
+  - Triggers when AWS throttles Step Function execution
+  - May indicate too many concurrent executions
+
+**Viewing Execution Details:**
+
+```bash
+# List recent executions
+AWS_PROFILE=ses-mail aws stepfunctions list-executions \
+  --state-machine-arn $(cd terraform/environments/test && terraform output -raw stepfunction_retry_processor_arn) \
+  --max-results 10
+
+# Get execution details
+AWS_PROFILE=ses-mail aws stepfunctions describe-execution \
+  --execution-arn <execution-arn-from-above>
+
+# Get execution history (all state transitions)
+AWS_PROFILE=ses-mail aws stepfunctions get-execution-history \
+  --execution-arn <execution-arn-from-above>
+```
+
+**Dashboard Widget:**
+
+The CloudWatch Dashboard includes a "Step Function Retry Processor" widget showing:
+- Execution success/failure/timeout/throttled counts over time
+- Average execution duration
+- Visual trends for identifying issues
+
+**Common Scenarios:**
+
+1. **Monitoring Token Refresh Recovery**:
+   - After running refresh script, check Step Function executions
+   - Verify `ExecutionsSucceeded` metric increments
+   - Confirm retry queue depth returns to zero
+
+2. **Troubleshooting Failed Retry Processing**:
+   - Check `ExecutionsFailed` alarm status
+   - View CloudWatch Logs for error details
+   - Use X-Ray trace ID to correlate with Lambda errors
+   - Check Gmail Forwarder logs for token issues
+
+3. **Tracking Retry Queue Processing**:
+   - Monitor `RetryProcessingCompleted` custom metric
+   - Compare with retry queue depth to ensure messages processed
+   - Check execution time to identify performance issues
+
+**Best Practices:**
+
+- Review Step Function execution history after each token refresh
+- Set up SNS notifications for failure alarms
+- Use X-Ray traces to debug complex retry scenarios
+- Monitor execution duration trends to catch performance degradation
+- Keep retry queue depth low by refreshing tokens proactively
+
 ### CloudWatch Logs Insights Saved Queries
 
 The system includes pre-configured CloudWatch Logs Insights queries for common troubleshooting scenarios. Access them via:

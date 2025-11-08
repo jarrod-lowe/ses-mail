@@ -108,6 +108,30 @@ resource "aws_iam_role_policy_attachment" "stepfunction_xray_access" {
   role       = aws_iam_role.stepfunction_retry_processor.name
 }
 
+# IAM policy for Step Function to publish CloudWatch metrics
+resource "aws_iam_role_policy" "stepfunction_cloudwatch_metrics" {
+  name = "cloudwatch-metrics"
+  role = aws_iam_role.stepfunction_retry_processor.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "cloudwatch:PutMetricData"
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "cloudwatch:namespace" = "SESMail/${var.environment}"
+          }
+        }
+      }
+    ]
+  })
+}
+
 # CloudWatch Log Group for Step Function
 resource "aws_cloudwatch_log_group" "stepfunction_retry_processor_logs" {
   name              = "/aws/states/ses-mail-gmail-forwarder-retry-processor-${var.environment}"
@@ -302,8 +326,55 @@ resource "aws_sfn_state_machine" "retry_processor" {
         Default = "ReadMessagesFromQueue"
       }
 
-      # All messages processed successfully
+      # All messages processed - publish completion metrics
       AllMessagesProcessed = {
+        Type = "Pass"
+        Parameters = {
+          "Status"                = "Completed"
+          "ProcessingResults.$"   = "$.ProcessingResults"
+          "CompletionTimestamp.$" = "$$.State.EnteredTime"
+        }
+        Next = "PublishCompletionMetrics"
+      }
+
+      # Publish metrics about retry processing completion
+      PublishCompletionMetrics = {
+        Type     = "Task"
+        Resource = "arn:aws:states:::aws-sdk:cloudwatch:putMetricData"
+        Parameters = {
+          Namespace = "SESMail/${var.environment}"
+          MetricData = [
+            {
+              MetricName = "RetryProcessingCompleted"
+              Value      = 1
+              Unit       = "Count"
+            }
+          ]
+        }
+        ResultPath = "$.MetricsResult"
+        Catch = [
+          {
+            ErrorEquals = ["States.ALL"]
+            Next        = "MetricsPublishFailed"
+            ResultPath  = "$.MetricsError"
+          }
+        ]
+        Next = "RetryProcessingComplete"
+      }
+
+      # Metrics publish failed - log and continue
+      MetricsPublishFailed = {
+        Type = "Pass"
+        Parameters = {
+          "Status"         = "MetricsPublishFailed"
+          "Error.$"        = "$.MetricsError"
+          "OriginalData.$" = "$"
+        }
+        Next = "RetryProcessingComplete"
+      }
+
+      # Final success state
+      RetryProcessingComplete = {
         Type = "Succeed"
       }
 
@@ -337,6 +408,7 @@ resource "aws_sfn_state_machine" "retry_processor" {
     aws_iam_role_policy.stepfunction_sqs_access,
     aws_iam_role_policy.stepfunction_lambda_invoke,
     aws_iam_role_policy.stepfunction_cloudwatch_logs,
+    aws_iam_role_policy.stepfunction_cloudwatch_metrics,
     aws_cloudwatch_log_group.stepfunction_retry_processor_logs
   ]
 }
