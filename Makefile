@@ -46,12 +46,11 @@ help:
 	@echo ""
 
 # Package Lambda functions with dependencies
-$(MODULE_DIR)/lambda/package: requirements.txt $(MODULE_DIR)/lambda/email_processor.py $(MODULE_DIR)/lambda/router_enrichment.py $(MODULE_DIR)/lambda/gmail_forwarder.py $(MODULE_DIR)/lambda/bouncer.py $(MODULE_DIR)/lambda/smtp_credential_manager.py
+$(MODULE_DIR)/lambda/package: requirements.txt $(MODULE_DIR)/lambda/router_enrichment.py $(MODULE_DIR)/lambda/gmail_forwarder.py $(MODULE_DIR)/lambda/bouncer.py $(MODULE_DIR)/lambda/smtp_credential_manager.py
 	@echo "Packaging Lambda functions with dependencies..."
 	@rm -rf $(MODULE_DIR)/lambda/package
 	@mkdir -p $(MODULE_DIR)/lambda/package
 	@pip3 install -q -r requirements.txt -t $(MODULE_DIR)/lambda/package
-	@cp $(MODULE_DIR)/lambda/email_processor.py $(MODULE_DIR)/lambda/package/
 	@cp $(MODULE_DIR)/lambda/router_enrichment.py $(MODULE_DIR)/lambda/package/
 	@cp $(MODULE_DIR)/lambda/gmail_forwarder.py $(MODULE_DIR)/lambda/package/
 	@cp $(MODULE_DIR)/lambda/bouncer.py $(MODULE_DIR)/lambda/package/

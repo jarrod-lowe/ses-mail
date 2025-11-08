@@ -28,16 +28,6 @@ output "s3_bucket_arn" {
   value       = aws_s3_bucket.email_storage.arn
 }
 
-output "lambda_function_name" {
-  description = "Name of the email processor Lambda function"
-  value       = aws_lambda_function.email_processor.function_name
-}
-
-output "lambda_function_arn" {
-  description = "ARN of the email processor Lambda function"
-  value       = aws_lambda_function.email_processor.arn
-}
-
 output "ses_receipt_rule_set" {
   description = "Name of the SES receipt rule set"
   value       = aws_ses_receipt_rule_set.main.rule_set_name

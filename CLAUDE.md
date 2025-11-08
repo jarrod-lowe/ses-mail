@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-SES Mail is an AWS-based email receiving system that processes emails through SES and forwards them to Gmail via the Gmail API. The system is currently being modernized from a direct Lambda invocation architecture to a fully event-driven architecture using SNS, SQS, EventBridge Pipes, and EventBridge Event Bus.
+SES Mail is an AWS-based email receiving system that processes emails through SES and forwards them to Gmail via the Gmail API. The system uses a fully event-driven architecture with SNS, SQS, EventBridge, and Lambda functions for routing and processing email.
 
 ## Common Commands
 
@@ -76,32 +76,24 @@ AWS_PROFILE=ses-mail aws ssm put-parameter \
 
 ## Architecture
 
-### Current Architecture (Legacy - Being Replaced)
+The system uses a fully event-driven architecture:
 
 ```plain
-SES → S3 → Lambda (validator - sync) → Lambda (email_processor - async) → Gmail API
+SES → S3 → SNS → router_enrichment Lambda → EventBridge Event Bus →
+  → SQS (gmail-forwarder) → Lambda (gmail_forwarder) → Gmail API
+  → SQS (bouncer) → Lambda (bouncer) → SES Bounce
 ```
 
-- `email_validator.py`: Synchronous RequestResponse lambda that bounces all emails
-- `email_processor.py`: Async lambda that fetches email from S3, imports to Gmail, deletes from S3
+**Key components**:
 
-### Target Architecture (Modernization In Progress)
-
-```plain
-SES → S3 → SNS → SQS → EventBridge Pipes[router enrichment] → EventBridge Event Bus →
-  → SQS (gmail-forwarder) → Lambda (gmail handler)
-  → SQS (bouncer) → Lambda (bouncer handler)
-```
-
-Key changes:
-
-- **SNS with X-Ray tracing**: Replaces direct lambda invocation
-- **EventBridge Pipes**: Enriches messages via router lambda (DynamoDB lookup)
-- **EventBridge Event Bus**: Routes messages to appropriate queues based on routing decisions
-- **Handler lambdas**: Process specific actions (Gmail forwarding, bouncing)
+- **SNS with X-Ray tracing**: SES publishes email receipt notifications to SNS topic
+- **Router enrichment Lambda**: Subscribes to SNS, performs DynamoDB lookup for routing rules, publishes to EventBridge Event Bus
+- **EventBridge Event Bus**: Routes messages to appropriate SQS queues based on routing action
+- **Handler lambdas**: Process specific actions (Gmail forwarding via `gmail_forwarder.py`, bouncing via `bouncer.py`)
 - **DynamoDB**: Stores routing rules with hierarchical address matching
+- **Retry processing**: Step Functions workflow handles persistent failures with exponential backoff
 
-See `.kiro/specs/*` -for complete design documentation.
+See `.kiro/specs/*` for complete design documentation.
 
 ### DynamoDB Single-Table Design Pattern
 
@@ -155,9 +147,11 @@ terraform/
         ├── cloudwatch.tf        # Metrics, alarms, dashboard
         ├── mta-sts.tf           # MTA-STS policy hosting
         └── lambda/
-            ├── email_processor.py   # Gmail forwarder lambda
-            ├── email_validator.py   # Sync validator (to be removed)
-            └── package/             # Lambda dependencies (pip install -t)
+            ├── router_enrichment.py        # Router lambda (DynamoDB lookup)
+            ├── gmail_forwarder.py          # Gmail forwarder lambda
+            ├── bouncer.py                  # Email bouncer lambda
+            ├── smtp_credential_manager.py  # SMTP credential management
+            └── package/                    # Lambda dependencies (pip install -t)
 ```
 
 ## Key Development Patterns
@@ -197,15 +191,18 @@ Lambda functions are in `terraform/modules/ses-mail/lambda/`:
 
 **Lambda handlers**:
 
-- Current: `email_processor.lambda_handler` - SES event → Gmail import
-- Future: Router enrichment, Gmail handler, Bouncer handler
+- `router_enrichment.lambda_handler` - SNS event → DynamoDB lookup → EventBridge Event Bus
+- `gmail_forwarder.lambda_handler` - SQS event → Fetch from S3 → Gmail API import → Delete from S3
+- `bouncer.lambda_handler` - SQS event → Send bounce email via SES
+- `smtp_credential_manager.lambda_handler` - DynamoDB Streams → IAM user creation/deletion for SMTP
 
 ### IAM Role Naming Convention
 
-- Email processor: `ses-mail-lambda-execution-{env}`
-- Email validator: `ses-mail-lambda-validator-{env}` (to be removed)
 - Router enrichment: `ses-mail-lambda-router-{env}`
-- EventBridge Pipes: `ses-mail-pipes-execution-{env}` (future)
+- Gmail forwarder: `ses-mail-lambda-gmail-forwarder-{env}`
+- Bouncer: `ses-mail-lambda-bouncer-{env}`
+- SMTP credential manager: `ses-mail-lambda-credential-manager-{env}`
+- Tag sync: `ses-mail-lambda-tag-sync-{env}`
 
 ## Important Conventions
 
@@ -224,20 +221,19 @@ When extending DynamoDB table:
 
 ### Email Processing Flow
 
-Current:
+The event-driven email processing flow:
 
-1. SES receives email → stores in S3 (`emails/{messageId}`)
-2. Validator lambda (sync) → bounces all emails, returns STOP_RULE_SET
-3. Email processor lambda (async, but currently skipped due to validator)
-
-Target (after modernization):
-
-1. SES receives email → stores in S3 → publishes to SNS
-2. SNS → SQS input queue
-3. EventBridge Pipes → router lambda enriches message (DynamoDB lookup)
-4. EventBridge Event Bus → routes to handler queues
-5. Handler lambdas process from queues (Gmail forward or bounce)
-6. X-Ray distributed tracing across entire pipeline
+1. SES receives email → stores in S3 (`emails/{messageId}`) → publishes to SNS topic
+2. Router enrichment Lambda subscribes to SNS → performs DynamoDB lookup for routing rules
+3. Router Lambda publishes routing decision to EventBridge Event Bus
+4. EventBridge rules route to appropriate SQS queues based on action:
+   - `forward-to-gmail` → gmail-forwarder queue
+   - `bounce` → bouncer queue
+5. Handler lambdas process messages from queues:
+   - Gmail forwarder: Fetches email from S3, imports to Gmail API, deletes from S3
+   - Bouncer: Sends bounce email via SES
+6. Failed messages are retried via SQS DLQ and Step Functions workflow
+7. X-Ray distributed tracing tracks requests across the entire pipeline
 
 ## Monitoring and Operations
 
@@ -252,10 +248,18 @@ Target (after modernization):
 
 ```bash
 # View Lambda logs
-AWS_PROFILE=ses-mail aws logs tail /aws/lambda/ses-mail-email-processor-test --follow
+AWS_PROFILE=ses-mail aws logs tail /aws/lambda/ses-mail-router-enrichment-test --follow
+AWS_PROFILE=ses-mail aws logs tail /aws/lambda/ses-mail-gmail-forwarder-test --follow
+AWS_PROFILE=ses-mail aws logs tail /aws/lambda/ses-mail-bouncer-test --follow
 
 # Check email in S3
 AWS_PROFILE=ses-mail aws s3 ls s3://ses-mail-storage-{account-id}-test/emails/
+
+# Check SQS queues
+AWS_PROFILE=ses-mail aws sqs get-queue-attributes --queue-url $(AWS_PROFILE=ses-mail aws sqs get-queue-url --queue-name ses-mail-gmail-forwarder-test --query 'QueueUrl' --output text) --attribute-names ApproximateNumberOfMessages
+
+# View X-Ray traces
+aws xray get-trace-summaries --start-time $(date -u -v-1H +%s) --end-time $(date -u +%s)
 ```
 
 ## State Management
