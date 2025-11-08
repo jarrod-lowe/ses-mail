@@ -236,6 +236,47 @@ resource "aws_cloudwatch_dashboard" "ses_mail" {
             }
           }
         }
+      },
+      # Recent Email Routing Decisions (Table View)
+      {
+        type   = "log"
+        width  = 24
+        height = 8
+        x      = 0
+        y      = 30
+        properties = {
+          query   = <<-EOT
+SOURCE '${aws_cloudwatch_log_group.lambda_router_logs.name}'
+| filter message = "Routing decision" or message = "Looking up routing rule for recipient"
+| fields @timestamp, recipient, action, lookupKey, target
+| sort @timestamp desc
+| limit 50
+EOT
+          region  = var.aws_region
+          stacked = false
+          view    = "table"
+          title   = "Recent Email Routing Decisions"
+        }
+      },
+      # Routing Action Statistics (Pie Chart)
+      {
+        type   = "log"
+        width  = 12
+        height = 6
+        x      = 0
+        y      = 38
+        properties = {
+          query   = <<-EOT
+SOURCE '${aws_cloudwatch_log_group.lambda_router_logs.name}'
+| filter message = "Routing decision"
+| stats count() as count by action
+| sort count desc
+EOT
+          region  = var.aws_region
+          stacked = false
+          view    = "pie"
+          title   = "Routing Actions Distribution"
+        }
       }
     ]
   })
