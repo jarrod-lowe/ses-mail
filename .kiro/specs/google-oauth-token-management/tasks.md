@@ -72,14 +72,14 @@ A task is not complete until:
     - Grant permissions to delete processed messages from queue
     - _Requirements: 5.2_
 
-- [ ] 5. Set up CloudWatch monitoring and alerting
+- [x] 5. Set up CloudWatch monitoring and alerting
   - [x] 5.1 Create CloudWatch alarm for token expiration
     - Define alarm to trigger 24 hours before token expiration
     - Configure SNS notification to administrators
     - Use environment-specific naming for alarm and SNS topic
     - _Requirements: 3.1, 3.3_
 
-  - [ ] 5.2 Configure CloudWatch metrics for retry processing
+  - [x] 5.2 Configure CloudWatch metrics for retry processing
     - Set up metrics for retry queue depth and processing time
     - Create alarms for retry processing failures
     - Monitor Step Function execution success/failure rates

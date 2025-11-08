@@ -1332,6 +1332,8 @@ echo "https://console.aws.amazon.com/cloudwatch/home?region=ap-southeast-2#dashb
 6. **Dead Letter Queue Messages** - DLQ message counts (should normally be 0)
 7. **Lambda Duration** - Average execution times for router, gmail forwarder, and bouncer lambdas
 8. **Recent Email Logs** - CloudWatch Logs Insights query showing recent processed emails
+9. **Retry Queue Metrics (Token Expiration)** - Retry queue depth, age, and DLQ messages for OAuth token expiration handling
+10. **Step Function Retry Processor** - Execution metrics (succeeded, failed, timed out, throttled) and duration for retry processing
 
 ### Custom Metrics
 
@@ -1407,6 +1409,18 @@ The system includes CloudWatch alarms that trigger when operational thresholds a
 - `eventbridge-pipes-failures-{environment}` - EventBridge Pipes enrichment failures
 - `eventbridge-gmail-failures-{environment}` - EventBridge failed to deliver to Gmail queue
 - `eventbridge-bouncer-failures-{environment}` - EventBridge failed to deliver to bouncer queue
+
+**Retry Queue Alarms (OAuth Token Expiration):**
+
+- `ses-mail-gmail-forwarder-retry-queue-depth-{environment}` - Retry queue has ≥1 message (indicates token expired)
+- `ses-mail-gmail-forwarder-retry-queue-age-{environment}` - Retry messages aging >15 minutes
+- `ses-mail-gmail-forwarder-retry-dlq-messages-{environment}` - Retry DLQ has messages (permanent failures)
+
+**Step Function Alarms (Retry Processing):**
+
+- `ses-mail-stepfunction-retry-processor-failed-{environment}` - Step Function executions failing
+- `ses-mail-stepfunction-retry-processor-timeout-{environment}` - Step Function executions timing out
+- `ses-mail-stepfunction-retry-processor-throttled-{environment}` - Step Function executions being throttled
 
 **Viewing Alarm Status:**
 

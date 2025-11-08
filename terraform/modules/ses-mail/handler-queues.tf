@@ -184,6 +184,31 @@ resource "aws_cloudwatch_metric_alarm" "gmail_forwarder_retry_queue_age_alarm" {
   }
 }
 
+# CloudWatch alarm for Gmail forwarder retry queue depth (messages pending retry)
+resource "aws_cloudwatch_metric_alarm" "gmail_forwarder_retry_queue_depth_alarm" {
+  alarm_name          = "ses-mail-gmail-forwarder-retry-queue-depth-${var.environment}"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = 1
+  metric_name         = "ApproximateNumberOfMessagesVisible"
+  namespace           = "AWS/SQS"
+  period              = 300
+  statistic           = "Average"
+  threshold           = 1 # Alert when >= 1 message (low-usage system, any retry indicates token expiration)
+  alarm_description   = "Alert when messages are queued for retry - indicates OAuth token expiration (${var.environment})"
+  alarm_actions       = [var.alarm_sns_topic_arn]
+  ok_actions          = [var.alarm_sns_topic_arn]
+
+  dimensions = {
+    QueueName = aws_sqs_queue.gmail_forwarder_retry.name
+  }
+
+  tags = {
+    Name        = "ses-gmail-forwarder-retry-queue-depth-alarm-${var.environment}"
+    Environment = var.environment
+    Service     = "ses-mail"
+  }
+}
+
 # ===========================
 # Bouncer Queue Infrastructure
 # ===========================

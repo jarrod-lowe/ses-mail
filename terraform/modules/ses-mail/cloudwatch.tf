@@ -244,6 +244,70 @@ resource "aws_cloudwatch_dashboard" "ses_mail" {
           title   = "Recent Emails"
           stacked = false
         }
+      },
+      # Retry Queue Metrics
+      {
+        type   = "metric"
+        width  = 12
+        height = 6
+        x      = 0
+        y      = 24
+        properties = {
+          metrics = [
+            ["AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", aws_sqs_queue.gmail_forwarder_retry.name, { stat = "Average", label = "Retry Queue Depth", color = "#ff7f0e" }],
+            [".", "ApproximateAgeOfOldestMessage", ".", ".", { stat = "Maximum", label = "Retry Queue Age (s)", yAxis = "right", color = "#d62728" }],
+            [".", "ApproximateNumberOfMessagesVisible", ".", aws_sqs_queue.gmail_forwarder_retry_dlq.name, { stat = "Average", label = "Retry DLQ", color = "#e377c2" }]
+          ]
+          period = 300
+          stat   = "Average"
+          region = var.aws_region
+          title  = "Retry Queue Metrics (Token Expiration)"
+          yAxis = {
+            left = {
+              min       = 0
+              label     = "Message Count"
+              showUnits = false
+            }
+            right = {
+              min       = 0
+              label     = "Age (seconds)"
+              showUnits = false
+            }
+          }
+        }
+      },
+      # Step Function Execution Metrics
+      {
+        type   = "metric"
+        width  = 12
+        height = 6
+        x      = 12
+        y      = 24
+        properties = {
+          metrics = [
+            ["AWS/States", "ExecutionsSucceeded", "StateMachineArn", aws_sfn_state_machine.retry_processor.arn, { stat = "Sum", label = "Succeeded", color = "#2ca02c" }],
+            [".", "ExecutionsFailed", ".", ".", { stat = "Sum", label = "Failed", color = "#d62728" }],
+            [".", "ExecutionsTimedOut", ".", ".", { stat = "Sum", label = "Timed Out", color = "#ff7f0e" }],
+            [".", "ExecutionThrottled", ".", ".", { stat = "Sum", label = "Throttled", color = "#9467bd" }],
+            [".", "ExecutionTime", ".", ".", { stat = "Average", label = "Duration (ms)", yAxis = "right", color = "#1f77b4" }]
+          ]
+          period = 300
+          stat   = "Sum"
+          region = var.aws_region
+          title  = "Step Function Retry Processor"
+          yAxis = {
+            left = {
+              min       = 0
+              label     = "Execution Count"
+              showUnits = false
+            }
+            right = {
+              min       = 0
+              label     = "Duration (ms)"
+              showUnits = false
+            }
+          }
+        }
       }
     ]
   })
