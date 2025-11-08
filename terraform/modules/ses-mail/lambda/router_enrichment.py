@@ -26,7 +26,7 @@ logger = Logger(service="ses-mail-router-enrichment")
 # Environment configuration
 DYNAMODB_TABLE_NAME = os.environ.get('DYNAMODB_TABLE_NAME')
 ENVIRONMENT = os.environ.get('ENVIRONMENT', 'unknown')
-EVENT_BUS_NAME = f"ses-email-routing-{ENVIRONMENT}"
+EVENT_BUS_NAME = f"ses-mail-email-routing-{ENVIRONMENT}"
 
 # Initialize AWS clients
 dynamodb = boto3.client('dynamodb')

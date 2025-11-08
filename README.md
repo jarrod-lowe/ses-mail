@@ -51,17 +51,6 @@
 - After setting up the infrastructure, set the token parameter to the value of token.json
 - Delete the `client_secret.json` and `token.json` files from the local filesystem
 
-### Setup Service Account
-
-This section is still under testing. I don't think it will work.
-
-- Go into "APIs and Services", and enable the "Identity and Access Management (IAM) API"
-- Go into "IAM and Admin" -> "Service Accounts" -> "Create Service Account"
-  - Name: ses-mail-test
-  - ID: ses-mail-test
-  - Create and Continue
-  - 
-
 ## Initial AWS Setup
 
 In the account, enable Production access in SES.
@@ -331,6 +320,7 @@ AWS_PROFILE=ses-mail python3 scripts/refresh_oauth_token.py --env test
 **Interactive OAuth Flow Details:**
 
 When you run the refresh script, it will:
+
 - Display instructions in your terminal about the OAuth consent process
 - Automatically open your default web browser to Google's OAuth consent screen
 - Show the permissions being requested (Gmail API access for inserting/importing messages)
@@ -340,6 +330,7 @@ When you run the refresh script, it will:
 - Return control to the script for token storage
 
 **Important Notes:**
+
 - Ensure port 8080 is not in use by another application
 - The browser must be able to connect to `localhost:8080`
 - You must click "Allow" on the consent screen to proceed
@@ -550,7 +541,7 @@ If credentials are not yet configured, you'll see detailed instructions on how t
 
 ### Troubleshooting OAuth Issues
 
-**Error: "OAuth client credentials not yet configured in SSM"**
+In case of: **Error: "OAuth client credentials not yet configured in SSM"**
 
 Upload your `client_secret.json` file to SSM:
 
@@ -562,13 +553,14 @@ AWS_PROFILE=ses-mail aws ssm put-parameter \
   --overwrite
 ```
 
-**Error: "Permission denied accessing SSM parameter"**
+In case of: **Error: "Permission denied accessing SSM parameter"**
 
 Ensure your AWS credentials have the required permissions:
+
 - `ssm:GetParameter` - Read SSM parameters
 - `kms:Decrypt` - Decrypt SecureString parameters
 
-**Error: "Failed to parse OAuth client credentials from SSM"**
+In case of: **Error: "Failed to parse OAuth client credentials from SSM"**
 
 Verify the parameter contains valid Google OAuth JSON format:
 
@@ -594,7 +586,7 @@ The JSON should have this structure:
 }
 ```
 
-**Error: "OAuth authorization flow failed" or "Port 8080 is already in use"**
+In case of: In case of: **Error: "OAuth authorization flow failed" or "Port 8080 is already in use"**
 
 Ensure port 8080 is available:
 
@@ -606,16 +598,16 @@ lsof -i :8080
 # The script currently uses a fixed port (8080) - this may be configurable in future versions
 ```
 
-**Error: "OAuth flow succeeded but did not return a refresh token"**
+In case of: **Error: "OAuth flow succeeded but did not return a refresh token"**
 
 This happens if you've already authorized the application. To fix:
 
-1. Visit https://myaccount.google.com/permissions
+1. Visit <https://myaccount.google.com/permissions>
 2. Find the "ses-mail" application in the list
 3. Click "Remove access"
 4. Re-run the refresh script to re-authorize
 
-**Error: "OAuth redirect URI mismatch"**
+In case of: **Error: "OAuth redirect URI mismatch"**
 
 The OAuth client configuration in Google Cloud Console must include `http://localhost:8080` in redirect URIs:
 
@@ -624,9 +616,10 @@ The OAuth client configuration in Google Cloud Console must include `http://loca
 3. Add `http://localhost:8080` to "Authorized redirect URIs"
 4. Save and retry
 
-**Error: "Browser didn't open automatically"**
+In case of: **Error: "Browser didn't open automatically"**
 
 If your browser doesn't open:
+
 1. Look for the authorization URL in the terminal output
 2. Copy the URL and paste it into your browser manually
 3. Complete the authorization in the browser
@@ -1554,7 +1547,7 @@ All logs are output as structured JSON with the following fields:
 
 Query retry queue operations:
 
-```
+```plain
 fields @timestamp, message, errorType, attemptCount
 | filter message = "Queued message for retry"
 | sort @timestamp desc
@@ -1563,7 +1556,7 @@ fields @timestamp, message, errorType, attemptCount
 
 Query token operations:
 
-```
+```plain
 fields @timestamp, message, token_expiry
 | filter message like /token/
 | sort @timestamp desc
@@ -1572,7 +1565,7 @@ fields @timestamp, message, token_expiry
 
 Query processing metrics:
 
-```
+```plain
 fields @timestamp, successCount, failureCount, totalCount
 | filter message = "Processed messages"
 | stats sum(successCount) as TotalSuccess, sum(failureCount) as TotalFailure by bin(5m)
@@ -1600,6 +1593,7 @@ The Gmail Forwarder retry processing uses AWS Step Functions to automatically pr
 **Monitoring Capabilities:**
 
 1. **Execution History** - View all executions in AWS Console:
+
    ```bash
    # Get Step Function ARN from Terraform
    cd terraform/environments/test
@@ -1622,6 +1616,7 @@ The Gmail Forwarder retry processing uses AWS Step Functions to automatically pr
    - `RetryProcessingCompleted` - Count of successful retry processing completions
 
    Query custom metrics:
+
    ```bash
    # Get retry processing completion count
    AWS_PROFILE=ses-mail aws cloudwatch get-metric-statistics \
@@ -1639,6 +1634,7 @@ The Gmail Forwarder retry processing uses AWS Step Functions to automatically pr
    - **Content**: Complete execution data including inputs, outputs, state transitions
 
    View logs:
+
    ```bash
    # Tail Step Function execution logs
    AWS_PROFILE=ses-mail aws logs tail \
@@ -1649,7 +1645,7 @@ The Gmail Forwarder retry processing uses AWS Step Functions to automatically pr
 
 Find failed executions:
 
-```
+```plain
 fields @timestamp, execution_arn, error.Error, error.Cause
 | filter type = "ExecutionFailed"
 | sort @timestamp desc
@@ -1658,7 +1654,7 @@ fields @timestamp, execution_arn, error.Error, error.Cause
 
 Track message processing progress:
 
-```
+```plain
 fields @timestamp, execution_arn, details.name as state, event_type
 | filter event_type like /StateEntered/
 | sort @timestamp desc
@@ -1667,7 +1663,7 @@ fields @timestamp, execution_arn, details.name as state, event_type
 
 Analyze execution duration:
 
-```
+```plain
 fields @timestamp, execution_arn, event_timestamp
 | filter type = "ExecutionSucceeded"
 | sort @timestamp desc
@@ -1710,6 +1706,7 @@ AWS_PROFILE=ses-mail aws stepfunctions get-execution-history \
 **Dashboard Widget:**
 
 The CloudWatch Dashboard includes a "Step Function Retry Processor" widget showing:
+
 - Execution success/failure/timeout/throttled counts over time
 - Average execution duration
 - Visual trends for identifying issues
@@ -1850,6 +1847,7 @@ terraform output smtp_ports
 ```
 
 **SMTP Server Settings**:
+
 - **Host**: `email-smtp.{region}.amazonaws.com` (from terraform output)
 - **Port**: 587 (recommended - STARTTLS)
 - **Security**: STARTTLS
@@ -1877,6 +1875,7 @@ AWS_PROFILE=ses-mail aws dynamodb put-item \
 ```
 
 **Required Fields**:
+
 - `PK`: Always `"SMTP_USER"` (partition key for SMTP credential records)
 - `SK`: `"USER#{username}"` (unique identifier, e.g., `USER#john.doe`)
 - `status`: `"pending"` (triggers Lambda processing)
@@ -1885,6 +1884,7 @@ AWS_PROFILE=ses-mail aws dynamodb put-item \
 - `entity_type`: `"smtp_credential"` (record type identifier)
 
 **Email Restriction Patterns**:
+
 - Exact address: `"john.doe@example.com"` (only this specific address)
 - Domain wildcard: `"*@marketing.example.com"` (any address at this domain)
 - Global wildcard: `"*"` (any address - use with caution)
@@ -2015,6 +2015,7 @@ AWS_PROFILE=ses-mail aws dynamodb delete-item \
 ```
 
 When a credential record is deleted, the Lambda function automatically:
+
 1. Detects the REMOVE event via DynamoDB Streams
 2. Lists and deletes all IAM access keys for the user
 3. Lists and deletes all inline IAM policies
@@ -2069,6 +2070,7 @@ spf_include_domains = [
 
 **SPF Mechanism Order**:
 The SPF record is built in this order:
+
 1. `v=spf1` - SPF version identifier
 2. `a:hostname` - A records (authorize IPs from these hostnames' A records)
 3. `mx:hostname` - MX records (authorize IPs from these hostnames' MX records - only use if the MX server also SENDS email)
@@ -2079,13 +2081,14 @@ The SPF record is built in this order:
 **Important**: SPF is for authorizing who can SEND email on behalf of your domain. Don't add backup MX servers to SPF unless they also send email. Use the `backup_mx_records` configuration below for email receiving.
 
 **SPF Policy Explanation**:
+
 - `~all` (soft fail) - Default setting. Tells receiving servers "if the email doesn't match SPF, mark it as suspicious but still accept it"
   - **Use for**: Testing, initial setup, or when you have other email services not included in SPF
-  - **Behavior**: Emails from unauthorized sources are typically delivered to spam/junk folders
+  - **Behaviour**: Emails from unauthorized sources are typically delivered to spam/junk folders
 
 - `-all` (hard fail) - Strict setting. Tells receiving servers "if the email doesn't match SPF, reject it completely"
   - **Use for**: Production environments after confirming all legitimate email sources are included
-  - **Behavior**: Emails from unauthorized sources are rejected and not delivered
+  - **Behaviour**: Emails from unauthorized sources are rejected and not delivered
   - **Warning**: Test thoroughly before using - misconfigured SPF with `-all` can cause legitimate emails to be rejected
 
 **The SPF record is automatically included in `dns_configuration_summary`** and will appear in the consolidated DNS records list when you run `terraform output dns_configuration_summary`.
@@ -2105,6 +2108,7 @@ backup_mx_records = [
 ```
 
 **MX Priority Explained**:
+
 - Lower priority number = higher preference (tried first)
 - SES primary MX has priority 10
 - Backup MX should have priority > 10 (e.g., 20, 30, etc.)
@@ -2114,30 +2118,35 @@ backup_mx_records = [
 **Note**: Backup MX servers are for RECEIVING email only. They should NOT be added to the SPF record unless they also send email on behalf of your domain.
 
 The backup MX records will automatically:
+
 - Appear in the `dns_configuration_summary` output alongside the primary SES MX record
 - Be included in the MTA-STS policy file (if MTA-STS is enabled) to authorize them for TLS email delivery
 
 ### Troubleshooting SMTP Issues
 
 **Authentication Failures**:
+
 - Verify SMTP credentials are correct (username = `access_key_id`, password = `smtp_password`)
 - Check IAM user status in DynamoDB (`status` should be `"active"`)
 - Verify IAM user exists and has active access keys
 - Check credential manager Lambda logs for creation errors
 
 **Email Sending Blocked**:
+
 - Verify sender address matches one of the `allowed_from_addresses` patterns
 - Check IAM policy attached to user restricts `ses:FromAddress` correctly
 - Verify SES is out of sandbox mode (or recipient is verified in sandbox)
 - Check CloudWatch Logs for SES rejection errors
 
 **DNS/Deliverability Issues**:
+
 - Verify SPF record is properly configured in DNS
 - Ensure DKIM records are added and verified in SES
 - Check DMARC policy is configured
 - Monitor bounce and complaint rates in CloudWatch
 
 **Lambda Processing Failures**:
+
 - Check DLQ for failed credential creation events (Task 4 implementation)
 - Review credential manager Lambda CloudWatch Logs
 - Verify KMS key permissions allow encryption/decryption
