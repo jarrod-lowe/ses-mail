@@ -43,7 +43,7 @@ The Makefile handles:
 ```bash
 # Add a routing rule (single-table design pattern)
 AWS_PROFILE=ses-mail aws dynamodb put-item \
-  --table-name ses-email-routing-test \
+  --table-name ses-mail-email-routing-test \
   --item '{
     "PK": {"S": "ROUTE#support@example.com"},
     "SK": {"S": "RULE#v1"},
@@ -59,7 +59,7 @@ AWS_PROFILE=ses-mail aws dynamodb put-item \
 
 # Query routing rules
 AWS_PROFILE=ses-mail aws dynamodb get-item \
-  --table-name ses-email-routing-test \
+  --table-name ses-mail-email-routing-test \
   --key '{"PK": {"S": "ROUTE#support@example.com"}, "SK": {"S": "RULE#v1"}}'
 ```
 
@@ -107,7 +107,7 @@ See `.kiro/specs/*` -for complete design documentation.
 
 The routing table uses generic PK/SK keys with prefixed values for extensibility:
 
-**Table**: `ses-email-routing-{environment}`
+**Table**: `ses-mail-email-routing-{environment}`
 
 - **PK**: `ROUTE#<pattern>` (e.g., `ROUTE#support@example.com`, `ROUTE#*@example.com`, `ROUTE#*`)
 - **SK**: `RULE#v1` (allows future versioning)

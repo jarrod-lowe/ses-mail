@@ -4,10 +4,10 @@
 
 # Custom Event Bus for email routing
 resource "aws_cloudwatch_event_bus" "email_routing" {
-  name = "ses-email-routing-${var.environment}"
+  name = "ses-mail-email-routing-${var.environment}"
 
   tags = {
-    Name        = "ses-email-routing-${var.environment}"
+    Name        = "ses-mail-email-routing-${var.environment}"
     Environment = var.environment
     Service     = "ses-mail"
     Purpose     = "Event bus for routing enriched email messages to handlers"
@@ -70,7 +70,7 @@ resource "aws_iam_role_policy" "eventbridge_sqs_access" {
 
 # Debug rule: Catch all events from router to CloudWatch Logs for debugging
 resource "aws_cloudwatch_event_rule" "debug_catch_all" {
-  name           = "debug-catch-all-${var.environment}"
+  name           = "ses-mail-debug-catch-all-${var.environment}"
   description    = "Debug: Catch all events from router to verify they arrive at Event Bus"
   event_bus_name = aws_cloudwatch_event_bus.email_routing.name
   state          = "ENABLED" # Temporarily disabled to test if it's interfering
@@ -81,7 +81,7 @@ resource "aws_cloudwatch_event_rule" "debug_catch_all" {
   })
 
   tags = {
-    Name        = "debug-catch-all-${var.environment}"
+    Name        = "ses-mail-debug-catch-all-${var.environment}"
     Environment = var.environment
     Service     = "ses-mail"
     Purpose     = "Debug rule to verify events arrive at Event Bus"
@@ -98,7 +98,7 @@ resource "aws_cloudwatch_event_target" "debug_catch_all" {
 
 # EventBridge rule for routing to Gmail forwarder
 resource "aws_cloudwatch_event_rule" "gmail_forwarder" {
-  name           = "route-to-gmail-${var.environment}"
+  name           = "ses-mail-route-to-gmail-${var.environment}"
   description    = "Route emails with forward-to-gmail action to Gmail forwarder queue"
   event_bus_name = aws_cloudwatch_event_bus.email_routing.name
 
@@ -117,7 +117,7 @@ resource "aws_cloudwatch_event_rule" "gmail_forwarder" {
   })
 
   tags = {
-    Name        = "route-to-gmail-${var.environment}"
+    Name        = "ses-mail-route-to-gmail-${var.environment}"
     Environment = var.environment
     Service     = "ses-mail"
     Purpose     = "Route forward-to-gmail actions to Gmail forwarder queue"
@@ -146,7 +146,7 @@ resource "aws_cloudwatch_event_target" "gmail_forwarder" {
 
 # EventBridge rule for routing to bouncer
 resource "aws_cloudwatch_event_rule" "bouncer" {
-  name           = "route-to-bouncer-${var.environment}"
+  name           = "ses-mail-route-to-bouncer-${var.environment}"
   description    = "Route emails with bounce action to bouncer queue"
   event_bus_name = aws_cloudwatch_event_bus.email_routing.name
 
@@ -165,7 +165,7 @@ resource "aws_cloudwatch_event_rule" "bouncer" {
   })
 
   tags = {
-    Name        = "route-to-bouncer-${var.environment}"
+    Name        = "ses-mail-route-to-bouncer-${var.environment}"
     Environment = var.environment
     Service     = "ses-mail"
     Purpose     = "Route bounce actions to bouncer queue"
@@ -273,7 +273,7 @@ resource "aws_cloudwatch_log_group" "eventbridge_logs" {
   retention_in_days = 30
 
   tags = {
-    Name        = "eventbridge-logs-${var.environment}"
+    Name        = "ses-mail-eventbridge-logs-${var.environment}"
     Environment = var.environment
     Service     = "ses-mail"
   }
@@ -281,7 +281,7 @@ resource "aws_cloudwatch_log_group" "eventbridge_logs" {
 
 # Resource policy to allow EventBridge to write to CloudWatch Logs
 resource "aws_cloudwatch_log_resource_policy" "eventbridge_logs" {
-  policy_name = "eventbridge-logs-${var.environment}"
+  policy_name = "ses-mail-eventbridge-logs-${var.environment}"
 
   policy_document = jsonencode({
     Version = "2012-10-17"
@@ -302,7 +302,7 @@ resource "aws_cloudwatch_log_resource_policy" "eventbridge_logs" {
 # CloudWatch metric filter for EventBridge rule failures (Gmail forwarder)
 resource "aws_cloudwatch_log_metric_filter" "eventbridge_gmail_failures" {
   depends_on     = [aws_cloudwatch_log_group.eventbridge_logs]
-  name           = "eventbridge-gmail-failures-${var.environment}"
+  name           = "ses-mail-eventbridge-gmail-failures-${var.environment}"
   log_group_name = "/aws/events/${aws_cloudwatch_event_bus.email_routing.name}"
   pattern        = "[time, request_id, event_id, rule_name=${aws_cloudwatch_event_rule.gmail_forwarder.name}, ...]"
 
@@ -316,7 +316,7 @@ resource "aws_cloudwatch_log_metric_filter" "eventbridge_gmail_failures" {
 
 # CloudWatch alarm for EventBridge Gmail forwarder rule failures
 resource "aws_cloudwatch_metric_alarm" "eventbridge_gmail_failures" {
-  alarm_name          = "eventbridge-gmail-failures-${var.environment}"
+  alarm_name          = "ses-mail-eventbridge-gmail-failures-${var.environment}"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 1
   metric_name         = "EventBridgeGmailRuleFailures"
@@ -330,7 +330,7 @@ resource "aws_cloudwatch_metric_alarm" "eventbridge_gmail_failures" {
   treat_missing_data  = "notBreaching"
 
   tags = {
-    Name        = "eventbridge-gmail-failures-${var.environment}"
+    Name        = "ses-mail-eventbridge-gmail-failures-${var.environment}"
     Environment = var.environment
     Service     = "ses-mail"
   }
@@ -339,7 +339,7 @@ resource "aws_cloudwatch_metric_alarm" "eventbridge_gmail_failures" {
 # CloudWatch metric filter for EventBridge rule failures (Bouncer)
 resource "aws_cloudwatch_log_metric_filter" "eventbridge_bouncer_failures" {
   depends_on     = [aws_cloudwatch_log_group.eventbridge_logs]
-  name           = "eventbridge-bouncer-failures-${var.environment}"
+  name           = "ses-mail-eventbridge-bouncer-failures-${var.environment}"
   log_group_name = "/aws/events/${aws_cloudwatch_event_bus.email_routing.name}"
   pattern        = "[time, request_id, event_id, rule_name=${aws_cloudwatch_event_rule.bouncer.name}, ...]"
 
@@ -353,7 +353,7 @@ resource "aws_cloudwatch_log_metric_filter" "eventbridge_bouncer_failures" {
 
 # CloudWatch alarm for EventBridge bouncer rule failures
 resource "aws_cloudwatch_metric_alarm" "eventbridge_bouncer_failures" {
-  alarm_name          = "eventbridge-bouncer-failures-${var.environment}"
+  alarm_name          = "ses-mail-eventbridge-bouncer-failures-${var.environment}"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 1
   metric_name         = "EventBridgeBouncerRuleFailures"
@@ -367,7 +367,7 @@ resource "aws_cloudwatch_metric_alarm" "eventbridge_bouncer_failures" {
   treat_missing_data  = "notBreaching"
 
   tags = {
-    Name        = "eventbridge-bouncer-failures-${var.environment}"
+    Name        = "ses-mail-eventbridge-bouncer-failures-${var.environment}"
     Environment = var.environment
     Service     = "ses-mail"
   }

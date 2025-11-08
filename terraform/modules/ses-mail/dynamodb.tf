@@ -3,7 +3,7 @@
 # and can be extended for other use cases in the future
 
 resource "aws_dynamodb_table" "email_routing" {
-  name         = "ses-email-routing-${var.environment}"
+  name         = "ses-mail-email-routing-${var.environment}"
   billing_mode = "PAY_PER_REQUEST" # No standing costs, pay per request
 
   # Single-table design with generic keys
@@ -35,7 +35,7 @@ resource "aws_dynamodb_table" "email_routing" {
   stream_view_type = "NEW_AND_OLD_IMAGES" # Capture both old and new item images for INSERT and MODIFY events
 
   tags = {
-    Name        = "ses-email-routing-${var.environment}"
+    Name        = "ses-mail-email-routing-${var.environment}"
     Environment = var.environment
     ManagedBy   = "Terraform"
     Purpose     = "Email routing rules and configuration"

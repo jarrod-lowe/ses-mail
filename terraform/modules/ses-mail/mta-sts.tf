@@ -4,7 +4,7 @@
 # S3 bucket for MTA-STS policy file
 resource "aws_s3_bucket" "mta_sts" {
   count  = var.mta_sts_mode != "none" ? 1 : 0
-  bucket = "mta-sts-ses-mail-${data.aws_caller_identity.current.account_id}-${var.environment}"
+  bucket = "ses-mail-mta-sts-${data.aws_caller_identity.current.account_id}-${var.environment}"
 }
 
 # Block public access (CloudFront will access via OAC)
@@ -53,7 +53,7 @@ resource "aws_s3_object" "mta_sts_policy" {
 # CloudFront Origin Access Control
 resource "aws_cloudfront_origin_access_control" "mta_sts" {
   count                             = var.mta_sts_mode != "none" ? 1 : 0
-  name                              = "mta-sts-ses-mail-${var.environment}"
+  name                              = "ses-mail-mta-sts-${var.environment}"
   description                       = "OAC for MTA-STS S3 bucket (${var.environment})"
   origin_access_control_origin_type = "s3"
   signing_behavior                  = "always"

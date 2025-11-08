@@ -1,12 +1,12 @@
 # SNS topic for email processing pipeline with X-Ray tracing
 resource "aws_sns_topic" "email_processing" {
-  name = "ses-email-processing-${var.environment}"
+  name = "ses-mail-email-processing-${var.environment}"
 
   # Enable X-Ray Active tracing to initiate distributed traces
   tracing_config = "Active"
 
   tags = {
-    Name        = "ses-email-processing-${var.environment}"
+    Name        = "ses-mail-email-processing-${var.environment}"
     Environment = var.environment
     Service     = "ses-mail"
     Purpose     = "Email processing pipeline message broker"

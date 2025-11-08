@@ -365,7 +365,7 @@ data "aws_iam_policy_document" "tag_sync_permissions" {
 
 # Attach permissions to tag-sync role
 resource "aws_iam_policy" "tag_sync_permissions" {
-  name   = "tag-sync-permissions-${var.environment}"
+  name   = "ses-mail-tag-sync-permissions-${var.environment}"
   policy = data.aws_iam_policy_document.tag_sync_permissions.json
 }
 
@@ -428,8 +428,7 @@ data "aws_iam_policy_document" "lambda_gmail_forwarder_sqs_access" {
       "sqs:GetQueueAttributes"
     ]
     resources = [
-      # This resource will be created in Task 7
-      "arn:aws:sqs:*:*:ses-gmail-forwarder-${var.environment}"
+      aws_sqs_queue.gmail_forwarder.arn
     ]
   }
 
@@ -516,8 +515,7 @@ data "aws_iam_policy_document" "lambda_bouncer_sqs_access" {
       "sqs:GetQueueAttributes"
     ]
     resources = [
-      # This resource will be created in Task 7
-      "arn:aws:sqs:*:*:ses-bouncer-${var.environment}"
+      aws_sqs_queue.bouncer.arn
     ]
   }
 }

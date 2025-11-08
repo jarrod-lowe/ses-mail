@@ -119,7 +119,7 @@ resource "aws_iam_role_policy" "ssm_automation_lambda" {
 
 # SSM Automation Document: Redrive DLQ Messages
 resource "aws_ssm_document" "dlq_redrive" {
-  name            = "SESMail-DLQ-Redrive-${var.environment}"
+  name            = "ses-mail-dlq-redrive-${var.environment}"
   document_type   = "Automation"
   document_format = "YAML"
 
@@ -297,14 +297,14 @@ resource "aws_ssm_document" "dlq_redrive" {
   })
 
   tags = {
-    Name        = "SESMail-DLQ-Redrive-${var.environment}"
+    Name        = "ses-mail-dlq-redrive-${var.environment}"
     Environment = var.environment
   }
 }
 
 # SSM Automation Document: Queue Health Check
 resource "aws_ssm_document" "queue_health_check" {
-  name            = "SESMail-Queue-HealthCheck-${var.environment}"
+  name            = "ses-mail-queue-health-check-${var.environment}"
   document_type   = "Automation"
   document_format = "YAML"
 
@@ -462,7 +462,7 @@ resource "aws_ssm_document" "queue_health_check" {
   })
 
   tags = {
-    Name        = "SESMail-Queue-HealthCheck-${var.environment}"
+    Name        = "ses-mail-queue-health-check-${var.environment}"
     Environment = var.environment
   }
 }

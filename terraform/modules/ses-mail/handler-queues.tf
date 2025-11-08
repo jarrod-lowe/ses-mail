@@ -4,13 +4,13 @@
 
 # Dead letter queue for Gmail forwarder
 resource "aws_sqs_queue" "gmail_forwarder_dlq" {
-  name = "ses-gmail-forwarder-dlq-${var.environment}"
+  name = "ses-mail-gmail-forwarder-dlq-${var.environment}"
 
   # Retain messages for 14 days to allow time for investigation
   message_retention_seconds = 1209600
 
   tags = {
-    Name        = "ses-gmail-forwarder-dlq-${var.environment}"
+    Name        = "ses-mail-gmail-forwarder-dlq-${var.environment}"
     Environment = var.environment
     Service     = "ses-mail"
     Purpose     = "Dead letter queue for Gmail forwarder handler"
@@ -19,7 +19,7 @@ resource "aws_sqs_queue" "gmail_forwarder_dlq" {
 
 # Gmail forwarder queue (receives messages from EventBridge Event Bus)
 resource "aws_sqs_queue" "gmail_forwarder" {
-  name = "ses-gmail-forwarder-${var.environment}"
+  name = "ses-mail-gmail-forwarder-${var.environment}"
 
   # Message retention: 4 days (default)
   message_retention_seconds = 345600
@@ -34,7 +34,7 @@ resource "aws_sqs_queue" "gmail_forwarder" {
   })
 
   tags = {
-    Name        = "ses-gmail-forwarder-${var.environment}"
+    Name        = "ses-mail-gmail-forwarder-${var.environment}"
     Environment = var.environment
     Service     = "ses-mail"
     Purpose     = "Handler queue for Gmail forwarding actions"
@@ -43,7 +43,7 @@ resource "aws_sqs_queue" "gmail_forwarder" {
 
 # CloudWatch alarm for Gmail forwarder DLQ messages
 resource "aws_cloudwatch_metric_alarm" "gmail_forwarder_dlq_alarm" {
-  alarm_name          = "ses-gmail-forwarder-dlq-messages-${var.environment}"
+  alarm_name          = "ses-mail-gmail-forwarder-dlq-messages-${var.environment}"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 1
   metric_name         = "ApproximateNumberOfMessagesVisible"
@@ -60,7 +60,7 @@ resource "aws_cloudwatch_metric_alarm" "gmail_forwarder_dlq_alarm" {
   }
 
   tags = {
-    Name        = "ses-gmail-forwarder-dlq-alarm-${var.environment}"
+    Name        = "ses-mail-gmail-forwarder-dlq-alarm-${var.environment}"
     Environment = var.environment
     Service     = "ses-mail"
   }
@@ -68,7 +68,7 @@ resource "aws_cloudwatch_metric_alarm" "gmail_forwarder_dlq_alarm" {
 
 # CloudWatch alarm for Gmail forwarder queue age (messages waiting too long)
 resource "aws_cloudwatch_metric_alarm" "gmail_forwarder_queue_age_alarm" {
-  alarm_name          = "ses-gmail-forwarder-queue-age-${var.environment}"
+  alarm_name          = "ses-mail-gmail-forwarder-queue-age-${var.environment}"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 2
   metric_name         = "ApproximateAgeOfOldestMessage"
@@ -85,7 +85,7 @@ resource "aws_cloudwatch_metric_alarm" "gmail_forwarder_queue_age_alarm" {
   }
 
   tags = {
-    Name        = "ses-gmail-forwarder-queue-age-alarm-${var.environment}"
+    Name        = "ses-mail-gmail-forwarder-queue-age-alarm-${var.environment}"
     Environment = var.environment
     Service     = "ses-mail"
   }
@@ -203,7 +203,7 @@ resource "aws_cloudwatch_metric_alarm" "gmail_forwarder_retry_queue_depth_alarm"
   }
 
   tags = {
-    Name        = "ses-gmail-forwarder-retry-queue-depth-alarm-${var.environment}"
+    Name        = "ses-mail-gmail-forwarder-retry-queue-depth-alarm-${var.environment}"
     Environment = var.environment
     Service     = "ses-mail"
   }
@@ -215,13 +215,13 @@ resource "aws_cloudwatch_metric_alarm" "gmail_forwarder_retry_queue_depth_alarm"
 
 # Dead letter queue for bouncer
 resource "aws_sqs_queue" "bouncer_dlq" {
-  name = "ses-bouncer-dlq-${var.environment}"
+  name = "ses-mail-bouncer-dlq-${var.environment}"
 
   # Retain messages for 14 days to allow time for investigation
   message_retention_seconds = 1209600
 
   tags = {
-    Name        = "ses-bouncer-dlq-${var.environment}"
+    Name        = "ses-mail-bouncer-dlq-${var.environment}"
     Environment = var.environment
     Service     = "ses-mail"
     Purpose     = "Dead letter queue for bouncer handler"
@@ -230,7 +230,7 @@ resource "aws_sqs_queue" "bouncer_dlq" {
 
 # Bouncer queue (receives messages from EventBridge Event Bus)
 resource "aws_sqs_queue" "bouncer" {
-  name = "ses-bouncer-${var.environment}"
+  name = "ses-mail-bouncer-${var.environment}"
 
   # Message retention: 4 days (default)
   message_retention_seconds = 345600
@@ -245,7 +245,7 @@ resource "aws_sqs_queue" "bouncer" {
   })
 
   tags = {
-    Name        = "ses-bouncer-${var.environment}"
+    Name        = "ses-mail-bouncer-${var.environment}"
     Environment = var.environment
     Service     = "ses-mail"
     Purpose     = "Handler queue for bounce actions"
@@ -254,7 +254,7 @@ resource "aws_sqs_queue" "bouncer" {
 
 # CloudWatch alarm for bouncer DLQ messages
 resource "aws_cloudwatch_metric_alarm" "bouncer_dlq_alarm" {
-  alarm_name          = "ses-bouncer-dlq-messages-${var.environment}"
+  alarm_name          = "ses-mail-bouncer-dlq-messages-${var.environment}"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 1
   metric_name         = "ApproximateNumberOfMessagesVisible"
@@ -271,7 +271,7 @@ resource "aws_cloudwatch_metric_alarm" "bouncer_dlq_alarm" {
   }
 
   tags = {
-    Name        = "ses-bouncer-dlq-alarm-${var.environment}"
+    Name        = "ses-mail-bouncer-dlq-alarm-${var.environment}"
     Environment = var.environment
     Service     = "ses-mail"
   }
@@ -279,7 +279,7 @@ resource "aws_cloudwatch_metric_alarm" "bouncer_dlq_alarm" {
 
 # CloudWatch alarm for bouncer queue age (messages waiting too long)
 resource "aws_cloudwatch_metric_alarm" "bouncer_queue_age_alarm" {
-  alarm_name          = "ses-bouncer-queue-age-${var.environment}"
+  alarm_name          = "ses-mail-bouncer-queue-age-${var.environment}"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 2
   metric_name         = "ApproximateAgeOfOldestMessage"
@@ -296,7 +296,7 @@ resource "aws_cloudwatch_metric_alarm" "bouncer_queue_age_alarm" {
   }
 
   tags = {
-    Name        = "ses-bouncer-queue-age-alarm-${var.environment}"
+    Name        = "ses-mail-bouncer-queue-age-alarm-${var.environment}"
     Environment = var.environment
     Service     = "ses-mail"
   }
