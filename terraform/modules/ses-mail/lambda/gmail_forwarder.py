@@ -123,14 +123,18 @@ def lambda_handler(event, context):
                 receipt_handle = record.get('receiptHandle')
                 try:
                     queue_for_retry(record, error_context)
-                    # Mark as failure so SQS removes it from original queue
-                    batch_item_failures.append({'itemIdentifier': receipt_handle})
+                    # Successfully queued - do NOT add to batch failures
+                    # This lets SQS delete the message from the original queue
+                    logger.info("Successfully queued message for retry - allowing SQS to delete from source queue", extra={
+                        "receiptHandle": receipt_handle
+                    })
                 except Exception as queue_error:
-                    logger.error("Failed to queue message for retry", extra={
+                    logger.error("Failed to queue message for retry - adding to batch failures for SQS retry", extra={
                         "receiptHandle": receipt_handle,
                         "queueError": str(queue_error)
                     })
-                    # Still mark as failure to avoid reprocessing immediately
+                    # Only add to failures if we FAILED to queue for retry
+                    # This will cause SQS to retry, which will attempt to queue again
                     batch_item_failures.append({'itemIdentifier': receipt_handle})
 
             return {
@@ -389,18 +393,21 @@ def process_sqs_record(record, service):
             try:
                 queue_for_retry(record, error_context)
 
-                # Add error details to X-Ray subsegment
+                # Add success details to X-Ray subsegment
                 if subsegment:
                     subsegment.put_annotation('import_status', 'queued_for_retry')
                     subsegment.put_annotation('error_type', 'token_expired')
 
+                # Successfully queued - return 'ok' status so SQS deletes from original queue
+                # Do NOT return 'error' status as that adds to batchItemFailures and causes SQS to retry
                 return {
-                    'status': 'error',  # Return error so Lambda removes from original queue
-                    'error': 'Token expired - queued for retry',
+                    'status': 'ok',
+                    'action': 'queued_for_retry',
+                    'reason': 'Token expired - successfully queued for retry after token refresh',
                     'receiptHandle': receipt_handle
                 }
             except Exception as queue_error:
-                logger.error("Failed to queue message for retry", extra={
+                logger.error("Failed to queue message for retry - will be added to batch failures", extra={
                     "originalError": str(e),
                     "queueError": str(queue_error)
                 })
@@ -410,6 +417,8 @@ def process_sqs_record(record, service):
                     subsegment.put_annotation('import_status', 'error')
                     subsegment.put_annotation('error_type', 'failed_to_queue')
 
+                # Only return error if we FAILED to queue for retry
+                # This will be added to batchItemFailures, causing SQS to retry
                 return {
                     'error': f"Token expired and failed to queue: {queue_error}",
                     'status': 'error',

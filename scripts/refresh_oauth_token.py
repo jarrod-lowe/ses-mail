@@ -538,6 +538,125 @@ def setup_expiration_alarm(environment: str, expires_at: datetime) -> None:
         raise RuntimeError(f"Unexpected error publishing metric: {e}")
 
 
+def trigger_retry_processing(environment: str) -> None:
+    """
+    Trigger Step Function execution to process messages in the retry queue.
+
+    After successfully obtaining a new refresh token, this function starts the
+    Step Function that processes all queued messages in the Gmail forwarder retry queue.
+    The Step Function handles the actual message processing, retries, and error handling.
+
+    Args:
+        environment: Environment name (e.g., 'test', 'prod')
+
+    Raises:
+        RuntimeError: If Step Function cannot be triggered
+    """
+    logger.info("Triggering retry processing Step Function")
+
+    # Get Step Function ARN from Terraform outputs
+    # The Step Function ARN is exposed as a Terraform output
+    try:
+        # Construct Step Function name (matches Terraform naming convention)
+        account_id = boto3.client('sts').get_caller_identity()['Account']
+        region = boto3.Session().region_name or 'us-east-1'
+        step_function_name = f"ses-mail-gmail-forwarder-retry-processor-{environment}"
+        step_function_arn = f"arn:aws:states:{region}:{account_id}:stateMachine:{step_function_name}"
+
+        logger.info(f"Step Function ARN: {step_function_arn}")
+
+    except ClientError as e:
+        raise RuntimeError(
+            f"Failed to construct Step Function ARN: {e}\n"
+            "Ensure AWS credentials are properly configured."
+        )
+
+    # Start Step Function execution
+    try:
+        sfn_client = boto3.client('stepfunctions')
+
+        # Create unique execution name with timestamp
+        execution_name = f"token-refresh-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}"
+
+        response = sfn_client.start_execution(
+            stateMachineArn=step_function_arn,
+            name=execution_name
+        )
+
+        execution_arn = response['executionArn']
+
+        logger.info(
+            "Successfully started Step Function execution",
+            extra={
+                'execution_arn': execution_arn,
+                'execution_name': execution_name,
+                'step_function_arn': step_function_arn
+            }
+        )
+
+        print("\n" + "="*70)
+        print("RETRY PROCESSING TRIGGERED")
+        print("="*70)
+        print(f"\nStep Function: {step_function_name}")
+        print(f"Execution:     {execution_name}")
+        print(f"ARN:           {execution_arn}")
+        print("\nThe Step Function will process all messages in the retry queue.")
+        print("You can monitor execution in the AWS Console:")
+        print(f"https://console.aws.amazon.com/states/home?region={region}#/executions/details/{execution_arn}")
+        print("="*70 + "\n")
+
+    except ClientError as e:
+        error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+
+        if error_code == 'AccessDeniedException':
+            raise RuntimeError(
+                f"Permission denied starting Step Function execution.\n\n"
+                f"Ensure your AWS credentials have the following permissions:\n"
+                f"  - states:StartExecution\n"
+                f"  - states:DescribeExecution (optional, for monitoring)\n\n"
+                f"Step Function ARN: {step_function_arn}\n"
+                f"Current AWS profile: {boto3.Session().profile_name or 'default'}"
+            )
+        elif error_code == 'StateMachineDoesNotExist':
+            raise RuntimeError(
+                f"Step Function does not exist: {step_function_name}\n\n"
+                f"Expected ARN: {step_function_arn}\n\n"
+                f"This Step Function should be created by Terraform.\n"
+                f"Please verify your infrastructure is deployed:\n\n"
+                f"   AWS_PROFILE=ses-mail make apply ENV={environment}"
+            )
+        elif error_code == 'InvalidArn':
+            raise RuntimeError(
+                f"Invalid Step Function ARN: {step_function_arn}\n\n"
+                f"This may indicate a configuration error.\n"
+                f"Please verify the environment is correctly set up."
+            )
+        elif error_code == 'ExecutionAlreadyExists':
+            logger.warning(
+                f"Step Function execution '{execution_name}' already exists. "
+                "This is expected if you've run the script multiple times in the same second."
+            )
+            print(f"\nNote: Retry processing execution already exists for this timestamp.")
+        else:
+            raise RuntimeError(
+                f"AWS error starting Step Function execution: {error_code}\n"
+                f"Details: {e}"
+            )
+
+    except NoCredentialsError:
+        raise RuntimeError(
+            "No AWS credentials configured.\n\n"
+            "Configure AWS credentials using one of:\n"
+            "  - AWS_PROFILE=ses-mail environment variable\n"
+            "  - ~/.aws/credentials file\n"
+            "  - AWS IAM role (if running on EC2/Lambda)"
+        )
+
+    except Exception as e:
+        logger.exception("Unexpected error triggering retry processing")
+        raise RuntimeError(f"Unexpected error triggering retry processing: {e}")
+
+
 def main():
     """Main entry point for the OAuth token refresh script."""
     parser = argparse.ArgumentParser(
@@ -572,8 +691,9 @@ def main():
         setup_expiration_alarm(args.env, expires_at)
         logger.info("CloudWatch expiration metric published successfully")
 
-        # TODO: Task 3.4 - Trigger retry processing
-        logger.warning("Retry processing trigger not yet implemented (Task 3.4)")
+        # Task 3.4: Trigger retry processing
+        trigger_retry_processing(args.env)
+        logger.info("Retry processing Step Function triggered successfully")
 
         logger.info("OAuth token refresh completed successfully")
         return 0

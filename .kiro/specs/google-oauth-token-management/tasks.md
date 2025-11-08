@@ -53,13 +53,13 @@ A task is not complete until:
     - Create `setup_expiration_alarm()` function to update CloudWatch alarm
     - _Requirements: 1.4, 3.1, 3.2_
 
-  - [ ] 3.4 Implement Step Function integration for retry processing
+  - [x] 3.4 Implement Step Function integration for retry processing
     - Create `trigger_retry_processing()` function to start Step Function execution
     - Pass retry queue information to Step Function
     - Handle Step Function invocation errors
     - _Requirements: 5.1, 5.2_
 
-- [ ] 4. Create Step Function definition for retry processing
+- [x] 4. Create Step Function definition for retry processing
   - [x] 4.1 Define Step Function state machine for message processing
     - Create state machine to read messages from SQS retry queue
     - Define states for invoking Gmail Forwarder Lambda with original SES events

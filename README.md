@@ -324,9 +324,9 @@ AWS_PROFILE=ses-mail python3 scripts/refresh_oauth_token.py --env test
 
 1. **Retrieves Client Credentials**: Fetches OAuth client credentials from SSM Parameter Store (`/ses-mail/{environment}/gmail-forwarder/oauth/client-credentials`)
 2. **Interactive OAuth Flow**: Opens your browser to Google consent screen, runs a temporary local web server on port 8080 to receive the authorization callback, and exchanges the authorization code for a new refresh token
-3. **Stores New Token**: Saves the new refresh token to SSM Parameter Store (to be implemented in Task 3.3)
-4. **Sets Up Monitoring**: Configures CloudWatch alarm for token expiration (to be implemented in Task 3.3)
-5. **Triggers Retry Processing**: Automatically starts Step Function execution to process queued messages that failed due to expired token (to be implemented in Task 3.4)
+3. **Stores New Token**: Saves the new refresh token to SSM Parameter Store with expiration metadata
+4. **Sets Up Monitoring**: Publishes CloudWatch metric for token expiration monitoring
+5. **Triggers Retry Processing**: Automatically starts Step Function execution to process queued messages that failed due to expired token
 
 **Interactive OAuth Flow Details:**
 
@@ -406,10 +406,10 @@ The Gmail forwarder Lambda automatically detects OAuth token expiration errors a
    - The message is removed from the main processing queue to prevent immediate reprocessing
    - Structured logging records the retry queueing event in CloudWatch Logs
 
-3. **Retry Processing**: After refreshing the OAuth token, manually trigger the Step Function retry processor to process queued messages:
+3. **Retry Processing**: After refreshing the OAuth token, the refresh script automatically triggers the Step Function retry processor to process queued messages. You can also manually trigger retry processing if needed:
 
    ```bash
-   # Trigger Step Function retry processing
+   # Manual Step Function retry processing (usually not needed - automatic via refresh script)
    AWS_PROFILE=ses-mail aws stepfunctions start-execution \
      --state-machine-arn arn:aws:states:ap-southeast-2:{account}:stateMachine:ses-mail-gmail-forwarder-retry-processor-test \
      --input '{}'
@@ -459,8 +459,8 @@ When a refresh token expires during email processing:
 2. **Queueing**: Failed messages are placed in retry queue with original SES event and error metadata
 3. **Alerting**: CloudWatch alarm triggers to notify administrators
 4. **Manual Refresh**: Administrator runs refresh script to obtain new token
-5. **Automatic Retry**: Refresh script triggers retry processing of queued messages
-6. **Resume Normal Operation**: Email forwarding resumes with new token
+5. **Automatic Retry**: Refresh script automatically triggers Step Function to process all queued messages
+6. **Resume Normal Operation**: Email forwarding resumes with new token, no messages lost
 
 ### Testing OAuth Credential Retrieval
 

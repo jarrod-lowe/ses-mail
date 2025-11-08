@@ -188,24 +188,26 @@ resource "aws_sfn_state_machine" "retry_processor" {
         Iterator = {
           StartAt = "ParseMessageBody"
           States = {
-            # Parse the SES event from the message body
+            # Wrap message in SQS Records array format for Lambda
             ParseMessageBody = {
               Type = "Pass"
               Parameters = {
-                "SESEvent.$"      = "States.StringToJson($.Body)"
-                "ReceiptHandle.$" = "$.ReceiptHandle"
-                "MessageId.$"     = "$.MessageId"
+                "body.$"          = "$.Body"
+                "receiptHandle.$" = "$.ReceiptHandle"
+                "messageId.$"     = "$.MessageId"
               }
               Next = "InvokeGmailForwarder"
             }
 
-            # Invoke Gmail Forwarder Lambda with original SES event
+            # Invoke Gmail Forwarder Lambda with SQS-formatted event
             InvokeGmailForwarder = {
               Type     = "Task"
               Resource = "arn:aws:states:::lambda:invoke"
               Parameters = {
                 "FunctionName" = aws_lambda_function.gmail_forwarder.arn
-                "Payload.$"    = "$.SESEvent"
+                Payload = {
+                  "Records.$" = "States.Array($)"
+                }
               }
               TimeoutSeconds = 60
               Retry = [
@@ -238,7 +240,7 @@ resource "aws_sfn_state_machine" "retry_processor" {
               Resource = "arn:aws:states:::aws-sdk:sqs:deleteMessage"
               Parameters = {
                 "QueueUrl.$"      = "States.Format('${aws_sqs_queue.gmail_forwarder_retry.url}')"
-                "ReceiptHandle.$" = "$.ReceiptHandle"
+                "ReceiptHandle.$" = "$.receiptHandle"
               }
               ResultPath = "$.DeleteResult"
               Next       = "MessageProcessedSuccessfully"
