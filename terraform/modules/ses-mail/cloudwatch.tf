@@ -403,6 +403,6 @@ resource "aws_cloudwatch_metric_alarm" "gmail_token_expiring" {
   alarm_description   = "Gmail OAuth refresh token expires in less than 24 hours (${var.environment})"
   treat_missing_data  = "notBreaching"
 
-  alarm_actions = [var.alarm_sns_topic_arn]
-  ok_actions    = [var.alarm_sns_topic_arn]
+  alarm_actions = [aws_sns_topic.gmail_token_alerts.arn]
+  ok_actions    = [aws_sns_topic.gmail_token_alerts.arn]
 }

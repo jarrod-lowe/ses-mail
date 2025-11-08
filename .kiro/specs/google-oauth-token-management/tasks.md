@@ -98,7 +98,7 @@ A task is not complete until:
     - Configure Step Function logging and monitoring
     - _Requirements: 5.1, 5.2_
 
-  - [ ] 6.3 Add CloudWatch and SNS resources
+  - [x] 6.3 Add CloudWatch and SNS resources
     - Create SNS topic for token expiration notifications
     - Create CloudWatch alarms for token expiration and retry processing
     - Configure alarm actions and notification policies

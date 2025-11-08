@@ -340,3 +340,87 @@ resource "aws_sfn_state_machine" "retry_processor" {
     aws_cloudwatch_log_group.stepfunction_retry_processor_logs
   ]
 }
+
+# CloudWatch alarm for Step Function execution failures
+resource "aws_cloudwatch_metric_alarm" "stepfunction_retry_processor_failed" {
+  alarm_name          = "ses-mail-stepfunction-retry-processor-failed-${var.environment}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "ExecutionsFailed"
+  namespace           = "AWS/States"
+  period              = 300
+  statistic           = "Sum"
+  threshold           = 0
+  alarm_description   = "Alert when Step Function retry processor execution fails"
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    StateMachineArn = aws_sfn_state_machine.retry_processor.arn
+  }
+
+  alarm_actions = [aws_sns_topic.gmail_token_alerts.arn]
+  ok_actions    = [aws_sns_topic.gmail_token_alerts.arn]
+
+  tags = {
+    Name        = "ses-mail-stepfunction-retry-processor-failed-${var.environment}"
+    Environment = var.environment
+    Service     = "ses-mail"
+    Purpose     = "Alert on Step Function retry processor failures"
+  }
+}
+
+# CloudWatch alarm for Step Function execution timeouts
+resource "aws_cloudwatch_metric_alarm" "stepfunction_retry_processor_timeout" {
+  alarm_name          = "ses-mail-stepfunction-retry-processor-timeout-${var.environment}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "ExecutionsTimedOut"
+  namespace           = "AWS/States"
+  period              = 300
+  statistic           = "Sum"
+  threshold           = 0
+  alarm_description   = "Alert when Step Function retry processor execution times out"
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    StateMachineArn = aws_sfn_state_machine.retry_processor.arn
+  }
+
+  alarm_actions = [aws_sns_topic.gmail_token_alerts.arn]
+  ok_actions    = [aws_sns_topic.gmail_token_alerts.arn]
+
+  tags = {
+    Name        = "ses-mail-stepfunction-retry-processor-timeout-${var.environment}"
+    Environment = var.environment
+    Service     = "ses-mail"
+    Purpose     = "Alert on Step Function retry processor timeouts"
+  }
+}
+
+# CloudWatch alarm for Step Function throttled executions
+resource "aws_cloudwatch_metric_alarm" "stepfunction_retry_processor_throttled" {
+  alarm_name          = "ses-mail-stepfunction-retry-processor-throttled-${var.environment}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "ExecutionThrottled"
+  namespace           = "AWS/States"
+  period              = 300
+  statistic           = "Sum"
+  threshold           = 0
+  alarm_description   = "Alert when Step Function retry processor execution is throttled"
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    StateMachineArn = aws_sfn_state_machine.retry_processor.arn
+  }
+
+  alarm_actions = [aws_sns_topic.gmail_token_alerts.arn]
+  ok_actions    = [aws_sns_topic.gmail_token_alerts.arn]
+
+  tags = {
+    Name        = "ses-mail-stepfunction-retry-processor-throttled-${var.environment}"
+    Environment = var.environment
+    Service     = "ses-mail"
+    Purpose     = "Alert on Step Function retry processor throttling"
+  }
+}
