@@ -73,7 +73,7 @@ A task is not complete until:
     - _Requirements: 5.2_
 
 - [ ] 5. Set up CloudWatch monitoring and alerting
-  - [ ] 5.1 Create CloudWatch alarm for token expiration
+  - [x] 5.1 Create CloudWatch alarm for token expiration
     - Define alarm to trigger 24 hours before token expiration
     - Configure SNS notification to administrators
     - Use environment-specific naming for alarm and SNS topic
@@ -85,7 +85,7 @@ A task is not complete until:
     - Monitor Step Function execution success/failure rates
     - _Requirements: 5.4, 5.5_
 
-- [ ] 6. Update Terraform infrastructure
+- [x] 6. Update Terraform infrastructure
   - [x] 6.1 Add SQS resources for retry processing
     - Create retry queue with environment-specific naming
     - Create dead letter queue for permanently failed messages

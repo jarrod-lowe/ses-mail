@@ -347,14 +347,62 @@ When you run the refresh script, it will:
 
 ### Token Expiration Monitoring
 
-(To be implemented in Task 3.3)
+The system automatically monitors refresh token expiration using CloudWatch alarms to provide proactive alerts before tokens expire:
 
-The system will automatically monitor refresh token expiration using CloudWatch alarms:
+**CloudWatch Alarm Configuration:**
 
 - **Alarm Name**: `ses-mail-gmail-forwarder-token-expiring-{environment}`
-- **Trigger**: 24 hours before refresh token expires
-- **Action**: SNS notification to administrators
+- **Metric**: `TokenHoursUntilExpiration` in namespace `SESMail/{environment}`
+- **Trigger Condition**: Less than 24 hours until token expiration
+- **Evaluation Period**: Every 1 hour (3600 seconds)
+- **Statistic**: Minimum (catches the lowest value to ensure earliest alert)
+- **SNS Notification**: `ses-mail-gmail-forwarder-token-alerts-{environment}`
 - **Purpose**: Proactive reminder to run refresh script before token expires
+
+**How It Works:**
+
+1. **Metric Publishing**: The refresh script (`scripts/refresh_oauth_token.py`) automatically publishes the `TokenHoursUntilExpiration` metric to CloudWatch after storing a new token
+2. **Expiration Calculation**: The metric value is calculated as `(expiration_time - current_time) / 3600` where expiration is 7 days after token creation (in testing mode)
+3. **Hourly Evaluation**: CloudWatch evaluates the metric every hour to check if it falls below 24 hours
+4. **Alert Delivery**: When the threshold is crossed, an SNS notification is sent to administrators via the token alerts topic
+
+**Subscribing to Token Expiration Alerts:**
+
+To receive notifications when tokens are about to expire, subscribe to the SNS topic:
+
+```bash
+# Subscribe email address to token alerts
+AWS_PROFILE=ses-mail aws sns subscribe \
+  --topic-arn arn:aws:sns:ap-southeast-2:{account}:ses-mail-gmail-forwarder-token-alerts-test \
+  --protocol email \
+  --notification-endpoint admin@example.com
+
+# Confirm subscription in email inbox
+```
+
+**Checking Current Token Expiration:**
+
+```bash
+# Get the latest token expiration metric value
+AWS_PROFILE=ses-mail aws cloudwatch get-metric-statistics \
+  --namespace "SESMail/test" \
+  --metric-name TokenHoursUntilExpiration \
+  --start-time $(date -u -v-24H +%Y-%m-%dT%H:%M:%S) \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+  --period 3600 \
+  --statistics Minimum
+
+# Check alarm status
+AWS_PROFILE=ses-mail aws cloudwatch describe-alarms \
+  --alarm-names ses-mail-gmail-forwarder-token-expiring-test
+```
+
+**Important Notes:**
+
+- The alarm only triggers when the metric is published (i.e., after running the refresh script)
+- If you never run the refresh script, the alarm will show "INSUFFICIENT_DATA" state
+- In production OAuth mode (after Google app verification), refresh tokens don't expire, so this alarm becomes unnecessary
+- The alarm also triggers on OK state transitions to notify when token refresh extends the expiration
 
 ### Retry Queue Infrastructure
 
