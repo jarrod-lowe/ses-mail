@@ -1514,6 +1514,77 @@ AWS_PROFILE=ses-mail aws logs start-query \
   --query-string 'fields @timestamp, @message | filter @message like /ERROR/ | sort @timestamp desc'
 ```
 
+### Structured Logging
+
+The Gmail Forwarder Lambda uses **AWS Lambda Powertools Logger** to provide structured JSON logging that is fully compatible with CloudWatch Logs Insights queries. This enables powerful filtering, searching, and analysis of log data.
+
+**Logging Format:**
+
+All logs are output as structured JSON with the following fields:
+
+- `level`: Log level (INFO, WARNING, ERROR, etc.)
+- `location`: Source code location (function:line_number)
+- `message`: Human-readable log message
+- `timestamp`: ISO 8601 timestamp with timezone
+- `service`: Service identifier (`ses-mail-gmail-forwarder`)
+- `xray_trace_id`: X-Ray trace ID for correlation with distributed tracing
+
+**Additional structured fields** (via `extra={}` parameter):
+
+- **Token Operations**: `token_expiry`, `error`
+- **Retry Queue Operations**: `messageId`, `sqsMessageId`, `errorType`, `attemptCount`
+- **Processing Details**: `messageCount`, `successCount`, `failureCount`, `from`, `to`, `subject`, `targetGmail`, `gmailId`
+- **Performance**: `byteCount`, execution timing
+
+**Example Log Entry:**
+
+```json
+{
+  "level": "INFO",
+  "location": "generate_access_token:544",
+  "message": "Successfully generated fresh access token",
+  "timestamp": "2025-11-08 00:19:17,120+0000",
+  "service": "ses-mail-gmail-forwarder",
+  "token_expiry": "2025-11-08T01:19:16.119650",
+  "xray_trace_id": "1-690e8c82-02beff676ae1e54bedcd51c3"
+}
+```
+
+**CloudWatch Insights Queries:**
+
+Query retry queue operations:
+
+```
+fields @timestamp, message, errorType, attemptCount
+| filter message = "Queued message for retry"
+| sort @timestamp desc
+| limit 20
+```
+
+Query token operations:
+
+```
+fields @timestamp, message, token_expiry
+| filter message like /token/
+| sort @timestamp desc
+| limit 20
+```
+
+Query processing metrics:
+
+```
+fields @timestamp, successCount, failureCount, totalCount
+| filter message = "Processed messages"
+| stats sum(successCount) as TotalSuccess, sum(failureCount) as TotalFailure by bin(5m)
+```
+
+**Benefits:**
+
+- **Searchable**: All fields are indexed and queryable in CloudWatch Insights
+- **Correlatable**: X-Ray trace IDs link logs to distributed traces
+- **Parseable**: JSON format allows automated log processing and alerting
+- **Debuggable**: Detailed context for troubleshooting token expiration and retry scenarios
+
 ### CloudWatch Logs Insights Saved Queries
 
 The system includes pre-configured CloudWatch Logs Insights queries for common troubleshooting scenarios. Access them via:
