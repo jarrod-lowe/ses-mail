@@ -64,6 +64,36 @@ resource "aws_iam_role_policy" "eventbridge_sqs_access" {
   policy = data.aws_iam_policy_document.eventbridge_sqs_access.json
 }
 
+# IAM policy document for CloudWatch Logs to allow EventBridge access
+data "aws_iam_policy_document" "cloudwatch_logs_eventbridge_access" {
+  statement {
+    effect = "Allow"
+
+    principals {
+      type        = "Service"
+      identifiers = ["events.amazonaws.com"]
+    }
+
+    actions = [
+      "logs:CreateLogStream",
+      "logs:PutLogEvents"
+    ]
+
+    resources = ["${aws_cloudwatch_log_group.eventbridge_logs.arn}:*"]
+  }
+}
+
+# IAM policy document for EventBridge to start Step Function executions
+data "aws_iam_policy_document" "eventbridge_stepfunctions_access" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "states:StartExecution"
+    ]
+    resources = [aws_sfn_state_machine.token_monitor.arn]
+  }
+}
+
 # ===========================
 # EventBridge Rules and Targets
 # ===========================
@@ -283,20 +313,7 @@ resource "aws_cloudwatch_log_group" "eventbridge_logs" {
 resource "aws_cloudwatch_log_resource_policy" "eventbridge_logs" {
   policy_name = "ses-mail-eventbridge-logs-${var.environment}"
 
-  policy_document = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Principal = {
-        Service = "events.amazonaws.com"
-      }
-      Action = [
-        "logs:CreateLogStream",
-        "logs:PutLogEvents"
-      ]
-      Resource = "${aws_cloudwatch_log_group.eventbridge_logs.arn}:*"
-    }]
-  })
+  policy_document = data.aws_iam_policy_document.cloudwatch_logs_eventbridge_access.json
 }
 
 # CloudWatch metric filter for EventBridge rule failures (Gmail forwarder)
@@ -381,18 +398,7 @@ resource "aws_cloudwatch_metric_alarm" "eventbridge_bouncer_failures" {
 resource "aws_iam_role" "eventbridge_stepfunctions" {
   name = "ses-mail-eventbridge-stepfunctions-${var.environment}"
 
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Principal = {
-          Service = "events.amazonaws.com"
-        }
-        Action = "sts:AssumeRole"
-      }
-    ]
-  })
+  assume_role_policy = data.aws_iam_policy_document.eventbridge_assume_role.json
 
   tags = {
     Name        = "ses-mail-eventbridge-stepfunctions-${var.environment}"
@@ -407,18 +413,7 @@ resource "aws_iam_role_policy" "eventbridge_stepfunctions_access" {
   name = "stepfunctions-start-execution"
   role = aws_iam_role.eventbridge_stepfunctions.id
 
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "states:StartExecution"
-        ]
-        Resource = aws_sfn_state_machine.token_monitor.arn
-      }
-    ]
-  })
+  policy = data.aws_iam_policy_document.eventbridge_stepfunctions_access.json
 }
 
 # EventBridge rule to trigger token monitor every 5 minutes

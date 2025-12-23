@@ -48,35 +48,43 @@ resource "aws_xray_resource_policy" "sns_tracing" {
 # This is an account-level setting configured via CloudFormation since there's
 # no native Terraform resource yet.
 
+# IAM policy document for CloudWatch Logs to allow X-Ray to write span data
+data "aws_iam_policy_document" "cloudwatch_logs_xray_access" {
+  statement {
+    sid    = "TransactionSearchXRayAccess"
+    effect = "Allow"
+
+    principals {
+      type        = "Service"
+      identifiers = ["xray.amazonaws.com"]
+    }
+
+    actions = ["logs:PutLogEvents"]
+
+    resources = [
+      "arn:aws:logs:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:log-group:aws/spans:*",
+      "arn:aws:logs:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:log-group:/aws/application-signals/data:*"
+    ]
+
+    condition {
+      test     = "ArnLike"
+      variable = "aws:SourceArn"
+      values   = ["arn:aws:xray:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:*"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [data.aws_caller_identity.current.account_id]
+    }
+  }
+}
+
 # CloudWatch Logs resource policy to allow X-Ray to write span data
 resource "aws_cloudwatch_log_resource_policy" "xray_transaction_search" {
   policy_name = "ses-mail-xray-transaction-search-${var.environment}"
 
-  policy_document = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid    = "TransactionSearchXRayAccess"
-        Effect = "Allow"
-        Principal = {
-          Service = "xray.amazonaws.com"
-        }
-        Action = "logs:PutLogEvents"
-        Resource = [
-          "arn:aws:logs:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:log-group:aws/spans:*",
-          "arn:aws:logs:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:log-group:/aws/application-signals/data:*"
-        ]
-        Condition = {
-          ArnLike = {
-            "aws:SourceArn" = "arn:aws:xray:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:*"
-          }
-          StringEquals = {
-            "aws:SourceAccount" = data.aws_caller_identity.current.account_id
-          }
-        }
-      }
-    ]
-  })
+  policy_document = data.aws_iam_policy_document.cloudwatch_logs_xray_access.json
 }
 
 # CloudFormation stack for X-Ray Transaction Search configuration

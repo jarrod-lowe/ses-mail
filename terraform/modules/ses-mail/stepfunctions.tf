@@ -2,22 +2,149 @@
 # Step Function for Retry Processing
 # ===========================
 
+# IAM policy document for Step Functions assume role (shared)
+data "aws_iam_policy_document" "stepfunctions_assume_role" {
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRole"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["states.amazonaws.com"]
+    }
+  }
+}
+
+# IAM policy document for retry processor SQS access
+data "aws_iam_policy_document" "stepfunctions_retry_processor_sqs_access" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "sqs:ReceiveMessage",
+      "sqs:DeleteMessage",
+      "sqs:GetQueueAttributes"
+    ]
+    resources = [aws_sqs_queue.gmail_forwarder_retry.arn]
+  }
+}
+
+# IAM policy document for retry processor Lambda invoke
+data "aws_iam_policy_document" "stepfunctions_retry_processor_lambda_invoke" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "lambda:InvokeFunction"
+    ]
+    resources = [aws_lambda_function.gmail_forwarder.arn]
+  }
+}
+
+# IAM policy document for retry processor CloudWatch Logs
+data "aws_iam_policy_document" "stepfunctions_retry_processor_cloudwatch_logs" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "logs:CreateLogDelivery",
+      "logs:GetLogDelivery",
+      "logs:UpdateLogDelivery",
+      "logs:DeleteLogDelivery",
+      "logs:ListLogDeliveries",
+      "logs:PutResourcePolicy",
+      "logs:DescribeResourcePolicies",
+      "logs:DescribeLogGroups"
+    ]
+    resources = ["*"]
+  }
+
+  statement {
+    effect = "Allow"
+    actions = [
+      "logs:CreateLogGroup",
+      "logs:CreateLogStream",
+      "logs:PutLogEvents"
+    ]
+    resources = ["${aws_cloudwatch_log_group.stepfunction_retry_processor_logs.arn}:*"]
+  }
+}
+
+# IAM policy document for retry processor CloudWatch metrics
+data "aws_iam_policy_document" "stepfunctions_retry_processor_cloudwatch_metrics" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "cloudwatch:PutMetricData"
+    ]
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "cloudwatch:namespace"
+      values   = ["SESMail/${var.environment}"]
+    }
+  }
+}
+
+# IAM policy document for token monitor SSM access
+data "aws_iam_policy_document" "stepfunctions_token_monitor_ssm_access" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "ssm:GetParameter"
+    ]
+    resources = [aws_ssm_parameter.gmail_oauth_refresh_token.arn]
+  }
+}
+
+# IAM policy document for token monitor CloudWatch metrics
+data "aws_iam_policy_document" "stepfunctions_token_monitor_cloudwatch_metrics" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "cloudwatch:PutMetricData"
+    ]
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "cloudwatch:namespace"
+      values   = ["SESMail/${var.environment}"]
+    }
+  }
+}
+
+# IAM policy document for token monitor CloudWatch Logs
+data "aws_iam_policy_document" "stepfunctions_token_monitor_cloudwatch_logs" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "logs:CreateLogDelivery",
+      "logs:GetLogDelivery",
+      "logs:UpdateLogDelivery",
+      "logs:DeleteLogDelivery",
+      "logs:ListLogDeliveries",
+      "logs:PutResourcePolicy",
+      "logs:DescribeResourcePolicies",
+      "logs:DescribeLogGroups"
+    ]
+    resources = ["*"]
+  }
+
+  statement {
+    effect = "Allow"
+    actions = [
+      "logs:CreateLogGroup",
+      "logs:CreateLogStream",
+      "logs:PutLogEvents"
+    ]
+    resources = ["${aws_cloudwatch_log_group.stepfunction_token_monitor_logs.arn}:*"]
+  }
+}
+
 # IAM role for Step Function execution
 resource "aws_iam_role" "stepfunction_retry_processor" {
   name = "ses-mail-stepfunction-retry-processor-${var.environment}"
 
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Principal = {
-          Service = "states.amazonaws.com"
-        }
-        Action = "sts:AssumeRole"
-      }
-    ]
-  })
+  assume_role_policy = data.aws_iam_policy_document.stepfunctions_assume_role.json
 
   tags = {
     Name        = "ses-mail-stepfunction-retry-processor-${var.environment}"
@@ -32,20 +159,7 @@ resource "aws_iam_role_policy" "stepfunction_sqs_access" {
   name = "sqs-access"
   role = aws_iam_role.stepfunction_retry_processor.id
 
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "sqs:ReceiveMessage",
-          "sqs:DeleteMessage",
-          "sqs:GetQueueAttributes"
-        ]
-        Resource = aws_sqs_queue.gmail_forwarder_retry.arn
-      }
-    ]
-  })
+  policy = data.aws_iam_policy_document.stepfunctions_retry_processor_sqs_access.json
 }
 
 # IAM policy for Step Function to invoke Gmail Forwarder Lambda
@@ -53,18 +167,7 @@ resource "aws_iam_role_policy" "stepfunction_lambda_invoke" {
   name = "lambda-invoke"
   role = aws_iam_role.stepfunction_retry_processor.id
 
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "lambda:InvokeFunction"
-        ]
-        Resource = aws_lambda_function.gmail_forwarder.arn
-      }
-    ]
-  })
+  policy = data.aws_iam_policy_document.stepfunctions_retry_processor_lambda_invoke.json
 }
 
 # IAM policy for Step Function CloudWatch Logs
@@ -72,34 +175,7 @@ resource "aws_iam_role_policy" "stepfunction_cloudwatch_logs" {
   name = "cloudwatch-logs"
   role = aws_iam_role.stepfunction_retry_processor.id
 
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "logs:CreateLogDelivery",
-          "logs:GetLogDelivery",
-          "logs:UpdateLogDelivery",
-          "logs:DeleteLogDelivery",
-          "logs:ListLogDeliveries",
-          "logs:PutResourcePolicy",
-          "logs:DescribeResourcePolicies",
-          "logs:DescribeLogGroups"
-        ]
-        Resource = "*"
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "logs:CreateLogGroup",
-          "logs:CreateLogStream",
-          "logs:PutLogEvents"
-        ]
-        Resource = "${aws_cloudwatch_log_group.stepfunction_retry_processor_logs.arn}:*"
-      }
-    ]
-  })
+  policy = data.aws_iam_policy_document.stepfunctions_retry_processor_cloudwatch_logs.json
 }
 
 # IAM policy for Step Function X-Ray tracing
@@ -113,23 +189,7 @@ resource "aws_iam_role_policy" "stepfunction_cloudwatch_metrics" {
   name = "cloudwatch-metrics"
   role = aws_iam_role.stepfunction_retry_processor.id
 
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "cloudwatch:PutMetricData"
-        ]
-        Resource = "*"
-        Condition = {
-          StringEquals = {
-            "cloudwatch:namespace" = "SESMail/${var.environment}"
-          }
-        }
-      }
-    ]
-  })
+  policy = data.aws_iam_policy_document.stepfunctions_retry_processor_cloudwatch_metrics.json
 }
 
 # CloudWatch Log Group for Step Function
@@ -505,18 +565,7 @@ resource "aws_cloudwatch_metric_alarm" "stepfunction_retry_processor_throttled" 
 resource "aws_iam_role" "stepfunction_token_monitor" {
   name = "ses-mail-stepfunction-token-monitor-${var.environment}"
 
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Principal = {
-          Service = "states.amazonaws.com"
-        }
-        Action = "sts:AssumeRole"
-      }
-    ]
-  })
+  assume_role_policy = data.aws_iam_policy_document.stepfunctions_assume_role.json
 
   tags = {
     Name        = "ses-mail-stepfunction-token-monitor-${var.environment}"
@@ -531,18 +580,7 @@ resource "aws_iam_role_policy" "stepfunction_token_monitor_ssm" {
   name = "ssm-access"
   role = aws_iam_role.stepfunction_token_monitor.id
 
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "ssm:GetParameter"
-        ]
-        Resource = aws_ssm_parameter.gmail_oauth_refresh_token.arn
-      }
-    ]
-  })
+  policy = data.aws_iam_policy_document.stepfunctions_token_monitor_ssm_access.json
 }
 
 # IAM policy for Step Function to publish CloudWatch metrics
@@ -550,23 +588,7 @@ resource "aws_iam_role_policy" "stepfunction_token_monitor_cloudwatch" {
   name = "cloudwatch-metrics"
   role = aws_iam_role.stepfunction_token_monitor.id
 
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "cloudwatch:PutMetricData"
-        ]
-        Resource = "*"
-        Condition = {
-          StringEquals = {
-            "cloudwatch:namespace" = "SESMail/${var.environment}"
-          }
-        }
-      }
-    ]
-  })
+  policy = data.aws_iam_policy_document.stepfunctions_token_monitor_cloudwatch_metrics.json
 }
 
 # IAM policy for Step Function CloudWatch Logs
@@ -574,34 +596,7 @@ resource "aws_iam_role_policy" "stepfunction_token_monitor_logs" {
   name = "cloudwatch-logs"
   role = aws_iam_role.stepfunction_token_monitor.id
 
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "logs:CreateLogDelivery",
-          "logs:GetLogDelivery",
-          "logs:UpdateLogDelivery",
-          "logs:DeleteLogDelivery",
-          "logs:ListLogDeliveries",
-          "logs:PutResourcePolicy",
-          "logs:DescribeResourcePolicies",
-          "logs:DescribeLogGroups"
-        ]
-        Resource = "*"
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "logs:CreateLogGroup",
-          "logs:CreateLogStream",
-          "logs:PutLogEvents"
-        ]
-        Resource = "${aws_cloudwatch_log_group.stepfunction_token_monitor_logs.arn}:*"
-      }
-    ]
-  })
+  policy = data.aws_iam_policy_document.stepfunctions_token_monitor_cloudwatch_logs.json
 }
 
 # CloudWatch Log Group for token monitor Step Function

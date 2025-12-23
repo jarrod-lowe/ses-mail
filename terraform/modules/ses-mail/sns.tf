@@ -13,29 +13,33 @@ resource "aws_sns_topic" "email_processing" {
   }
 }
 
+# IAM policy document for SNS topic to allow SES to publish
+data "aws_iam_policy_document" "sns_email_processing_policy" {
+  statement {
+    sid    = "AllowSESToPublish"
+    effect = "Allow"
+
+    principals {
+      type        = "Service"
+      identifiers = ["ses.amazonaws.com"]
+    }
+
+    actions   = ["SNS:Publish"]
+    resources = [aws_sns_topic.email_processing.arn]
+
+    condition {
+      test     = "StringEquals"
+      variable = "AWS:SourceAccount"
+      values   = [data.aws_caller_identity.current.account_id]
+    }
+  }
+}
+
 # SNS topic policy to allow SES to publish messages
 resource "aws_sns_topic_policy" "email_processing" {
   arn = aws_sns_topic.email_processing.arn
 
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid    = "AllowSESToPublish"
-        Effect = "Allow"
-        Principal = {
-          Service = "ses.amazonaws.com"
-        }
-        Action   = "SNS:Publish"
-        Resource = aws_sns_topic.email_processing.arn
-        Condition = {
-          StringEquals = {
-            "AWS:SourceAccount" = data.aws_caller_identity.current.account_id
-          }
-        }
-      }
-    ]
-  })
+  policy = data.aws_iam_policy_document.sns_email_processing_policy.json
 }
 
 # SNS topic for Gmail OAuth token alerts and retry processing notifications
