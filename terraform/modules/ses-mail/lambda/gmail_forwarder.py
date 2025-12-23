@@ -46,6 +46,27 @@ sqs_client = boto3.client('sqs')
 cloudwatch = boto3.client('cloudwatch')
 
 
+def extract_subject(ses_message: Dict[str, Any], max_length: int = 64) -> str:
+    """
+    Extract and safely truncate email subject from SES message headers.
+
+    Args:
+        ses_message: SES event message
+        max_length: Maximum characters to return (default 64)
+
+    Returns:
+        str: Truncated subject or '(no subject)' if not found
+    """
+    headers = ses_message.get('mail', {}).get('headers', [])
+    for header in headers:
+        if header.get('name', '').lower() == 'subject':
+            subject = header.get('value', '')
+            if subject:
+                # Truncate to max_length characters
+                return subject[:max_length] if len(subject) > max_length else subject
+    return '(no subject)'
+
+
 def lambda_handler(event, context):
     """
     Lambda handler for processing enriched email messages from SQS.
@@ -355,6 +376,18 @@ def process_sqs_record(record, service):
                 "gmailId": gmail_response.get('id')
             })
 
+            # Log action result for dashboard
+            logger.info("Action result", extra={
+                "messageId": message_id,
+                "sender": source,
+                "subject": extract_subject(ses_message, max_length=64),
+                "recipient": recipient,
+                "action": "forward-to-gmail",
+                "result": "success",
+                "target": destination,  # Gmail destination address
+                "resultId": gmail_response.get('id')  # Gmail message ID
+            })
+
             results.append({
                 'recipient': recipient,
                 'destination': destination,
@@ -427,6 +460,22 @@ def process_sqs_record(record, service):
 
         # Not a token expiration error - log and return error
         logger.exception("Error processing SQS message", extra={"error": str(e)})
+
+        # Log action result for dashboard (if we have enough context)
+        try:
+            logger.error("Action result", extra={
+                "messageId": message_id if 'message_id' in locals() else 'unknown',
+                "sender": source if 'source' in locals() else 'unknown',
+                "subject": extract_subject(ses_message, max_length=64) if 'ses_message' in locals() else '(no subject)',
+                "recipient": recipient if 'recipient' in locals() else 'unknown',
+                "action": "forward-to-gmail",
+                "result": "failure",
+                "target": destination if 'destination' in locals() else 'unknown',  # Gmail destination
+                "error": str(e)
+            })
+        except Exception:
+            # If logging fails, don't let it crash the error handling
+            pass
 
         # Add error details to X-Ray subsegment
         if subsegment:

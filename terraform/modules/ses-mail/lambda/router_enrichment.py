@@ -211,10 +211,11 @@ def decide_action(ses_message: Dict[str, Any]) -> List[Tuple[str, Optional[Any]]
     if subsegment is None:
         raise RuntimeError("Failed to create X-Ray subsegment for enrichment")
 
-    # Extract and annotate messageId and source for X-Ray indexing
+    # Extract email metadata for logging
     mail = ses_message.get('mail', {})
     message_id = mail.get('messageId', 'unknown')
     source = mail.get('source', 'unknown')
+    subject = extract_subject(ses_message, max_length=64)
 
     subsegment.put_annotation('messageId', message_id)
     subsegment.put_annotation('source', source)
@@ -230,12 +231,34 @@ def decide_action(ses_message: Dict[str, Any]) -> List[Tuple[str, Optional[Any]]
     for target in ses_message["receipt"]["recipients"]:
         if bounce:
             results.append(('bounce', {"target": target, "reason": "security"}))
+            # Log routing decision for bounced emails
+            logger.info("Routing decision", extra={
+                "messageId": message_id,
+                "sender": source,
+                "subject": subject,
+                "recipient": target,
+                "action": "bounce",
+                "lookupKey": None,
+                "target": target,
+                "reason": "security"
+            })
         else:
-            routing_decision, destination = get_routing_decision(target)
+            routing_decision, destination, lookup_key = get_routing_decision(target)
             if routing_decision == 'bounce':
                 results.append((routing_decision, {"target": target, "reason": "policy"}))
             else:
                 results.append((routing_decision, {"target": target, "destination": destination}))
+
+            # Log routing decision with full context
+            logger.info("Routing decision", extra={
+                "messageId": message_id,
+                "sender": source,
+                "subject": subject,
+                "recipient": target,
+                "action": routing_decision,
+                "lookupKey": lookup_key,
+                "target": destination if routing_decision == 'forward-to-gmail' else target
+            })
         counts[results[-1][0]] += 1
 
     subsegment.put_annotation('recipient_count', len(results))
@@ -245,7 +268,7 @@ def decide_action(ses_message: Dict[str, Any]) -> List[Tuple[str, Optional[Any]]
     return results
 
 
-def get_routing_decision(recipient: str) -> Tuple[str, Optional[str]]:
+def get_routing_decision(recipient: str) -> Tuple[str, Optional[str], Optional[str]]:
     """
     Determine routing decision for a recipient using hierarchical DynamoDB lookup.
 
@@ -257,7 +280,7 @@ def get_routing_decision(recipient: str) -> Tuple[str, Optional[str]]:
     Args:
         recipient: Email address to look up
     Returns:
-        tuple: (routing action, target destination)
+        tuple: (routing action, target destination, lookup key)
     """
     logger.info("Looking up routing rule for recipient", extra={"recipient": recipient})
 
@@ -277,16 +300,12 @@ def get_routing_decision(recipient: str) -> Tuple[str, Optional[str]]:
 
             action = rule.get('action', 'bounce')
             target = rule.get('target', None)
-            logger.info("Routing decision", extra={
-                "action": action,
-                "lookupKey": lookup_key,
-                "target": target
-            })
-            return action, target
+            # Return action, target, and lookupKey (removed "Routing decision" log from here)
+            return action, target, lookup_key
 
     # No rule found - default to store
     logger.warning("No routing rule found, defaulting to store", extra={"recipient": recipient})
-    return 'store', None
+    return 'store', None, None
 
 def check_spam(ses_message: Dict[str, Any]) -> bool:
     """
@@ -383,6 +402,27 @@ def normalize_email_address(email_address: str) -> str:
         local_part = local_part.split('+')[0]
 
     return f"{local_part}@{domain}"
+
+
+def extract_subject(ses_message: Dict[str, Any], max_length: int = 64) -> str:
+    """
+    Extract and safely truncate email subject from SES message headers.
+
+    Args:
+        ses_message: SES event message
+        max_length: Maximum characters to return (default 64)
+
+    Returns:
+        str: Truncated subject or '(no subject)' if not found
+    """
+    headers = ses_message.get('mail', {}).get('headers', [])
+    for header in headers:
+        if header.get('name', '').lower() == 'subject':
+            subject = header.get('value', '')
+            if subject:
+                # Truncate to max_length characters
+                return subject[:max_length] if len(subject) > max_length else subject
+    return '(no subject)'
 
 
 # Cached result

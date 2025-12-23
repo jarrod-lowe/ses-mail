@@ -32,6 +32,27 @@ from aws_xray_sdk.core import patch_all
 patch_all()
 
 
+def extract_subject(ses_message: Dict[str, Any], max_length: int = 64) -> str:
+    """
+    Extract and safely truncate email subject from SES message headers.
+
+    Args:
+        ses_message: SES event message
+        max_length: Maximum characters to return (default 64)
+
+    Returns:
+        str: Truncated subject or '(no subject)' if not found
+    """
+    headers = ses_message.get('mail', {}).get('headers', [])
+    for header in headers:
+        if header.get('name', '').lower() == 'subject':
+            subject = header.get('value', '')
+            if subject:
+                # Truncate to max_length characters
+                return subject[:max_length] if len(subject) > max_length else subject
+    return '(no subject)'
+
+
 def lambda_handler(event, context):
     """
     Lambda handler for sending bounce notifications via SES.
@@ -191,15 +212,41 @@ def process_bounce_request(message: Dict[str, Any], sqs_message_id: str):
                 "bounceReason": bounce_reason
             })
 
-            send_bounce_notification(
-                recipient=recipient,
-                original_sender=source,
-                original_subject=subject,
-                original_timestamp=timestamp,
-                bounce_reason=bounce_reason
-            )
+            try:
+                bounce_message_id = send_bounce_notification(
+                    recipient=recipient,
+                    original_sender=source,
+                    original_subject=subject,
+                    original_timestamp=timestamp,
+                    bounce_reason=bounce_reason
+                )
 
-            logger.info("Bounce sent successfully", extra={"recipient": recipient})
+                logger.info("Bounce sent successfully", extra={"recipient": recipient})
+
+                # Log action result for dashboard (success)
+                logger.info("Action result", extra={
+                    "messageId": message_id,
+                    "sender": source,
+                    "subject": extract_subject(ses_event, max_length=64),
+                    "recipient": recipient,
+                    "action": "bounce",
+                    "result": "success",
+                    "resultId": bounce_message_id  # SES bounce message ID
+                })
+
+            except Exception as e:
+                # Log action result for dashboard (failure)
+                logger.error("Action result", extra={
+                    "messageId": message_id,
+                    "sender": source,
+                    "subject": extract_subject(ses_event, max_length=64),
+                    "recipient": recipient,
+                    "action": "bounce",
+                    "result": "failure",
+                    "error": str(e)
+                })
+                # Re-raise so the outer handler can catch it
+                raise
 
         logger.info("Bounce processing complete", extra={"messageId": message_id})
 
@@ -214,7 +261,7 @@ def send_bounce_notification(
     original_subject: str,
     original_timestamp: str,
     bounce_reason: str = 'policy'
-):
+) -> str:
     """
     Send a bounce notification email via SES.
 
@@ -224,6 +271,9 @@ def send_bounce_notification(
         original_subject: Original email subject
         original_timestamp: Original email timestamp
         bounce_reason: Reason for bounce ('security' or 'policy')
+
+    Returns:
+        str: SES bounce message ID
     """
     # Construct bounce message
     bounce_subject = f"Mail Delivery Failed: {original_subject}"
@@ -319,6 +369,8 @@ This is an automated message. Please do not reply to this email.
         subsegment = xray_recorder.current_subsegment()
         if subsegment:
             subsegment.put_annotation('bounce_message_id', bounce_message_id)
+
+        return bounce_message_id
 
     except ClientError as e:
         error_code = e.response.get('Error', {}).get('Code')

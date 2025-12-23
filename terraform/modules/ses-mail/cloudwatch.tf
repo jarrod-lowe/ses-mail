@@ -237,7 +237,7 @@ resource "aws_cloudwatch_dashboard" "ses_mail" {
           }
         }
       },
-      # Recent Email Routing Decisions (Table View)
+      # Recent Email Routing & Execution (Table View)
       {
         type   = "log"
         width  = 24
@@ -246,16 +246,15 @@ resource "aws_cloudwatch_dashboard" "ses_mail" {
         y      = 30
         properties = {
           query   = <<-EOT
-SOURCE '${aws_cloudwatch_log_group.lambda_router_logs.name}'
-| filter message = "Routing decision" or message = "Looking up routing rule for recipient"
-| fields @timestamp, recipient, action, lookupKey, target
+SOURCE '${aws_cloudwatch_log_group.lambda_router_logs.name}' | SOURCE '${aws_cloudwatch_log_group.lambda_gmail_forwarder_logs.name}' | SOURCE '${aws_cloudwatch_log_group.lambda_bouncer_logs.name}' | filter message = "Routing decision" or message = "Action result"
+| fields @timestamp, messageId, sender, subject, recipient, action, result, error, lookupKey, target, resultId, xray_trace_id
 | sort @timestamp desc
 | limit 50
 EOT
           region  = var.aws_region
           stacked = false
           view    = "table"
-          title   = "Recent Email Routing Decisions"
+          title   = "Recent Email Routing & Execution"
         }
       },
       # Routing Action Statistics (Pie Chart)

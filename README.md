@@ -342,7 +342,7 @@ The system uses an **event-driven architecture** to continuously monitor refresh
 
 **Architecture:**
 
-```
+```plain
 EventBridge Rule (every 5 minutes)
   → Step Function (JSONata expressions)
     → Get token metadata from SSM
@@ -385,10 +385,10 @@ EventBridge Rule (every 5 minutes)
 
 **Additional Monitoring Alarms:**
 
-3. **Monitoring Errors**: `ses-mail-token-monitoring-errors-{environment}`
+1. **Monitoring Errors**: `ses-mail-token-monitoring-errors-{environment}`
    - Triggers if the Step Function encounters errors (SSM parameter missing, JSON parse failures, etc.)
 
-4. **Step Function Failures**: `ses-mail-token-monitor-stepfunction-failed-{environment}`
+2. **Step Function Failures**: `ses-mail-token-monitor-stepfunction-failed-{environment}`
    - Monitors Step Function execution failures
 
 All alarms send notifications to the SNS topic: `ses-mail-gmail-forwarder-token-alerts-{environment}`
@@ -436,14 +436,16 @@ AWS_PROFILE=ses-mail aws stepfunctions list-executions \
 **What to Do When Alarms Fire:**
 
 1. **Warning Alarm (24 hours)**: Plan to refresh the token soon
+
    ```bash
-   cd /Users/jarrod/git/ses-mail/scripts
+   cd scripts
    AWS_PROFILE=ses-mail python3 refresh_oauth_token.py --env test
    ```
 
 2. **Critical Alarm (6 hours)**: Refresh the token immediately to avoid service interruption
 
 3. **Monitoring Errors**: Check Step Function logs for issues
+
    ```bash
    AWS_PROFILE=ses-mail aws logs tail /aws/states/ses-mail-gmail-token-monitor-test --follow
    ```
