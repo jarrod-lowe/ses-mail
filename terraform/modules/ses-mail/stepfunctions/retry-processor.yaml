@@ -1,0 +1,180 @@
+Comment: "Process retry queue messages and invoke Gmail Forwarder Lambda"
+StartAt: "ReadMessagesFromQueue"
+States:
+  # Read messages from the retry queue using AWS SDK integration
+  ReadMessagesFromQueue:
+    Type: "Task"
+    Resource: "arn:aws:states:::aws-sdk:sqs:receiveMessage"
+    Parameters:
+      QueueUrl: "${queue_url}"
+      MaxNumberOfMessages: 10
+      WaitTimeSeconds: 20
+    ResultPath: "$.QueueMessages"
+    Next: "CheckIfMessagesExist"
+    Catch:
+      - ErrorEquals:
+          - "States.ALL"
+        Next: "HandleQueueReadError"
+        ResultPath: "$.Error"
+
+  # Check if there are any messages to process
+  CheckIfMessagesExist:
+    Type: "Choice"
+    Choices:
+      - Variable: "$.QueueMessages.Messages[0]"
+        IsPresent: true
+        Next: "ProcessMessages"
+    Default: "NoMessagesToProcess"
+
+  # No messages found - complete successfully
+  NoMessagesToProcess:
+    Type: "Succeed"
+
+  # Process each message using a Map state
+  ProcessMessages:
+    Type: "Map"
+    ItemsPath: "$.QueueMessages.Messages"
+    MaxConcurrency: 1
+    ResultPath: "$.ProcessingResults"
+    Iterator:
+      StartAt: "ParseMessageBody"
+      States:
+        # Wrap message in SQS Records array format for Lambda
+        ParseMessageBody:
+          Type: "Pass"
+          Parameters:
+            body.$: "$.Body"
+            receiptHandle.$: "$.ReceiptHandle"
+            messageId.$: "$.MessageId"
+          Next: "InvokeGmailForwarder"
+
+        # Invoke Gmail Forwarder Lambda with SQS-formatted event
+        InvokeGmailForwarder:
+          Type: "Task"
+          Resource: "arn:aws:states:::lambda:invoke"
+          Parameters:
+            FunctionName: "${lambda_arn}"
+            Payload:
+              Records.$: "States.Array($)"
+          TimeoutSeconds: 60
+          Retry:
+            - ErrorEquals:
+                - "Lambda.ServiceException"
+                - "Lambda.AWSLambdaException"
+                - "Lambda.SdkClientException"
+                - "Lambda.TooManyRequestsException"
+              IntervalSeconds: 30
+              MaxAttempts: 3
+              BackoffRate: 2.0
+          Catch:
+            - ErrorEquals:
+                - "States.ALL"
+              Next: "InvocationFailed"
+              ResultPath: "$.LambdaError"
+          ResultPath: "$.LambdaResult"
+          Next: "DeleteMessageFromQueue"
+
+        # Delete message from queue after successful processing
+        DeleteMessageFromQueue:
+          Type: "Task"
+          Resource: "arn:aws:states:::aws-sdk:sqs:deleteMessage"
+          Parameters:
+            QueueUrl.$: "States.Format('${queue_url}')"
+            ReceiptHandle.$: "$.receiptHandle"
+          ResultPath: "$.DeleteResult"
+          Next: "MessageProcessedSuccessfully"
+
+        # Message processed successfully
+        MessageProcessedSuccessfully:
+          Type: "Succeed"
+
+        # Lambda invocation failed after retries
+        InvocationFailed:
+          Type: "Pass"
+          Parameters:
+            Status: "Failed"
+            MessageId.$: "$.MessageId"
+            Error.$: "$.LambdaError"
+            ReceiptHandle.$: "$.ReceiptHandle"
+          Next: "DeleteFailedMessage"
+
+        # Delete failed message from queue (will go to DLQ via redrive policy)
+        DeleteFailedMessage:
+          Type: "Task"
+          Resource: "arn:aws:states:::aws-sdk:sqs:deleteMessage"
+          Parameters:
+            QueueUrl.$: "States.Format('${queue_url}')"
+            ReceiptHandle.$: "$.ReceiptHandle"
+          Catch:
+            - ErrorEquals:
+                - "States.ALL"
+              Next: "MessageProcessingComplete"
+          Next: "MessageProcessingComplete"
+
+        # Final state for failed message processing
+        MessageProcessingComplete:
+          Type: "Succeed"
+    Next: "CheckForMoreMessages"
+
+  # Check if there might be more messages to process
+  CheckForMoreMessages:
+    Type: "Choice"
+    Choices:
+      - Variable: "$.QueueMessages.Messages[10]"
+        IsPresent: false
+        Next: "AllMessagesProcessed"
+    Default: "ReadMessagesFromQueue"
+
+  # All messages processed - publish completion metrics
+  AllMessagesProcessed:
+    Type: "Pass"
+    Parameters:
+      Status: "Completed"
+      ProcessingResults.$: "$.ProcessingResults"
+      CompletionTimestamp.$: "$$.State.EnteredTime"
+    Next: "PublishCompletionMetrics"
+
+  # Publish metrics about retry processing completion
+  PublishCompletionMetrics:
+    Type: "Task"
+    Resource: "arn:aws:states:::aws-sdk:cloudwatch:putMetricData"
+    Parameters:
+      Namespace: "SESMail/${environment}"
+      MetricData:
+        - MetricName: "RetryProcessingCompleted"
+          Value: 1
+          Unit: "Count"
+    ResultPath: "$.MetricsResult"
+    Catch:
+      - ErrorEquals:
+          - "States.ALL"
+        Next: "MetricsPublishFailed"
+        ResultPath: "$.MetricsError"
+    Next: "RetryProcessingComplete"
+
+  # Metrics publish failed - log and continue
+  MetricsPublishFailed:
+    Type: "Pass"
+    Parameters:
+      Status: "MetricsPublishFailed"
+      Error.$: "$.MetricsError"
+      OriginalData.$: "$"
+    Next: "RetryProcessingComplete"
+
+  # Final success state
+  RetryProcessingComplete:
+    Type: "Succeed"
+
+  # Handle errors reading from queue
+  HandleQueueReadError:
+    Type: "Pass"
+    Parameters:
+      Status: "QueueReadError"
+      Error.$: "$.Error"
+    Next: "QueueReadFailed"
+
+  # Queue read failed - terminal state
+  QueueReadFailed:
+    Type: "Fail"
+    Error: "QueueReadError"
+    Cause: "Failed to read messages from retry queue"

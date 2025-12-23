@@ -1,0 +1,92 @@
+Comment: "Monitor Gmail OAuth token expiration every 5 minutes"
+QueryLanguage: "JSONata"
+StartAt: "GetTokenParameter"
+States:
+  # Get SSM parameter containing token metadata
+  GetTokenParameter:
+    Type: "Task"
+    Resource: "arn:aws:states:::aws-sdk:ssm:getParameter"
+    Arguments:
+      Name: "${parameter_name}"
+      WithDecryption: true
+    Next: "CalculateExpiration"
+    Catch:
+      - ErrorEquals:
+          - "Ssm.ParameterNotFound"
+        Next: "HandleMissingParameter"
+      - ErrorEquals:
+          - "States.ALL"
+        Next: "HandleParameterError"
+
+  # Parse token JSON and calculate seconds until expiration using JSONata
+  CalculateExpiration:
+    Type: "Pass"
+    Output:
+      seconds_until_expiration: "{% $parse($states.input.Parameter.Value).expires_at_epoch - ($millis() / 1000) %}"
+    Next: "PublishExpirationMetric"
+
+  # Publish metric to CloudWatch
+  PublishExpirationMetric:
+    Type: "Task"
+    Resource: "arn:aws:states:::aws-sdk:cloudwatch:putMetricData"
+    Arguments:
+      Namespace: "SESMail/${environment}"
+      MetricData:
+        - MetricName: "TokenSecondsUntilExpiration"
+          Value: "{% $states.input.seconds_until_expiration %}"
+          Unit: "Seconds"
+    Next: "MonitoringComplete"
+    Catch:
+      - ErrorEquals:
+          - "States.ALL"
+        Next: "HandleMetricPublishError"
+
+  # Success state
+  MonitoringComplete:
+    Type: "Succeed"
+
+  # Error handling: Missing parameter
+  HandleMissingParameter:
+    Type: "Pass"
+    Output:
+      ErrorType: "ParameterNotFound"
+      ErrorMessage: "SSM parameter does not exist - run refresh_oauth_token.py"
+    Next: "PublishErrorMetric"
+
+  # Error handling: Parameter read error
+  HandleParameterError:
+    Type: "Pass"
+    Output:
+      ErrorType: "ParameterReadError"
+      ErrorMessage: "Failed to read SSM parameter"
+    Next: "PublishErrorMetric"
+
+  # Error handling: Metric publish error
+  HandleMetricPublishError:
+    Type: "Pass"
+    Output:
+      ErrorType: "MetricPublishError"
+      ErrorMessage: "Failed to publish metric to CloudWatch"
+    Next: "PublishErrorMetric"
+
+  # Publish error metric for monitoring system health
+  PublishErrorMetric:
+    Type: "Task"
+    Resource: "arn:aws:states:::aws-sdk:cloudwatch:putMetricData"
+    Arguments:
+      Namespace: "SESMail/${environment}"
+      MetricData:
+        - MetricName: "TokenMonitoringErrors"
+          Value: 1
+          Unit: "Count"
+    Catch:
+      - ErrorEquals:
+          - "States.ALL"
+        Next: "MonitoringFailed"
+    Next: "MonitoringFailed"
+
+  # Terminal failure state
+  MonitoringFailed:
+    Type: "Fail"
+    Error: "TokenMonitoringFailed"
+    Cause: "Token monitoring workflow failed - check CloudWatch logs"
