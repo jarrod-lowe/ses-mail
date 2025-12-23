@@ -338,24 +338,60 @@ When you run the refresh script, it will:
 
 ### Token Expiration Monitoring
 
-The system automatically monitors refresh token expiration using CloudWatch alarms to provide proactive alerts before tokens expire:
+The system uses an **event-driven architecture** to continuously monitor refresh token expiration and provide proactive alerts before tokens expire. The monitoring system runs automatically every 5 minutes without requiring manual intervention.
 
-**CloudWatch Alarm Configuration:**
+**Architecture:**
 
-- **Alarm Name**: `ses-mail-gmail-forwarder-token-expiring-{environment}`
-- **Metric**: `TokenHoursUntilExpiration` in namespace `SESMail/{environment}`
-- **Trigger Condition**: Less than 24 hours until token expiration
-- **Evaluation Period**: Every 1 hour (3600 seconds)
-- **Statistic**: Minimum (catches the lowest value to ensure earliest alert)
-- **SNS Notification**: `ses-mail-gmail-forwarder-token-alerts-{environment}`
-- **Purpose**: Proactive reminder to run refresh script before token expires
+```
+EventBridge Rule (every 5 minutes)
+  → Step Function (JSONata expressions)
+    → Get token metadata from SSM
+    → Calculate seconds until expiration
+    → Publish CloudWatch metric
+  → CloudWatch Alarms → SNS Notifications
+```
 
-**How It Works:**
+**Key Components:**
 
-1. **Metric Publishing**: The refresh script (`scripts/refresh_oauth_token.py`) automatically publishes the `TokenHoursUntilExpiration` metric to CloudWatch after storing a new token
-2. **Expiration Calculation**: The metric value is calculated as `(expiration_time - current_time) / 3600` where expiration is 7 days after token creation (in testing mode)
-3. **Hourly Evaluation**: CloudWatch evaluates the metric every hour to check if it falls below 24 hours
-4. **Alert Delivery**: When the threshold is crossed, an SNS notification is sent to administrators via the token alerts topic
+1. **EventBridge Rule**: `ses-mail-token-monitor-schedule-{environment}`
+   - Triggers every 5 minutes using `rate(5 minutes)` expression
+   - Automatically starts Step Function execution
+
+2. **Step Function**: `ses-mail-gmail-token-monitor-{environment}`
+   - Uses **JSONata** query language for data transformation (no Lambda required)
+   - Retrieves token metadata from SSM Parameter Store
+   - Calculates seconds until expiration: `expires_at_epoch - (current_time_ms / 1000)`
+   - Publishes metric to CloudWatch
+
+3. **CloudWatch Metric**: `TokenSecondsUntilExpiration`
+   - **Namespace**: `SESMail/{environment}`
+   - **Unit**: Seconds
+   - **Update Frequency**: Every 5 minutes
+   - **Value**: Seconds remaining until token expires (can be negative if expired)
+
+**CloudWatch Alarms (Two-Tier):**
+
+1. **Warning Alarm** (24-hour threshold):
+   - **Name**: `ses-mail-gmail-token-expiring-warning-{environment}`
+   - **Threshold**: 86,400 seconds (24 hours)
+   - **Evaluation**: 2 consecutive periods (10 minutes total)
+   - **Purpose**: Early warning to prepare for token refresh
+
+2. **Critical Alarm** (6-hour threshold):
+   - **Name**: `ses-mail-gmail-token-expiring-critical-{environment}`
+   - **Threshold**: 21,600 seconds (6 hours)
+   - **Evaluation**: 1 period (5 minutes)
+   - **Purpose**: Urgent reminder - token expiring soon
+
+**Additional Monitoring Alarms:**
+
+3. **Monitoring Errors**: `ses-mail-token-monitoring-errors-{environment}`
+   - Triggers if the Step Function encounters errors (SSM parameter missing, JSON parse failures, etc.)
+
+4. **Step Function Failures**: `ses-mail-token-monitor-stepfunction-failed-{environment}`
+   - Monitors Step Function execution failures
+
+All alarms send notifications to the SNS topic: `ses-mail-gmail-forwarder-token-alerts-{environment}`
 
 **Subscribing to Token Expiration Alerts:**
 
@@ -374,26 +410,53 @@ AWS_PROFILE=ses-mail aws sns subscribe \
 **Checking Current Token Expiration:**
 
 ```bash
-# Get the latest token expiration metric value
+# Get the latest token expiration metric value (in seconds)
 AWS_PROFILE=ses-mail aws cloudwatch get-metric-statistics \
   --namespace "SESMail/test" \
-  --metric-name TokenHoursUntilExpiration \
-  --start-time $(date -u -v-24H +%Y-%m-%dT%H:%M:%S) \
+  --metric-name TokenSecondsUntilExpiration \
+  --start-time $(date -u -v-1H +%Y-%m-%dT%H:%M:%S) \
   --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
-  --period 3600 \
+  --period 300 \
   --statistics Minimum
 
-# Check alarm status
+# Check alarm statuses
 AWS_PROFILE=ses-mail aws cloudwatch describe-alarms \
-  --alarm-names ses-mail-gmail-forwarder-token-expiring-test
+  --alarm-name-prefix "ses-mail-gmail-token" \
+  --query 'MetricAlarms[*].[AlarmName,StateValue,StateReason]' \
+  --output table
+
+# Check Step Function execution history
+AWS_PROFILE=ses-mail aws stepfunctions list-executions \
+  --state-machine-arn $(AWS_PROFILE=ses-mail aws stepfunctions list-state-machines \
+    --query 'stateMachines[?name==`ses-mail-gmail-token-monitor-test`].stateMachineArn' \
+    --output text) \
+  --max-results 5
 ```
+
+**What to Do When Alarms Fire:**
+
+1. **Warning Alarm (24 hours)**: Plan to refresh the token soon
+   ```bash
+   cd /Users/jarrod/git/ses-mail/scripts
+   AWS_PROFILE=ses-mail python3 refresh_oauth_token.py --env test
+   ```
+
+2. **Critical Alarm (6 hours)**: Refresh the token immediately to avoid service interruption
+
+3. **Monitoring Errors**: Check Step Function logs for issues
+   ```bash
+   AWS_PROFILE=ses-mail aws logs tail /aws/states/ses-mail-gmail-token-monitor-test --follow
+   ```
 
 **Important Notes:**
 
-- The alarm only triggers when the metric is published (i.e., after running the refresh script)
-- If you never run the refresh script, the alarm will show "INSUFFICIENT_DATA" state
-- In production OAuth mode (after Google app verification), refresh tokens don't expire, so this alarm becomes unnecessary
-- The alarm also triggers on OK state transitions to notify when token refresh extends the expiration
+- **Automatic Monitoring**: The system monitors token expiration continuously without manual intervention
+- **Proactive Alerts**: Two-tier alarms provide both early warning (24hr) and urgent notification (6hr)
+- **No Lambda Required**: Uses AWS Step Functions with JSONata expressions for serverless data transformation
+- **Precision**: Calculates expiration in seconds (not hours) for accurate monitoring
+- **Negative Values**: Metric can be negative if token has already expired
+- **Missing Data Triggers Alarm**: If monitoring fails, `treat_missing_data=breaching` ensures you get notified
+- **Production OAuth**: In production mode (after Google app verification), refresh tokens don't expire, so these alarms become unnecessary
 
 ### Retry Queue Infrastructure
 

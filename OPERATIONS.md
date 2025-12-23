@@ -18,22 +18,24 @@ This document provides operational procedures for managing and troubleshooting t
 
 The system has three dead letter queues (DLQs) that receive messages after failed processing attempts:
 
-* `ses-email-input-dlq-{environment}` - Messages that failed EventBridge Pipes enrichment
-* `ses-gmail-forwarder-dlq-{environment}` - Messages that failed Gmail forwarding
-* `ses-bouncer-dlq-{environment}` - Messages that failed bounce sending
+- `ses-email-input-dlq-{environment}` - Messages that failed EventBridge Pipes enrichment
+- `ses-gmail-forwarder-dlq-{environment}` - Messages that failed Gmail forwarding
+- `ses-bouncer-dlq-{environment}` - Messages that failed bounce sending
 
 ### When to Investigate DLQ Messages
 
 **Automated Redrive (Safe)**:
-* Single message in DLQ after transient error (network timeout, rate limiting)
-* Multiple messages with same timestamp (likely AWS service issue)
-* Gmail API token expiration (check logs for "token expired" errors)
+
+- Single message in DLQ after transient error (network timeout, rate limiting)
+- Multiple messages with same timestamp (likely AWS service issue)
+- Gmail API token expiration (check logs for "token expired" errors)
 
 **Manual Investigation Required**:
-* Messages repeatedly appearing in DLQ after redrive
-* DLQ alarms triggering multiple times for same message
-* Error messages indicating data corruption or malformed payloads
-* Security-related failures (invalid credentials, permission denied)
+
+- Messages repeatedly appearing in DLQ after redrive
+- DLQ alarms triggering multiple times for same message
+- Error messages indicating data corruption or malformed payloads
+- Security-related failures (invalid credentials, permission denied)
 
 ### Investigating DLQ Messages
 
@@ -49,9 +51,10 @@ Use the saved CloudWatch Logs Insights query "dlq-message-investigation":
 ```
 
 Look for:
-* Error messages with messageId matching DLQ messages
-* Stack traces indicating code bugs
-* AWS API errors (throttling, permissions, service issues)
+
+- Error messages with messageId matching DLQ messages
+- Stack traces indicating code bugs
+- AWS API errors (throttling, permissions, service issues)
 
 #### Step 2: Inspect DLQ Message Content
 
@@ -79,19 +82,22 @@ AWS_PROFILE=ses-mail aws sqs receive-message \
 #### Step 4: Decide on Remediation
 
 **Redrive to Source Queue** (automated):
-* Transient errors (network, throttling, temporary service issues)
-* Token refresh issues (after updating Gmail token)
-* One-time AWS service disruptions
+
+- Transient errors (network, throttling, temporary service issues)
+- Token refresh issues (after updating Gmail token)
+- One-time AWS service disruptions
 
 **Fix Code and Redeploy**:
-* Application bugs (null pointer, data validation errors)
-* Missing error handling for edge cases
-* Incorrect business logic
+
+- Application bugs (null pointer, data validation errors)
+- Missing error handling for edge cases
+- Incorrect business logic
 
 **Manual Processing**:
-* Data corruption in S3 email file
-* Permanent external service failure
-* Invalid routing rules in DynamoDB
+
+- Data corruption in S3 email file
+- Permanent external service failure
+- Invalid routing rules in DynamoDB
 
 ### Automated DLQ Redrive
 
@@ -123,6 +129,7 @@ AWS_PROFILE=ses-mail aws ssm describe-automation-executions \
 ```
 
 **Important**: Only redrive messages after:
+
 1. Investigating the root cause
 2. Confirming the issue is resolved (code deployed, token refreshed, service restored)
 3. Verifying messages won't immediately fail again
@@ -132,13 +139,16 @@ AWS_PROFILE=ses-mail aws ssm describe-automation-executions \
 ### Gmail API Token Expired
 
 **Symptoms**:
-* CloudWatch alarm: `ses-mail-lambda-gmail-forwarder-errors-{environment}`
-* DLQ: `ses-gmail-forwarder-dlq-{environment}` has messages
-* Logs show: "Token expired" or "invalid_grant"
+
+- CloudWatch alarm: `ses-mail-lambda-gmail-forwarder-errors-{environment}`
+- DLQ: `ses-gmail-forwarder-dlq-{environment}` has messages
+- Logs show: "Token expired" or "invalid_grant"
 
 **Resolution**:
+
 1. Generate new Gmail OAuth token locally (see README.md)
 2. Update SSM parameter:
+
    ```bash
    AWS_PROFILE=ses-mail aws ssm put-parameter \
      --name "/ses-mail/test/gmail-token" \
@@ -146,22 +156,27 @@ AWS_PROFILE=ses-mail aws ssm describe-automation-executions \
      --type SecureString \
      --overwrite
    ```
+
 3. Wait 2-3 minutes for parameter to propagate
 4. Use DLQ redrive runbook to reprocess failed messages
 
 ### Router Enrichment DynamoDB Errors
 
 **Symptoms**:
-* CloudWatch alarm: `ses-mail-lambda-router-errors-{environment}`
-* DLQ: `ses-email-input-dlq-{environment}` has messages
-* Logs show: "DynamoDB timeout" or "ProvisionedThroughputExceededException"
+
+- CloudWatch alarm: `ses-mail-lambda-router-errors-{environment}`
+- DLQ: `ses-email-input-dlq-{environment}` has messages
+- Logs show: "DynamoDB timeout" or "ProvisionedThroughputExceededException"
 
 **Resolution**:
+
 1. Check DynamoDB table status:
+
    ```bash
    AWS_PROFILE=ses-mail aws dynamodb describe-table \
      --table-name ses-email-routing-test
    ```
+
 2. If table is throttling, wait for capacity to recover (PAY_PER_REQUEST should auto-scale)
 3. If table doesn't exist, redeploy infrastructure
 4. Use DLQ redrive runbook to reprocess messages
@@ -169,15 +184,19 @@ AWS_PROFILE=ses-mail aws ssm describe-automation-executions \
 ### Bouncer SES Sending Failures
 
 **Symptoms**:
-* CloudWatch alarm: `ses-mail-lambda-bouncer-errors-{environment}`
-* DLQ: `ses-bouncer-dlq-{environment}` has messages
-* Logs show: "MessageRejected" or "Account in sandbox mode"
+
+- CloudWatch alarm: `ses-mail-lambda-bouncer-errors-{environment}`
+- DLQ: `ses-bouncer-dlq-{environment}` has messages
+- Logs show: "MessageRejected" or "Account in sandbox mode"
 
 **Resolution**:
+
 1. Check if SES is in sandbox mode (requires verified recipients):
+
    ```bash
    AWS_PROFILE=ses-mail aws ses get-account-sending-enabled
    ```
+
 2. For production, request SES sending limit increase
 3. For sandbox issues, verify sender email address
 4. Review bounce message content for compliance with SES policies
@@ -186,20 +205,26 @@ AWS_PROFILE=ses-mail aws ssm describe-automation-executions \
 ### EventBridge Pipes Failures
 
 **Symptoms**:
-* CloudWatch alarm: `eventbridge-pipes-failures-{environment}`
-* DLQ: `ses-email-input-dlq-{environment}` has messages
-* EventBridge Pipes logs show enrichment errors
+
+- CloudWatch alarm: `eventbridge-pipes-failures-{environment}`
+- DLQ: `ses-email-input-dlq-{environment}` has messages
+- EventBridge Pipes logs show enrichment errors
 
 **Resolution**:
+
 1. Check EventBridge Pipes status:
+
    ```bash
    AWS_PROFILE=ses-mail aws pipes list-pipes --region ap-southeast-2
    ```
+
 2. Check pipe logs:
+
    ```bash
    AWS_PROFILE=ses-mail aws logs tail \
      /aws/vendedlogs/pipes/test/ses-email-router --follow
    ```
+
 3. If router lambda is failing, check router lambda logs
 4. If pipes is stopped, restart it via console or CLI
 5. Use DLQ redrive runbook after resolution
@@ -207,12 +232,15 @@ AWS_PROFILE=ses-mail aws ssm describe-automation-executions \
 ### High Queue Age Alarms
 
 **Symptoms**:
-* CloudWatch alarm: `ses-{queue}-queue-age-{environment}`
-* Messages sitting in queue for >5 minutes
-* Dashboard shows increasing queue depth
+
+- CloudWatch alarm: `ses-{queue}-queue-age-{environment}`
+- Messages sitting in queue for >5 minutes
+- Dashboard shows increasing queue depth
 
 **Resolution**:
+
 1. Check if downstream lambda is throttled:
+
    ```bash
    # Check lambda concurrent executions
    AWS_PROFILE=ses-mail aws cloudwatch get-metric-statistics \
@@ -224,6 +252,7 @@ AWS_PROFILE=ses-mail aws ssm describe-automation-executions \
      --period 300 \
      --statistics Maximum
    ```
+
 2. Check if lambda is experiencing errors (see lambda error scenarios above)
 3. If lambda is healthy but slow, consider increasing concurrency limit
 4. Monitor queue depth - should decrease as lambda catches up
@@ -235,11 +264,14 @@ AWS_PROFILE=ses-mail aws ssm describe-automation-executions \
 **Definition**: No emails being processed for >15 minutes, multiple alarms firing
 
 **Response**:
+
 1. Run queue health check automation:
+
    ```bash
    AWS_PROFILE=ses-mail aws ssm start-automation-execution \
      --document-name "SESMail-Queue-HealthCheck-test"
    ```
+
 2. Check CloudWatch dashboard for system overview
 3. Review X-Ray service map for failed components
 4. Check AWS Service Health Dashboard for regional issues
@@ -251,6 +283,7 @@ AWS_PROFILE=ses-mail aws ssm describe-automation-executions \
 **Definition**: Some emails failing (DLQ has messages), but system mostly working
 
 **Response**:
+
 1. Identify which queue/lambda is affected from alarms
 2. Follow specific failure scenario procedures above
 3. Check if issue is isolated to specific email addresses or routing rules
@@ -263,6 +296,7 @@ AWS_PROFILE=ses-mail aws ssm describe-automation-executions \
 **Definition**: Emails processing slowly (high queue age) but eventually succeeding
 
 **Response**:
+
 1. Check CloudWatch dashboard "Lambda Duration" widget
 2. Review X-Ray traces for slow operations
 3. Check for AWS API throttling in lambda logs
@@ -279,32 +313,37 @@ AWS_PROFILE=ses-mail aws ssm describe-automation-executions \
 **Purpose**: Redrive messages from DLQ back to source queue with velocity control
 
 **When to Use**:
-* After fixing transient errors (token refresh, service restoration)
-* After deploying code fixes for application bugs
-* When DLQ messages are verified safe to reprocess
+
+- After fixing transient errors (token refresh, service restoration)
+- After deploying code fixes for application bugs
+- When DLQ messages are verified safe to reprocess
 
 **Parameters**:
-* `DLQUrl`: Dead letter queue URL to redrive from
-* `SourceQueueUrl`: Source queue URL to send messages back to
-* `MaxMessages`: Maximum number of messages to redrive (0 = all)
-* `VelocityPerSecond`: Rate limiting (messages per second)
+
+- `DLQUrl`: Dead letter queue URL to redrive from
+- `SourceQueueUrl`: Source queue URL to send messages back to
+- `MaxMessages`: Maximum number of messages to redrive (0 = all)
+- `VelocityPerSecond`: Rate limiting (messages per second)
 
 **Outputs**:
-* `RedrivenCount`: Number of messages successfully redriven
-* `FailedCount`: Number of messages that failed during redrive
+
+- `RedrivenCount`: Number of messages successfully redriven
+- `FailedCount`: Number of messages that failed during redrive
 
 #### SESMail-Queue-HealthCheck-{environment}
 
 **Purpose**: Check health of all queues and DLQs
 
 **When to Use**:
-* During incident response to quickly assess system state
-* As part of regular health monitoring
-* Before and after maintenance windows
+
+- During incident response to quickly assess system state
+- As part of regular health monitoring
+- Before and after maintenance windows
 
 **Outputs**:
-* `HealthReport`: JSON with queue depths, ages, DLQ counts, and detected issues
-* `HealthStatus`: HEALTHY or UNHEALTHY
+
+- `HealthReport`: JSON with queue depths, ages, DLQ counts, and detected issues
+- `HealthStatus`: HEALTHY or UNHEALTHY
 
 ### Running Runbooks via CLI
 
@@ -330,10 +369,12 @@ AWS_PROFILE=ses-mail aws ssm get-automation-execution \
 ### CloudWatch Dashboard
 
 Access the dashboard:
-* Console: CloudWatch → Dashboards → `ses-mail-dashboard-{environment}`
-* URL: `https://console.aws.amazon.com/cloudwatch/home?region=ap-southeast-2#dashboards:name=ses-mail-dashboard-{environment}`
+
+- Console: CloudWatch → Dashboards → `ses-mail-dashboard-{environment}`
+- URL: `https://console.aws.amazon.com/cloudwatch/home?region=ap-southeast-2#dashboards:name=ses-mail-dashboard-{environment}`
 
 **Key Widgets**:
+
 1. Email Processing Overview - Monitor email volume and spam/virus detection
 2. Handler Success/Failure Rates - Track routing, forwarding, and bounce operations
 3. Lambda Function Errors - Identify which lambda is failing
@@ -355,10 +396,10 @@ Navigate to CloudWatch Logs Insights and select from saved queries:
 
 ### Alarm Response Times
 
-* **DLQ Alarms**: Respond within 1 hour, investigate immediately
-* **Lambda Error Alarms**: Respond within 30 minutes
-* **Queue Age Alarms**: Respond within 2 hours, monitor for auto-recovery
-* **High Volume Alarms**: Informational, verify expected traffic
+- **DLQ Alarms**: Respond within 1 hour, investigate immediately
+- **Lambda Error Alarms**: Respond within 30 minutes
+- **Queue Age Alarms**: Respond within 2 hours, monitor for auto-recovery
+- **High Volume Alarms**: Informational, verify expected traffic
 
 ## Managing Routing Rules
 
@@ -423,6 +464,7 @@ After adding or modifying a routing rule:
 ### Common Routing Rule Patterns
 
 **Exact Address Match**:
+
 ```bash
 PK: "ROUTE#user@example.com"
 action: "forward-to-gmail"
@@ -430,6 +472,7 @@ target: "destination@gmail.com"
 ```
 
 **Domain Wildcard** (all addresses at domain):
+
 ```bash
 PK: "ROUTE#*@example.com"
 action: "forward-to-gmail"
@@ -437,6 +480,7 @@ target: "catchall@gmail.com"
 ```
 
 **Global Wildcard** (default for unmatched):
+
 ```bash
 PK: "ROUTE#*"
 action: "bounce"
@@ -459,24 +503,32 @@ AWS_PROFILE=ses-mail aws dynamodb scan \
 ## Escalation Paths
 
 ### Level 1: Automated Recovery
-* DLQ redrive runbooks (transient errors)
-* Queue health monitoring
-* Standard operational procedures
+
+- DLQ redrive runbooks (transient errors)
+
+- Queue health monitoring
+- Standard operational procedures
 
 ### Level 2: On-Call Engineer
-* Application bugs requiring code fixes
-* Configuration issues requiring Terraform changes
-* DLQ messages requiring manual investigation
+
+- Application bugs requiring code fixes
+
+- Configuration issues requiring Terraform changes
+- DLQ messages requiring manual investigation
 
 ### Level 3: AWS Support
-* AWS service outages or degradation
-* Quota increases (SES sending limits, Lambda concurrency)
-* Infrastructure-level issues
+
+- AWS service outages or degradation
+
+- Quota increases (SES sending limits, Lambda concurrency)
+- Infrastructure-level issues
 
 ### External Dependencies
-* **Gmail API**: Google Cloud Console → APIs & Services
-* **OAuth Token**: Token refresh requires manual process (see README.md)
-* **DNS/Route53**: Domain verification and email routing
+
+- **Gmail API**: Google Cloud Console → APIs & Services
+
+- **OAuth Token**: Token refresh requires manual process (see README.md)
+- **DNS/Route53**: Domain verification and email routing
 
 ## Best Practices
 
@@ -490,7 +542,7 @@ AWS_PROFILE=ses-mail aws dynamodb scan \
 
 ## Support Contacts
 
-* **System Owner**: [Your team/contact]
-* **AWS Account**: [Account ID and account owner]
-* **Gmail API Project**: [Google Cloud project name]
-* **On-Call**: [PagerDuty/on-call system]
+- **System Owner**: [Your team/contact]
+- **AWS Account**: [Account ID and account owner]
+- **Gmail API Project**: [Google Cloud project name]
+- **On-Call**: [PagerDuty/on-call system]
