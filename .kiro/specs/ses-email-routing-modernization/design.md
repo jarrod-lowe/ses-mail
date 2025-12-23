@@ -230,7 +230,7 @@ resource "aws_cloudwatch_event_rule" "bouncer" {
 
 **Schema:**
 
-```
+```plain
 Primary Key: recipient (String) - Email address pattern
 Attributes:
 - action (String) - Routing action (e.g., "forward-to-gmail", "bounce")

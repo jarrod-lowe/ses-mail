@@ -239,6 +239,8 @@ def queue_for_retry(sqs_record: Dict[str, Any], error_context: Dict[str, Any]) -
     if not RETRY_QUEUE_URL:
         raise RuntimeError("RETRY_QUEUE_URL environment variable must be set")
 
+    message_id = None
+
     try:
         # Parse the SQS message body to extract message ID for logging
         body = json.loads(sqs_record.get('body', '{}'))
@@ -284,7 +286,7 @@ def queue_for_retry(sqs_record: Dict[str, Any], error_context: Dict[str, Any]) -
 
     except ClientError as e:
         logger.error("Failed to queue message for retry", extra={
-            "messageId": message_id,
+            "messageId": message_id if message_id is not None else 'unknown',
             "error": str(e),
             "errorCode": e.response.get('Error', {}).get('Code')
         })
@@ -307,7 +309,16 @@ def process_sqs_record(record, service):
     # Create X-Ray subsegment at the beginning so it's accessible in except block
     subsegment = xray_recorder.begin_subsegment('process_gmail_forward')  # type: ignore[attr-defined]
 
+    # Initialize variables for error logging
+    message_id = None
+    source = None
+    ses_message = None
+    recipient = None
+    destination = None
+    subject = None
+
     try:
+
         # Parse SQS message body (enriched EventBridge message from EventBridge Event Bus)
         # The message is the EventBridge event detail
         body = json.loads(record.get('body', '{}'))
@@ -464,13 +475,13 @@ def process_sqs_record(record, service):
         # Log action result for dashboard (if we have enough context)
         try:
             logger.error("Action result", extra={
-                "messageId": message_id if 'message_id' in locals() else 'unknown',
-                "sender": source if 'source' in locals() else 'unknown',
-                "subject": extract_subject(ses_message, max_length=64) if 'ses_message' in locals() else '(no subject)',
-                "recipient": recipient if 'recipient' in locals() else 'unknown',
+                "messageId": message_id if message_id is not None else 'unknown',
+                "sender": source if source is not None else 'unknown',
+                "subject": extract_subject(ses_message, max_length=64) if ses_message is not None else '(no subject)',
+                "recipient": recipient if recipient is not None else 'unknown',
                 "action": "forward-to-gmail",
                 "result": "failure",
-                "target": destination if 'destination' in locals() else 'unknown',  # Gmail destination
+                "target": destination if destination is not None else 'unknown',  # Gmail destination
                 "error": str(e)
             })
         except Exception:

@@ -8,7 +8,7 @@ This design implements comprehensive end-to-end XRay distributed tracing for the
 
 ### Current Architecture (With XRay Gaps)
 
-```
+```plain
 SES Receipt Rule
 ├── S3 Action: Store email in S3
 └── SNS Action: Publish to SNS topic (✅ XRay Active Tracing)
@@ -22,13 +22,14 @@ SES Receipt Rule
 ```
 
 **XRay Problems**:
+
 1. **SES**: No native XRay support - traces don't start until SNS
 2. **EventBridge Pipes**: Limited XRay support - trace context may be lost during enrichment
 3. **Complex Flow**: Many components = more points of failure for trace propagation
 
 ### Proposed Architecture (Simplified with Complete XRay)
 
-```
+```plain
 SES Receipt Rule
 ├── S3 Action: Store email in S3
 └── SNS Action: Publish to SNS topic (✅ XRay Active Tracing)
@@ -39,9 +40,10 @@ SES Receipt Rule
 ```
 
 **Key Changes**:
+
 1. **Remove EventBridge Pipes**: Eliminate XRay-problematic component
 2. **Remove SQS Input Queue**: No longer needed without Pipes
-3. **Enhanced Router Lambda**: 
+3. **Enhanced Router Lambda**:
    - Triggered directly by SNS (not via Pipes)
    - Becomes the XRay trace initiator
    - Fetches email from S3
@@ -50,6 +52,7 @@ SES Receipt Rule
 4. **Simplified Flow**: Fewer components = better XRay support
 
 **Benefits**:
+
 - Complete end-to-end XRay tracing from SNS through final processing
 - Fewer components to maintain and monitor
 - Better error handling (SNS retry/DLQ vs Pipes complexity)
@@ -64,6 +67,7 @@ SES Receipt Rule
 **New Role**: Primary email processor and XRay trace initiator
 
 **New Responsibilities**:
+
 1. **SNS Event Processing**: Handle SNS messages containing SES events
 2. **XRay Trace Initiation**: Create initial trace segment for email processing
 3. **Routing Logic**: Query DynamoDB for routing rules using SES event metadata (existing functionality)
@@ -73,6 +77,7 @@ SES Receipt Rule
 **Note**: Router Lambda does NOT need to fetch email content from S3. It only processes SES event metadata (sender, recipients, message ID) to make routing decisions. Handler Lambdas fetch actual email content when needed.
 
 **Interface Changes**:
+
 ```python
 # Current: Handles EventBridge Pipes enrichment format
 def router_handler(pipes_event, context):
@@ -95,16 +100,19 @@ def enhanced_router_handler(sns_event, context):
 ### 2. Infrastructure Changes
 
 **Components to Remove**:
+
 - **EventBridge Pipes**: `aws_pipes_pipe.email_router`
-- **SQS Input Queue**: `aws_sqs_queue.input_queue` 
+- **SQS Input Queue**: `aws_sqs_queue.input_queue`
 - **Pipes IAM Role**: `aws_iam_role.eventbridge_pipes_execution`
 - **Pipes CloudWatch Logs**: `/aws/vendedlogs/pipes/...`
 
 **Components to Add**:
+
 - **SNS Subscription**: Router Lambda subscribes to existing SNS topic
 - **Lambda DLQ**: Dead letter queue for failed Router Lambda invocations
 
 **Components to Modify**:
+
 - **Router Lambda**: Add SNS trigger, XRay enhancements (no S3 access needed)
 - **SNS Topic**: Add Lambda subscription (keep existing SQS subscriptions if any)
 - **EventBridge Events**: Include XRay trace context in event detail
@@ -114,12 +122,14 @@ def enhanced_router_handler(sns_event, context):
 **Purpose**: Complete trace propagation and add detailed email processing annotations.
 
 **Implementation**:
+
 - **Trace Context Extraction**: Extract trace headers from SQS message attributes
 - **Custom Subsegments**: Create detailed subsegments for Gmail API calls, SES bounces
 - **Error Instrumentation**: Capture detailed error information in trace segments
 - **Performance Metrics**: Add timing annotations for external API calls
 
 **Enhanced Handler Structure**:
+
 ```python
 @xray_recorder.capture('gmail_forwarding')
 def enhanced_gmail_handler(event, context):
@@ -135,6 +145,7 @@ def enhanced_gmail_handler(event, context):
 **Purpose**: Maintain trace correlation across service boundaries that don't natively support XRay.
 
 **Implementation**:
+
 - **Correlation ID Strategy**: Use SES message ID as correlation identifier
 - **Custom Trace Linking**: Link related traces using correlation IDs
 - **Metadata Propagation**: Carry email metadata through all processing stages
@@ -206,11 +217,13 @@ def enhanced_gmail_handler(event, context):
 ### Architecture Option Failure Handling
 
 **Option A Failure Scenarios**:
+
 - **Lambda Failure**: Email remains in S3 but unprocessed (no retry mechanism)
 - **Mitigation**: Implement CloudWatch alarm on Lambda errors + manual reprocessing script
 - **Recovery**: Periodic scan of S3 for unprocessed emails (based on age/metadata)
 
 **Option B Failure Scenarios** (Recommended):
+
 - **Lambda Failure**: SNS retries Lambda invocation automatically
 - **Persistent Failure**: SNS sends message to DLQ after retry exhaustion
 - **DLQ Processing**: Separate Lambda processes DLQ messages for recovery
@@ -299,24 +312,28 @@ def handle_processing_error(error, context):
 ## Implementation Phases
 
 ### Phase 1: Architecture Simplification
+
 - Remove EventBridge Pipes and SQS input queue
 - Implement Option B (Keep SNS) for reliability
 - Add SNS subscription for Router Lambda with DLQ configuration
 - Add XRay permissions to Router Lambda IAM role
 
 ### Phase 2: Router Lambda Enhancement
+
 - Implement trace initiation in Router Lambda
 - Add S3 email fetching capability to Router Lambda
 - Enhance routing logic with XRay instrumentation
 - Add trace context injection to EventBridge events
 
 ### Phase 3: Handler Instrumentation
+
 - Enhance Gmail forwarder Lambda with detailed tracing
 - Enhance bouncer Lambda with XRay instrumentation
 - Add custom subsegments for external API calls
 - Implement trace context extraction from EventBridge events
 
 ### Phase 4: Monitoring and Optimization
+
 - Implement XRay-based CloudWatch dashboards
 - Configure sampling rules for cost optimization
 - Add XRay metrics to existing alarm infrastructure

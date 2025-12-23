@@ -24,7 +24,7 @@ This feature modernizes the existing SES email processing system by replacing th
 
 1. WHEN an SNS message is published from S3 email storage THEN it SHALL be sent to an SQS queue for EventBridge Pipes processing
 2. WHEN EventBridge Pipes processes the message THEN it SHALL use a router lambda for enrichment to add routing decisions
-3. WHEN the router enrichment function processes an email THEN it SHALL look up routing rules in DynamoDB using recipient address matching (target@domain.com, *@domain.com, * with most specific match winning)
+3. WHEN the router enrichment function processes an email THEN it SHALL look up routing rules in DynamoDB using recipient address matching (`target@domain.com`, `*@domain.com`, `*` with most specific match winning)
 4. WHEN the router enrichment function processes an email THEN it SHALL analyze DMARC result headers and other email security indicators
 5. WHEN the router enrichment completes THEN EventBridge Pipes SHALL send the enriched message to an EventBridge Event Bus
 6. WHEN the EventBridge Event Bus receives enriched messages THEN it SHALL route them to appropriate target SQS queues based on EventBridge rules matching the routing decisions
@@ -97,8 +97,8 @@ This feature modernizes the existing SES email processing system by replacing th
 #### Acceptance Criteria
 
 1. WHEN the router processes an email THEN it SHALL query DynamoDB for routing rules using a hierarchical lookup strategy
-2. WHEN looking up routing rules for an email address THEN the system SHALL check in order: full address (foo+thing@example.com), normalized address (foo@example.com), domain wildcard (*@example.com), and global wildcard (*) with the first match taking precedence
-3. WHEN DynamoDB contains routing rules THEN they SHALL have separate fields for the routing action (e.g., "forward-to-gmail", "bounce") and the target parameter (e.g., "foo@example.com")
+2. WHEN looking up routing rules for an email address THEN the system SHALL check in order: full address (`foo+thing@example.com`), normalized address (`foo@example.com`), domain wildcard (`*@example.com`), and global wildcard (`*`) with the first match taking precedence
+3. WHEN DynamoDB contains routing rules THEN they SHALL have separate fields for the routing action (e.g., "forward-to-gmail", "bounce") and the target parameter (e.g., `foo@example.com`)
 4. WHEN the router enriches messages THEN it SHALL include both the routing action and target parameter from DynamoDB in the enriched message
 5. WHEN new routing rules are needed THEN they SHALL be addable to DynamoDB without code deployment
 6. WHEN the router processes emails THEN it SHALL support multiple actions per email recipient
@@ -130,4 +130,3 @@ This feature modernizes the existing SES email processing system by replacing th
 4. WHEN Lambda functions process messages THEN they SHALL have X-Ray tracing enabled and propagate trace context
 5. WHEN the system processes an email end-to-end THEN a complete X-Ray trace SHALL be available showing the entire processing pipeline
 6. WHEN X-Ray traces are generated THEN they SHALL include custom annotations for email metadata (message ID, recipient, action taken)
-

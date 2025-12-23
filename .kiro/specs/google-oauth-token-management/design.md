@@ -40,6 +40,7 @@ graph TB
 **Purpose**: Interactive script to perform OAuth refresh process using SSM-stored credentials
 
 **Key Functions**:
+
 - `retrieve_oauth_credentials()`: Fetch complete client credentials JSON from SSM
 - `perform_interactive_oauth_flow()`: Execute Google OAuth authorization flow with browser interaction
 - `store_refresh_token()`: Save new refresh token to SSM
@@ -47,10 +48,12 @@ graph TB
 - `setup_expiration_alarm()`: Create/update CloudWatch alarm for token expiration
 
 **SSM Parameters**:
+
 - `/ses-mail/{environment}/gmail-forwarder/oauth/client-credentials`: Complete Google OAuth client JSON file (SecureString)
 - `/ses-mail/{environment}/gmail-forwarder/oauth/refresh-token`: Current refresh token (SecureString)
 
 **Configuration**:
+
 - AWS credentials configured via CLI/environment
 - OAuth redirect URI: `http://localhost:8080/callback`
 - Temporary local web server for OAuth callback handling
@@ -61,17 +64,20 @@ graph TB
 **Purpose**: Process emails efficiently while handling token expiration gracefully
 
 **Key Changes**:
+
 - Remove token update logic
 - Implement access token caching
 - Add retry queue integration
 - Enhanced error handling for token expiration
 
 **New Functions**:
+
 - `generate_access_token()`: Create new access token from refresh token for each use
 - `queue_for_retry()`: Add failed messages to retry queue
 - `is_token_expired_error()`: Detect OAuth expiration errors
 
 **Token Strategy**:
+
 - Generate fresh access token for each email processing session
 - No caching - simple and reliable approach
 - Handle token expiration by queuing messages for retry
@@ -81,11 +87,13 @@ graph TB
 **Purpose**: Monitor refresh token expiration using CloudWatch alarms based on known expiration time
 
 **Implementation**:
+
 - Refresh script calculates exact expiration time (creation time + 7 days)
 - Refresh script creates/updates CloudWatch alarm to trigger 24 hours before expiration
 - No Lambda required - pure CloudWatch alarm based on timestamp comparison
 
 **CloudWatch Alarm Configuration**:
+
 - **Alarm Name**: `ses-mail-gmail-forwarder-token-expiring-{environment}`
 - **Metric**: Custom metric with token expiration timestamp
 - **Condition**: Current time > (expiration_time - 24 hours)
@@ -93,6 +101,7 @@ graph TB
 - **SNS Topic**: `ses-mail-gmail-forwarder-token-alerts-{environment}`
 
 **Refresh Script Responsibilities**:
+
 - Extract expiration time from the refresh token itself
 - Update CloudWatch alarm with new expiration timestamp from token
 - Publish one-time metric with expiration time for alarm evaluation
@@ -102,19 +111,21 @@ graph TB
 **Purpose**: Store and process failed email messages after successful token refresh
 
 **SQS Queue Configuration**:
+
 - **Queue Name**: `ses-mail-gmail-forwarder-retry-{environment}`
 - **Dead Letter Queue**: `ses-mail-gmail-forwarder-retry-dlq-{environment}`
 - **Message Body**: Complete original SES event that failed to process
-- **Message Attributes**: 
+- **Message Attributes**:
   - `original_timestamp`: When message first failed
   - `error_type`: Classification of failure (token_expired, rate_limit, etc.)
 - **Visibility Timeout**: 15 minutes
 - **Message Retention**: 14 days
 
 **Step Function for Retry Processing**:
+
 - **Name**: `ses-mail-gmail-forwarder-retry-processor-{environment}`
 - **Trigger**: Invoked by refresh script after successful token refresh
-- **Functionality**: 
+- **Functionality**:
   - Read all messages from SQS retry queue
   - For each message, invoke Gmail Forwarder Lambda with original SES event
   - Handle retries with exponential backoff (3 attempts max)
@@ -124,19 +135,22 @@ graph TB
 ### 5. Enhanced SSM Parameter Management
 
 **Parameter Structure**:
-```
+
+```plain
 /ses-mail/{environment}/gmail-forwarder/oauth/
 ├── client-credentials (SecureString) - Complete Google OAuth JSON
 └── refresh-token (SecureString)
 ```
 
 **Access Patterns**:
+
 - Refresh Script: Read client credentials, write refresh token, extract expiration from token payload
 - Gmail Forwarder: Read refresh token only
 
 ## Data Models
 
 ### OAuth Token Metadata
+
 ```python
 @dataclass
 class TokenMetadata:
@@ -161,6 +175,7 @@ class TokenMetadata:
 ### Retry Queue Message Structure
 
 **SQS Message Body**: Complete original SES event JSON that failed processing
+
 ```json
 {
   "Records": [
@@ -182,6 +197,7 @@ class TokenMetadata:
 ```
 
 **SQS Message Attributes**:
+
 ```python
 {
     "attempt_count": {"StringValue": "1", "DataType": "Number"},
@@ -192,6 +208,7 @@ class TokenMetadata:
 ```
 
 ### OAuth Client Credentials
+
 ```python
 @dataclass
 class OAuthCredentials:
@@ -233,12 +250,14 @@ class OAuthCredentials:
 ### Retry Logic
 
 **Exponential Backoff Strategy**:
+
 - Initial delay: 30 seconds
 - Multiplier: 2.0
 - Maximum delay: 15 minutes
 - Maximum attempts: 3
 
 **Failure Categories**:
+
 - **Transient**: Network timeouts, rate limits (retry immediately)
 - **Authentication**: Token expiration (queue for later retry)
 - **Permanent**: Invalid message format (send to dead letter queue)

@@ -3,6 +3,7 @@
 ## Overview
 
 Implement a Python DSL as the single source of truth for AWS Step Functions that generates both:
+
 1. YAML files for Terraform deployment
 2. Test contracts for pre-deployment validation using AWS TestState API
 
@@ -10,7 +11,7 @@ This eliminates drift between state machine definitions and test contracts.
 
 ## Architecture
 
-```
+```plain
 ┌─────────────────────────────────────┐
 │ Python DSL Definitions              │
 │ stepfunctions/token_monitor.py      │
@@ -32,7 +33,7 @@ Deployment          Pre-deploy Tests
 
 ## File Structure
 
-```
+```plain
 ses-mail/
 ├── stepfunctions/                    # NEW: DSL definitions (source of truth)
 │   ├── __init__.py
@@ -729,36 +730,36 @@ class TestTokenMonitor:
 # Add new target to generate Step Functions YAML
 .PHONY: generate-stepfunctions
 generate-stepfunctions:
-	@echo "Generating Step Functions YAML from DSL..."
-	@python3 scripts/generate_stepfunctions.py
+ @echo "Generating Step Functions YAML from DSL..."
+ @python3 scripts/generate_stepfunctions.py
 
 # Add new target to run Step Functions tests
 .PHONY: test-stepfunctions
 test-stepfunctions:
-	@echo "Running Step Functions unit tests..."
-	@AWS_PROFILE=$(AWS_PROFILE) pytest tests/stepfunctions/ -v
+ @echo "Running Step Functions unit tests..."
+ @AWS_PROFILE=$(AWS_PROFILE) pytest tests/stepfunctions/ -v
 
 # Update validate to include Step Functions generation
 validate: generate-stepfunctions
-	@echo "Validating Terraform configuration..."
-	# ... existing validation logic
+ @echo "Validating Terraform configuration..."
+ # ... existing validation logic
 
 # Update plan to generate YAML first
 plan: generate-stepfunctions
-	@echo "Creating Terraform plan..."
-	# ... existing plan logic
+ @echo "Creating Terraform plan..."
+ # ... existing plan logic
 
 # Update apply to generate YAML first
 apply: generate-stepfunctions
-	@echo "Applying Terraform changes..."
-	# ... existing apply logic
+ @echo "Applying Terraform changes..."
+ # ... existing apply logic
 ```
 
 ## Phase 6: Dependencies
 
 ### File: `requirements.txt` (add)
 
-```
+```plain
 # Existing dependencies
 google-auth>=2.34.0
 google-auth-oauthlib>=1.2.1
@@ -779,6 +780,7 @@ PyYAML>=6.0.1
 ### TDD Workflow
 
 For each component:
+
 1. Write failing test first
 2. Implement minimal code to pass test
 3. Refactor
@@ -826,6 +828,7 @@ For each component:
 ## Migration Path
 
 ### Phase 1: Token Monitor (Using TDD)
+
 1. ✅ Use `superpowers:test-driven-development` skill to build DSL library
 2. ✅ Write tests for core.py, then implement
 3. ✅ Write tests for states.py, then implement
@@ -840,6 +843,7 @@ For each component:
 12. ✅ Run `make test-stepfunctions` to validate
 
 ### Phase 2: Retry Processor (Week 2)
+
 1. Add MapState support to DSL (already in states.py)
 2. Define retry_processor.py in DSL
 3. Update generate_stepfunctions.py
@@ -848,6 +852,7 @@ For each component:
 6. Validate all tests pass
 
 ### Phase 3: Documentation & Cleanup (Week 3)
+
 1. Update CLAUDE.md with DSL workflow
 2. Document contract derivation approach
 3. Add examples to README
@@ -857,6 +862,7 @@ For each component:
 ## Validation Strategy
 
 ### Before Each Commit
+
 1. Run `make generate-stepfunctions`
 2. Run `git diff terraform/modules/ses-mail/stepfunctions/`
 3. Verify generated YAML matches hand-written (during migration)
@@ -864,6 +870,7 @@ For each component:
 5. Run `make plan ENV=test >/dev/null` (no Terraform changes)
 
 ### Regression Testing
+
 - Keep existing integration_test.py running
 - Pre-deployment unit tests catch logic bugs
 - Post-deployment integration tests catch AWS integration issues
@@ -881,6 +888,7 @@ For each component:
 ## Critical Files
 
 **New files:**
+
 - `stepfunctions_dsl/core.py` - DSL base classes
 - `stepfunctions_dsl/states.py` - State implementations
 - `stepfunctions_dsl/error_handling.py` - Retry/Catch
@@ -890,10 +898,12 @@ For each component:
 - `tests/stepfunctions/test_token_monitor.py` - Tests
 
 **Modified files:**
+
 - `Makefile` - Add generate + test targets
 - `requirements.txt` - Add pytest, PyYAML
 
 **Generated files (keep in git during migration):**
+
 - `terraform/modules/ses-mail/stepfunctions/token-monitor.yaml`
 - `terraform/modules/ses-mail/stepfunctions/retry-processor.yaml`
 
@@ -923,19 +933,22 @@ A: Token monitor is simpler (93 lines vs 180 lines, no Map state). Validates the
 
 ### AWS TestState API Key Capabilities
 
-From https://docs.aws.amazon.com/step-functions/latest/dg/test-state-isolation.html:
+From <https://docs.aws.amazon.com/step-functions/latest/dg/test-state-isolation.html>:
 
 **Inspection Levels:**
+
 - `INFO` - Basic output/error (default)
 - `DEBUG` - Shows data flow through InputPath, Parameters, ResultPath, OutputPath
 - `TRACE` - HTTP request/response (HTTP Task only)
 
 **Validation Modes:**
+
 - `STRICT` - Enforces field naming, size, shape, type (default - use this)
 - `PRESENT` - Validates only present fields
 - `NONE` - Skips validation
 
 **Mock Format:**
+
 ```python
 # Success mock
 {"result": "{\"key\": \"value\"}"}  # Note: value is JSON string
@@ -945,6 +958,7 @@ From https://docs.aws.amazon.com/step-functions/latest/dg/test-state-isolation.h
 ```
 
 **What Can Be Tested:**
+
 - ✅ Data transformations (InputPath, Parameters, ResultPath, OutputPath)
 - ✅ Error handling (Catch/Retry blocks)
 - ✅ Map state logic (requires mocking iterator results)
@@ -954,6 +968,7 @@ From https://docs.aws.amazon.com/step-functions/latest/dg/test-state-isolation.h
 - ✅ Retry backoff calculations
 
 **What Cannot Be Tested:**
+
 - ❌ Cross-state execution flow (can chain tests manually)
 - ❌ JSONata expression evaluation (requires actual Step Functions runtime)
 - ❌ Real AWS service behavior (that's what integration tests are for)
@@ -961,6 +976,7 @@ From https://docs.aws.amazon.com/step-functions/latest/dg/test-state-isolation.h
 ### Current Step Functions
 
 **token-monitor.yaml** (93 lines):
+
 - Uses JSONata query language
 - States: GetTokenParameter, CalculateExpiration, PublishExpirationMetric, MonitoringComplete, HandleMissingParameter, HandleParameterError, HandleMetricPublishError, PublishErrorMetric, MonitoringFailed
 - AWS integrations: SSM GetParameter, CloudWatch PutMetricData
@@ -968,6 +984,7 @@ From https://docs.aws.amazon.com/step-functions/latest/dg/test-state-isolation.h
 - Terraform variables: `${parameter_name}`, `${environment}`
 
 **retry-processor.yaml** (180 lines):
+
 - Uses standard JSONPath
 - States: ReadMessagesFromQueue, CheckIfMessagesExist, NoMessagesToProcess, ProcessMessages (Map), ParseMessageBody, InvokeGmailForwarder, DeleteMessageFromQueue, MessageProcessedSuccessfully, InvocationFailed, DeleteFailedMessage, MessageProcessingComplete, CheckForMoreMessages, AllMessagesProcessed, PublishCompletionMetrics, MetricsPublishFailed, RetryProcessingComplete, HandleQueueReadError, QueueReadFailed
 - AWS integrations: SQS ReceiveMessage, SQS DeleteMessage, Lambda Invoke, CloudWatch PutMetricData
@@ -1001,6 +1018,7 @@ resource "aws_sfn_state_machine" "token_monitor" {
 ```
 
 **Key points:**
+
 - Uses `templatefile()` to inject Terraform variables
 - Wraps with `yamldecode()` then `jsonencode()` (YAML → JSON)
 - Generated YAML must preserve `${variable}` placeholders
@@ -1008,6 +1026,7 @@ resource "aws_sfn_state_machine" "token_monitor" {
 ### Future Enhancements
 
 **Phase 4: Advanced Features** (Optional, post-MVP)
+
 1. Contract validation with Pydantic models
 2. Mock fixture generation from contracts
 3. State machine visualization (generate diagrams from DSL)
@@ -1016,6 +1035,7 @@ resource "aws_sfn_state_machine" "token_monitor" {
 6. State machine composition (reusable sub-workflows)
 
 **Integration with Existing Workflows:**
+
 - Add to `.kiro/specs/` if formalized into a project
 - Update CLAUDE.md with DSL workflow documentation
 - Create developer guide: "How to Add a New Step Function"
@@ -1023,6 +1043,7 @@ resource "aws_sfn_state_machine" "token_monitor" {
 ### Testing Strategy
 
 **Pre-deployment (New - TestState API):**
+
 - Unit test individual states in isolation
 - Mock AWS service responses
 - Validate data transformations
@@ -1030,6 +1051,7 @@ resource "aws_sfn_state_machine" "token_monitor" {
 - Fast feedback (seconds)
 
 **Post-deployment (Existing - integration_test.py):**
+
 - End-to-end pipeline validation
 - Real AWS service integrations
 - X-Ray trace verification
@@ -1037,6 +1059,7 @@ resource "aws_sfn_state_machine" "token_monitor" {
 - Comprehensive but slower (minutes)
 
 **Both are necessary:**
+
 - Unit tests catch logic bugs early
 - Integration tests catch AWS configuration issues
 - Together provide comprehensive coverage
@@ -1053,11 +1076,13 @@ resource "aws_sfn_state_machine" "token_monitor" {
 ### Dependencies
 
 **Python packages required:**
+
 - `pytest>=7.4.0` - Testing framework
 - `PyYAML>=6.0.1` - YAML generation
 - `boto3` - Already present (AWS SDK)
 
 **AWS CLI requirements:**
+
 - AWS CLI v2 with Step Functions support
 - `aws stepfunctions test-state` command available
 - `AWS_PROFILE=ses-mail` configured with permissions:
@@ -1065,27 +1090,32 @@ resource "aws_sfn_state_machine" "token_monitor" {
   - `iam:PassRole` (optional if using mocks only)
 
 **System requirements:**
+
 - Python 3.13 (current project version)
 - Git (for verifying generated YAML)
 
 ### Risk Mitigation
 
-**Risk: Generated YAML differs from hand-written**
+#### Risk: Generated YAML differs from hand-written
+
 - Mitigation: Keep generated YAML in git during migration
 - Validation: `git diff` after generation, Terraform plan should show no changes
 - Recovery: Revert to manual YAML if needed
 
-**Risk: JSONata expressions not testable with TestState**
+#### Risk: JSONata expressions not testable with TestState
+
 - Mitigation: Test state structure, not JSONata evaluation
 - Acceptance: Integration tests validate JSONata behavior
 - Alternative: Document known limitation
 
-**Risk: DSL becomes too complex**
+#### Risk: DSL becomes too complex
+
 - Mitigation: Start minimal, add features only as needed
 - YAGNI principle: Don't add state types we don't use
 - Review: Reassess after token-monitor migration
 
-**Risk: Learning curve for team**
+#### Risk: Learning curve for team
+
 - Mitigation: Comprehensive examples in plan
 - Documentation: Clear developer guide
 - Migration: Start with one state machine, prove value
