@@ -378,7 +378,8 @@ def store_refresh_token(environment: str, refresh_token: str) -> datetime:
     token_data = {
         "token": refresh_token,
         "created_at": created_at.isoformat() + "Z",
-        "expires_at": expires_at.isoformat() + "Z"
+        "expires_at": expires_at.isoformat() + "Z",
+        "expires_at_epoch": int(expires_at.timestamp())
     }
 
     try:
@@ -449,93 +450,6 @@ def store_refresh_token(environment: str, refresh_token: str) -> datetime:
     except Exception as e:
         logger.exception("Unexpected error storing refresh token")
         raise RuntimeError(f"Unexpected error storing token: {e}")
-
-
-def setup_expiration_alarm(environment: str, expires_at: datetime) -> None:
-    """
-    Publish CloudWatch metric for token expiration monitoring.
-
-    Publishes a metric showing the number of hours until the refresh token expires.
-    The CloudWatch alarm (created by Terraform) will trigger when this value falls
-    below 24 hours.
-
-    Args:
-        environment: Environment name (e.g., 'test', 'prod')
-        expires_at: The datetime when the refresh token will expire
-
-    Raises:
-        RuntimeError: If metric cannot be published to CloudWatch
-    """
-    logger.info("Publishing token expiration metric to CloudWatch")
-
-    # Calculate hours until expiration
-    now = datetime.utcnow()
-    time_until_expiration = expires_at - now
-    hours_until_expiration = time_until_expiration.total_seconds() / 3600
-
-    # Namespace for custom metrics
-    namespace = f"SESMail/{environment}"
-    metric_name = "TokenHoursUntilExpiration"
-
-    try:
-        cloudwatch_client = boto3.client('cloudwatch')
-
-        cloudwatch_client.put_metric_data(
-            Namespace=namespace,
-            MetricData=[
-                {
-                    'MetricName': metric_name,
-                    'Value': hours_until_expiration,
-                    'Unit': 'None',
-                    'Timestamp': now
-                }
-            ]
-        )
-
-        logger.info(
-            "Successfully published token expiration metric to CloudWatch",
-            extra={
-                'namespace': namespace,
-                'metric_name': metric_name,
-                'hours_until_expiration': round(hours_until_expiration, 2),
-                'expires_at': expires_at.isoformat()
-            }
-        )
-
-        print(f"Published CloudWatch metric:")
-        print(f"  Namespace: {namespace}")
-        print(f"  Metric:    {metric_name}")
-        print(f"  Value:     {round(hours_until_expiration, 2)} hours")
-        print(f"\nCloudWatch alarm will trigger when < 24 hours remaining.")
-
-    except ClientError as e:
-        error_code = e.response.get('Error', {}).get('Code', 'Unknown')
-
-        if error_code == 'AccessDeniedException':
-            raise RuntimeError(
-                f"Permission denied publishing CloudWatch metric.\n\n"
-                f"Ensure your AWS credentials have the following permissions:\n"
-                f"  - cloudwatch:PutMetricData\n\n"
-                f"Current AWS profile: {boto3.Session().profile_name or 'default'}"
-            )
-        else:
-            raise RuntimeError(
-                f"AWS error publishing CloudWatch metric: {error_code}\n"
-                f"Details: {e}"
-            )
-
-    except NoCredentialsError:
-        raise RuntimeError(
-            "No AWS credentials configured.\n\n"
-            "Configure AWS credentials using one of:\n"
-            "  - AWS_PROFILE=ses-mail environment variable\n"
-            "  - ~/.aws/credentials file\n"
-            "  - AWS IAM role (if running on EC2/Lambda)"
-        )
-
-    except Exception as e:
-        logger.exception("Unexpected error publishing CloudWatch metric")
-        raise RuntimeError(f"Unexpected error publishing metric: {e}")
 
 
 def trigger_retry_processing(environment: str) -> None:
@@ -684,12 +598,9 @@ def main():
         gmail_credentials = perform_interactive_oauth_flow(oauth_credentials)
         logger.info("OAuth authorization completed - obtained refresh token")
 
-        # Task 3.3: Store refresh token and setup expiration monitoring
+        # Task 3.3: Store refresh token
         expires_at = store_refresh_token(args.env, gmail_credentials.refresh_token)
         logger.info("Refresh token stored successfully in SSM")
-
-        setup_expiration_alarm(args.env, expires_at)
-        logger.info("CloudWatch expiration metric published successfully")
 
         # Task 3.4: Trigger retry processing
         trigger_retry_processing(args.env)

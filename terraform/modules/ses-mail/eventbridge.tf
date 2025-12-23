@@ -372,3 +372,80 @@ resource "aws_cloudwatch_metric_alarm" "eventbridge_bouncer_failures" {
     Service     = "ses-mail"
   }
 }
+
+# ===========================
+# EventBridge Rule for Token Expiration Monitoring
+# ===========================
+
+# IAM role for EventBridge to invoke Step Functions
+resource "aws_iam_role" "eventbridge_stepfunctions" {
+  name = "ses-mail-eventbridge-stepfunctions-${var.environment}"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "events.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+
+  tags = {
+    Name        = "ses-mail-eventbridge-stepfunctions-${var.environment}"
+    Environment = var.environment
+    Service     = "ses-mail"
+    Purpose     = "EventBridge role to invoke Step Functions"
+  }
+}
+
+# IAM policy for EventBridge to start Step Function executions
+resource "aws_iam_role_policy" "eventbridge_stepfunctions_access" {
+  name = "stepfunctions-start-execution"
+  role = aws_iam_role.eventbridge_stepfunctions.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "states:StartExecution"
+        ]
+        Resource = aws_sfn_state_machine.token_monitor.arn
+      }
+    ]
+  })
+}
+
+# EventBridge rule to trigger token monitor every 5 minutes
+resource "aws_cloudwatch_event_rule" "token_monitor_schedule" {
+  name                = "ses-mail-token-monitor-schedule-${var.environment}"
+  description         = "Trigger Gmail token expiration monitoring every 5 minutes"
+  schedule_expression = "rate(5 minutes)"
+  state               = "ENABLED"
+
+  tags = {
+    Name        = "ses-mail-token-monitor-schedule-${var.environment}"
+    Environment = var.environment
+    Service     = "ses-mail"
+    Purpose     = "Schedule token expiration monitoring"
+  }
+}
+
+# EventBridge target to invoke token monitor Step Function
+resource "aws_cloudwatch_event_target" "token_monitor" {
+  rule      = aws_cloudwatch_event_rule.token_monitor_schedule.name
+  target_id = "token-monitor-stepfunction"
+  arn       = aws_sfn_state_machine.token_monitor.arn
+  role_arn  = aws_iam_role.eventbridge_stepfunctions.arn
+
+  retry_policy {
+    maximum_event_age_in_seconds = 300
+    maximum_retry_attempts       = 2
+  }
+}
+

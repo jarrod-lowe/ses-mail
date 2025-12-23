@@ -277,6 +277,50 @@ EOT
           view    = "pie"
           title   = "Routing Actions Distribution"
         }
+      },
+      # Gmail OAuth Token Expiration Monitoring
+      {
+        type   = "metric"
+        width  = 12
+        height = 6
+        x      = 12
+        y      = 38
+        properties = {
+          metrics = [
+            ["SESMail/${var.environment}", "TokenSecondsUntilExpiration", { stat = "Minimum", label = "Seconds Until Expiration", yAxis = "left" }],
+            [".", "TokenMonitoringErrors", { stat = "Sum", label = "Monitoring Errors", yAxis = "right" }]
+          ]
+          period = 300
+          stat   = "Minimum"
+          region = var.aws_region
+          title  = "Gmail OAuth Token Expiration"
+          annotations = {
+            horizontal = [
+              {
+                label = "Critical (6h)"
+                value = 21600
+                color = "#d62728"
+              },
+              {
+                label = "Warning (24h)"
+                value = 86400
+                color = "#ff7f0e"
+              }
+            ]
+          }
+          yAxis = {
+            left = {
+              min       = 0
+              label     = "Seconds"
+              showUnits = false
+            }
+            right = {
+              min       = 0
+              label     = "Count"
+              showUnits = false
+            }
+          }
+        }
       }
     ]
   })
@@ -402,18 +446,73 @@ resource "aws_cloudwatch_metric_alarm" "lambda_bouncer_errors" {
   ok_actions    = [var.alarm_sns_topic_arn]
 }
 
-# CloudWatch Alarm for Gmail OAuth refresh token expiration
-resource "aws_cloudwatch_metric_alarm" "gmail_token_expiring" {
-  alarm_name          = "ses-mail-gmail-forwarder-token-expiring-${var.environment}"
+# CloudWatch Alarm for Gmail OAuth refresh token expiration (24 hour warning)
+resource "aws_cloudwatch_metric_alarm" "gmail_token_expiring_warning" {
+  alarm_name          = "ses-mail-gmail-token-expiring-warning-${var.environment}"
+  comparison_operator = "LessThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "TokenSecondsUntilExpiration"
+  namespace           = "SESMail/${var.environment}"
+  period              = 300 # 5 minutes
+  statistic           = "Minimum"
+  threshold           = 86400 # Alert when < 24 hours (86400 seconds) remaining
+  alarm_description   = "WARNING: Gmail OAuth refresh token expires in less than 24 hours (${var.environment}). Run refresh_oauth_token.py to renew."
+  treat_missing_data  = "breaching"
+
+  alarm_actions = [aws_sns_topic.gmail_token_alerts.arn]
+  ok_actions    = [aws_sns_topic.gmail_token_alerts.arn]
+}
+
+# CloudWatch Alarm for Gmail OAuth refresh token expiration (6 hour critical)
+resource "aws_cloudwatch_metric_alarm" "gmail_token_expiring_critical" {
+  alarm_name          = "ses-mail-gmail-token-expiring-critical-${var.environment}"
   comparison_operator = "LessThanThreshold"
   evaluation_periods  = 1
-  metric_name         = "TokenHoursUntilExpiration"
+  metric_name         = "TokenSecondsUntilExpiration"
   namespace           = "SESMail/${var.environment}"
-  period              = 3600 # 1 hour
+  period              = 300 # 5 minutes
   statistic           = "Minimum"
-  threshold           = 24 # Alert when < 24 hours remaining
-  alarm_description   = "Gmail OAuth refresh token expires in less than 24 hours (${var.environment})"
+  threshold           = 21600 # Alert when < 6 hours (21600 seconds) remaining
+  alarm_description   = "CRITICAL: Gmail OAuth refresh token expires in less than 6 hours (${var.environment}). URGENT: Run refresh_oauth_token.py immediately!"
+  treat_missing_data  = "breaching"
+
+  alarm_actions = [aws_sns_topic.gmail_token_alerts.arn]
+  ok_actions    = [aws_sns_topic.gmail_token_alerts.arn]
+}
+
+# CloudWatch Alarm for token monitoring errors
+resource "aws_cloudwatch_metric_alarm" "token_monitoring_errors" {
+  alarm_name          = "ses-mail-token-monitoring-errors-${var.environment}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "TokenMonitoringErrors"
+  namespace           = "SESMail/${var.environment}"
+  period              = 300
+  statistic           = "Sum"
+  threshold           = 0
+  alarm_description   = "Token expiration monitoring system is failing (${var.environment}). Check Step Function logs."
   treat_missing_data  = "notBreaching"
+
+  alarm_actions = [aws_sns_topic.gmail_token_alerts.arn]
+  ok_actions    = [aws_sns_topic.gmail_token_alerts.arn]
+}
+
+# CloudWatch Alarm for Step Function execution failures
+resource "aws_cloudwatch_metric_alarm" "token_monitor_stepfunction_failed" {
+  alarm_name          = "ses-mail-token-monitor-stepfunction-failed-${var.environment}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "ExecutionsFailed"
+  namespace           = "AWS/States"
+  period              = 300
+  statistic           = "Sum"
+  threshold           = 2
+  alarm_description   = "Token monitoring Step Function executions are failing (${var.environment})"
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    StateMachineArn = aws_sfn_state_machine.token_monitor.arn
+  }
 
   alarm_actions = [aws_sns_topic.gmail_token_alerts.arn]
   ok_actions    = [aws_sns_topic.gmail_token_alerts.arn]
