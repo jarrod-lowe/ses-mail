@@ -19,7 +19,10 @@ When writing terraform, never use `jsonencode` where an
 # Plan changes for test environment
 AWS_PROFILE=ses-mail make plan ENV=test >/dev/null
 
-# Apply changes for test environment
+# Show the plan for test environment (will run plan if required)
+AWS_PROFILE=ses-mail make show-plan ENV=test >/dev/null
+
+# Apply changes for test environment (will run plan if required)
 AWS_PROFILE=ses-mail make apply ENV=test >/dev/null
 
 # Validate configuration

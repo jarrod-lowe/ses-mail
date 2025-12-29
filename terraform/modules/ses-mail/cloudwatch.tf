@@ -455,6 +455,23 @@ resource "aws_cloudwatch_metric_alarm" "gmail_token_expiring_critical" {
   ok_actions    = [var.alarm_sns_topic_arn]
 }
 
+# CloudWatch Alarm for Gmail OAuth refresh token EXPIRED
+resource "aws_cloudwatch_metric_alarm" "gmail_token_expiring_expired" {
+  alarm_name          = "ses-mail-gmail-token-expiring-expired-${var.environment}"
+  comparison_operator = "LessThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "TokenSecondsUntilExpiration"
+  namespace           = "SESMail/${var.environment}"
+  period              = 300
+  statistic           = "Minimum"
+  threshold           = 0
+  alarm_description   = "URGENT: Gmail OAuth refresh token has EXPIRED (${var.environment}). Email forwarding is FAILING. Run refresh_oauth_token.py immediately!"
+  treat_missing_data  = "breaching"
+
+  alarm_actions = [var.alarm_sns_topic_arn]
+  ok_actions    = [var.alarm_sns_topic_arn]
+}
+
 # CloudWatch Alarm for token monitoring errors
 resource "aws_cloudwatch_metric_alarm" "token_monitoring_errors" {
   alarm_name          = "ses-mail-token-monitoring-errors-${var.environment}"

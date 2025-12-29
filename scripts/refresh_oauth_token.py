@@ -23,7 +23,7 @@ import json
 import logging
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, List
 
 import boto3
@@ -371,14 +371,14 @@ def store_refresh_token(environment: str, refresh_token: str) -> datetime:
     logger.info(f"Storing refresh token to SSM: {parameter_name}")
 
     # Calculate timestamps
-    created_at = datetime.utcnow()
+    created_at = datetime.now(timezone.utc)
     expires_at = created_at + timedelta(days=7)  # Google testing mode limitation
 
     # Create JSON payload with token and metadata
     token_data = {
         "token": refresh_token,
-        "created_at": created_at.isoformat() + "Z",
-        "expires_at": expires_at.isoformat() + "Z",
+        "created_at": created_at.isoformat(),
+        "expires_at": expires_at.isoformat(),
         "expires_at_epoch": int(expires_at.timestamp())
     }
 
