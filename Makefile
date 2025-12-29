@@ -1,4 +1,4 @@
-.PHONY: help package init plan apply plan-destroy destroy clean backup-tfvars restore-tfvars fmt validate outputs
+.PHONY: help package init plan show-plan apply plan-destroy destroy clean backup-tfvars restore-tfvars fmt validate outputs
 
 # Environment selection (test or prod)
 ENV ?= test
@@ -31,6 +31,7 @@ help:
 	@echo "  make package ENV=<env>       - Package Lambda function with dependencies"
 	@echo "  make init ENV=<env>          - Initialize Terraform (creates state bucket)"
 	@echo "  make plan ENV=<env>          - Create Terraform plan file"
+	@echo "  make show-plan ENV=<env>     - Show the Terraform plan"
 	@echo "  make apply ENV=<env>         - Apply the plan file (requires plan)"
 	@echo "  make plan-destroy ENV=<env>  - Create destroy plan file"
 	@echo "  make destroy ENV=<env>       - Apply the destroy plan (requires plan-destroy)"
@@ -76,6 +77,11 @@ $(ENV_DIR)/terraform.plan: $(ENV_DIR)/.terraform $(ENV_DIR)/*.tf $(MODULE_DIR)/*
 	@echo "Plan created: $(ENV_DIR)/terraform.plan"
 
 plan: $(ENV_DIR)/terraform.plan
+
+# Show the plan file
+show-plan: $(ENV_DIR)/terraform.plan
+	@echo "Showing Terraform plan for $(ENV) environment..."
+	cd $(ENV_DIR) && terraform show terraform.plan
 
 # Apply the plan file
 apply: $(ENV_DIR)/terraform.plan

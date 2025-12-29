@@ -263,8 +263,8 @@ resource "aws_cloudwatch_metric_alarm" "stepfunction_retry_processor_failed" {
     StateMachineArn = aws_sfn_state_machine.retry_processor.arn
   }
 
-  alarm_actions = [aws_sns_topic.gmail_token_alerts.arn]
-  ok_actions    = [aws_sns_topic.gmail_token_alerts.arn]
+  alarm_actions = [var.alarm_sns_topic_arn]
+  ok_actions    = [var.alarm_sns_topic_arn]
 
   tags = {
     Name        = "ses-mail-stepfunction-retry-processor-failed-${var.environment}"
@@ -291,8 +291,8 @@ resource "aws_cloudwatch_metric_alarm" "stepfunction_retry_processor_timeout" {
     StateMachineArn = aws_sfn_state_machine.retry_processor.arn
   }
 
-  alarm_actions = [aws_sns_topic.gmail_token_alerts.arn]
-  ok_actions    = [aws_sns_topic.gmail_token_alerts.arn]
+  alarm_actions = [var.alarm_sns_topic_arn]
+  ok_actions    = [var.alarm_sns_topic_arn]
 
   tags = {
     Name        = "ses-mail-stepfunction-retry-processor-timeout-${var.environment}"
@@ -319,8 +319,8 @@ resource "aws_cloudwatch_metric_alarm" "stepfunction_retry_processor_throttled" 
     StateMachineArn = aws_sfn_state_machine.retry_processor.arn
   }
 
-  alarm_actions = [aws_sns_topic.gmail_token_alerts.arn]
-  ok_actions    = [aws_sns_topic.gmail_token_alerts.arn]
+  alarm_actions = [var.alarm_sns_topic_arn]
+  ok_actions    = [var.alarm_sns_topic_arn]
 
   tags = {
     Name        = "ses-mail-stepfunction-retry-processor-throttled-${var.environment}"

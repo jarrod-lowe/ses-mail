@@ -41,15 +41,3 @@ resource "aws_sns_topic_policy" "email_processing" {
 
   policy = data.aws_iam_policy_document.sns_email_processing_policy.json
 }
-
-# SNS topic for Gmail OAuth token alerts and retry processing notifications
-resource "aws_sns_topic" "gmail_token_alerts" {
-  name = "ses-mail-gmail-forwarder-token-alerts-${var.environment}"
-
-  tags = {
-    Name        = "ses-mail-gmail-forwarder-token-alerts-${var.environment}"
-    Environment = var.environment
-    Service     = "ses-mail"
-    Purpose     = "Gmail OAuth token expiration and retry processing alerts"
-  }
-}

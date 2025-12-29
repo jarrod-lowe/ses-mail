@@ -434,8 +434,8 @@ resource "aws_cloudwatch_metric_alarm" "gmail_token_expiring_warning" {
   alarm_description   = "WARNING: Gmail OAuth refresh token expires in less than 24 hours (${var.environment}). Run refresh_oauth_token.py to renew."
   treat_missing_data  = "breaching"
 
-  alarm_actions = [aws_sns_topic.gmail_token_alerts.arn]
-  ok_actions    = [aws_sns_topic.gmail_token_alerts.arn]
+  alarm_actions = [var.alarm_sns_topic_arn]
+  ok_actions    = [var.alarm_sns_topic_arn]
 }
 
 # CloudWatch Alarm for Gmail OAuth refresh token expiration (6 hour critical)
@@ -451,8 +451,8 @@ resource "aws_cloudwatch_metric_alarm" "gmail_token_expiring_critical" {
   alarm_description   = "CRITICAL: Gmail OAuth refresh token expires in less than 6 hours (${var.environment}). URGENT: Run refresh_oauth_token.py immediately!"
   treat_missing_data  = "breaching"
 
-  alarm_actions = [aws_sns_topic.gmail_token_alerts.arn]
-  ok_actions    = [aws_sns_topic.gmail_token_alerts.arn]
+  alarm_actions = [var.alarm_sns_topic_arn]
+  ok_actions    = [var.alarm_sns_topic_arn]
 }
 
 # CloudWatch Alarm for token monitoring errors
@@ -468,8 +468,8 @@ resource "aws_cloudwatch_metric_alarm" "token_monitoring_errors" {
   alarm_description   = "Token expiration monitoring system is failing (${var.environment}). Check Step Function logs."
   treat_missing_data  = "notBreaching"
 
-  alarm_actions = [aws_sns_topic.gmail_token_alerts.arn]
-  ok_actions    = [aws_sns_topic.gmail_token_alerts.arn]
+  alarm_actions = [var.alarm_sns_topic_arn]
+  ok_actions    = [var.alarm_sns_topic_arn]
 }
 
 # CloudWatch Alarm for Step Function execution failures
@@ -489,6 +489,6 @@ resource "aws_cloudwatch_metric_alarm" "token_monitor_stepfunction_failed" {
     StateMachineArn = aws_sfn_state_machine.token_monitor.arn
   }
 
-  alarm_actions = [aws_sns_topic.gmail_token_alerts.arn]
-  ok_actions    = [aws_sns_topic.gmail_token_alerts.arn]
+  alarm_actions = [var.alarm_sns_topic_arn]
+  ok_actions    = [var.alarm_sns_topic_arn]
 }
