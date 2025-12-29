@@ -4,30 +4,6 @@ resource "aws_cloudwatch_dashboard" "ses_mail" {
 
   dashboard_body = jsonencode({
     widgets = [
-      # Email Processing Overview
-      {
-        type   = "metric"
-        width  = 12
-        height = 6
-        x      = 0
-        y      = 0
-        properties = {
-          metrics = [
-            ["SESMail/${var.environment}", "EmailsAccepted", { stat = "Sum", label = "Accepted" }],
-            [".", "EmailsSpam", { stat = "Sum", label = "Spam" }],
-            [".", "EmailsVirus", { stat = "Sum", label = "Virus" }]
-          ]
-          period = 300
-          stat   = "Sum"
-          region = var.aws_region
-          title  = "Email Processing Overview"
-          yAxis = {
-            left = {
-              min = 0
-            }
-          }
-        }
-      },
       # Handler Success/Failure Rates
       {
         type   = "metric"
