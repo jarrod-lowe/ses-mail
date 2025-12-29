@@ -262,8 +262,9 @@ EOT
         y      = 38
         properties = {
           metrics = [
-            ["SESMail/${var.environment}", "TokenSecondsUntilExpiration", { stat = "Minimum", label = "Seconds Until Expiration", yAxis = "left" }],
-            [".", "TokenMonitoringErrors", { stat = "Sum", label = "Monitoring Errors", yAxis = "right" }]
+            ["SESMail/${var.environment}", "TokenSecondsUntilExpiration", { stat = "Minimum", id = "m1", visible = false }],
+            [{ expression = "m1/3600", label = "Hours Until Expiration", id = "e1", yAxis = "left" }],
+            ["SESMail/${var.environment}", "TokenMonitoringErrors", { stat = "Sum", label = "Monitoring Errors", id = "m2", yAxis = "right" }]
           ]
           period = 300
           stat   = "Minimum"
@@ -273,12 +274,12 @@ EOT
             horizontal = [
               {
                 label = "Critical (6h)"
-                value = 21600
+                value = 6
                 color = "#d62728"
               },
               {
                 label = "Warning (24h)"
-                value = 86400
+                value = 24
                 color = "#ff7f0e"
               }
             ]
@@ -286,7 +287,7 @@ EOT
           yAxis = {
             left = {
               min       = 0
-              label     = "Seconds"
+              label     = "Hours"
               showUnits = false
             }
             right = {
