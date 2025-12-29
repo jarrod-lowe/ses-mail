@@ -46,19 +46,28 @@ help:
 	@echo "  make plan ENV=prod"
 	@echo ""
 
-# Package Lambda functions with dependencies
-$(MODULE_DIR)/lambda/package: requirements.txt $(MODULE_DIR)/lambda/router_enrichment.py $(MODULE_DIR)/lambda/gmail_forwarder.py $(MODULE_DIR)/lambda/bouncer.py $(MODULE_DIR)/lambda/smtp_credential_manager.py
-	@echo "Packaging Lambda functions with dependencies..."
-	@rm -rf $(MODULE_DIR)/lambda/package
-	@mkdir -p $(MODULE_DIR)/lambda/package
-	@pip3 install -q -r requirements.txt -t $(MODULE_DIR)/lambda/package
-	@cp $(MODULE_DIR)/lambda/router_enrichment.py $(MODULE_DIR)/lambda/package/
-	@cp $(MODULE_DIR)/lambda/gmail_forwarder.py $(MODULE_DIR)/lambda/package/
-	@cp $(MODULE_DIR)/lambda/bouncer.py $(MODULE_DIR)/lambda/package/
-	@cp $(MODULE_DIR)/lambda/smtp_credential_manager.py $(MODULE_DIR)/lambda/package/
-	@echo "Lambda package created"
+# Build Lambda layers with dependencies
+# Shared layer: boto3, aws_xray_sdk, aws-lambda-powertools (used by all lambdas)
+$(MODULE_DIR)/lambda/layer/shared/python: $(MODULE_DIR)/lambda/layer/shared/requirements.txt
+	@echo "Building shared Lambda layer..."
+	@rm -rf $(MODULE_DIR)/lambda/layer/shared/python
+	@mkdir -p $(MODULE_DIR)/lambda/layer/shared/python
+	@pip3 install -q -r $(MODULE_DIR)/lambda/layer/shared/requirements.txt -t $(MODULE_DIR)/lambda/layer/shared/python
+	@echo "Shared layer created"
 
-package: $(MODULE_DIR)/lambda/package
+# Gmail layer: Google API dependencies (only for gmail_forwarder)
+$(MODULE_DIR)/lambda/layer/gmail/python: $(MODULE_DIR)/lambda/layer/gmail/requirements.txt
+	@echo "Building Gmail Lambda layer..."
+	@rm -rf $(MODULE_DIR)/lambda/layer/gmail/python
+	@mkdir -p $(MODULE_DIR)/lambda/layer/gmail/python
+	@pip3 install -q -r $(MODULE_DIR)/lambda/layer/gmail/requirements.txt -t $(MODULE_DIR)/lambda/layer/gmail/python
+	@echo "Gmail layer created"
+
+# Build all layers
+layers: $(MODULE_DIR)/lambda/layer/shared/python $(MODULE_DIR)/lambda/layer/gmail/python
+
+# Legacy package target (for backwards compatibility, now builds layers)
+package: layers
 
 # Initialize Terraform (depends on state bucket existing)
 $(ENV_DIR)/.terraform: $(MODULE_DIR)/scripts/ensure-state-bucket.sh $(ENV_DIR)/terraform.tfvars terraform/.fmt
@@ -71,7 +80,7 @@ $(ENV_DIR)/.terraform: $(MODULE_DIR)/scripts/ensure-state-bucket.sh $(ENV_DIR)/t
 init: $(ENV_DIR)/.terraform
 
 # Create plan file
-$(ENV_DIR)/terraform.plan: $(ENV_DIR)/.terraform $(ENV_DIR)/*.tf $(MODULE_DIR)/*.tf $(MODULE_DIR)/lambda/package
+$(ENV_DIR)/terraform.plan: $(ENV_DIR)/.terraform $(ENV_DIR)/*.tf $(MODULE_DIR)/*.tf $(MODULE_DIR)/lambda/layer/shared/python $(MODULE_DIR)/lambda/layer/gmail/python
 	@echo "Creating Terraform plan for $(ENV) environment..."
 	cd $(ENV_DIR) && terraform plan -out=terraform.plan
 	@echo "Plan created: $(ENV_DIR)/terraform.plan"
@@ -125,5 +134,7 @@ clean:
 	rm -f $(ENV_DIR)/*.tfstate
 	rm -f $(ENV_DIR)/*.tfstate.backup
 	rm -f $(MODULE_DIR)/lambda/*.zip
+	rm -rf $(MODULE_DIR)/lambda/layer/shared/python
+	rm -rf $(MODULE_DIR)/lambda/layer/gmail/python
 	rm -rf $(MODULE_DIR)/lambda/package
 	@echo "Clean-up complete for $(ENV) environment"
