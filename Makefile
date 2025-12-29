@@ -46,19 +46,29 @@ help:
 	@echo "  make plan ENV=prod"
 	@echo ""
 
-# Package Lambda functions with dependencies
-$(MODULE_DIR)/lambda/package: requirements.txt $(MODULE_DIR)/lambda/router_enrichment.py $(MODULE_DIR)/lambda/gmail_forwarder.py $(MODULE_DIR)/lambda/bouncer.py $(MODULE_DIR)/lambda/smtp_credential_manager.py
-	@echo "Packaging Lambda functions with dependencies..."
-	@rm -rf $(MODULE_DIR)/lambda/package
-	@mkdir -p $(MODULE_DIR)/lambda/package
-	@pip3 install -q -r requirements.txt -t $(MODULE_DIR)/lambda/package
-	@cp $(MODULE_DIR)/lambda/router_enrichment.py $(MODULE_DIR)/lambda/package/
-	@cp $(MODULE_DIR)/lambda/gmail_forwarder.py $(MODULE_DIR)/lambda/package/
-	@cp $(MODULE_DIR)/lambda/bouncer.py $(MODULE_DIR)/lambda/package/
-	@cp $(MODULE_DIR)/lambda/smtp_credential_manager.py $(MODULE_DIR)/lambda/package/
-	@echo "Lambda package created"
+# Lambda layer with shared dependencies (aws_xray_sdk, aws-lambda-powertools)
+# Note: boto3 and botocore are provided by AWS Lambda runtime
+$(MODULE_DIR)/lambda/layer/python: requirements-layer.txt
+	@echo "Building Lambda layer with shared dependencies..."
+	@rm -rf $(MODULE_DIR)/lambda/layer
+	@mkdir -p $(MODULE_DIR)/lambda/layer/python
+	@pip3 install -q -r requirements-layer.txt -t $(MODULE_DIR)/lambda/layer/python
+	@echo "Lambda layer created (~3 MB)"
 
-package: $(MODULE_DIR)/lambda/package
+# Gmail forwarder package (only Lambda that needs dependencies bundled)
+$(MODULE_DIR)/lambda/gmail_forwarder_package: requirements-gmail.txt $(MODULE_DIR)/lambda/gmail_forwarder.py
+	@echo "Building Gmail forwarder package with Google dependencies..."
+	@rm -rf $(MODULE_DIR)/lambda/gmail_forwarder_package
+	@mkdir -p $(MODULE_DIR)/lambda/gmail_forwarder_package
+	@pip3 install -q -r requirements-gmail.txt -t $(MODULE_DIR)/lambda/gmail_forwarder_package
+	@cp $(MODULE_DIR)/lambda/gmail_forwarder.py $(MODULE_DIR)/lambda/gmail_forwarder_package/
+	@echo "Gmail forwarder package created (~10 MB)"
+
+# Package target builds layer + gmail_forwarder package
+# Other Lambdas and canary are single files, zipped directly by Terraform
+package: $(MODULE_DIR)/lambda/layer/python $(MODULE_DIR)/lambda/gmail_forwarder_package
+	@echo "✓ Lambda layer and gmail_forwarder package created"
+	@echo "ℹ Other Lambda functions and canary will be zipped directly from source files"
 
 # Initialize Terraform (depends on state bucket existing)
 $(ENV_DIR)/.terraform: $(MODULE_DIR)/scripts/ensure-state-bucket.sh $(ENV_DIR)/terraform.tfvars terraform/.fmt
@@ -71,7 +81,8 @@ $(ENV_DIR)/.terraform: $(MODULE_DIR)/scripts/ensure-state-bucket.sh $(ENV_DIR)/t
 init: $(ENV_DIR)/.terraform
 
 # Create plan file
-$(ENV_DIR)/terraform.plan: $(ENV_DIR)/.terraform $(ENV_DIR)/*.tf $(MODULE_DIR)/*.tf $(MODULE_DIR)/lambda/package
+# Depends on Lambda layer and gmail_forwarder package (other Lambdas are single files)
+$(ENV_DIR)/terraform.plan: $(ENV_DIR)/.terraform $(ENV_DIR)/*.tf $(MODULE_DIR)/*.tf $(MODULE_DIR)/lambda/layer/python $(MODULE_DIR)/lambda/gmail_forwarder_package
 	@echo "Creating Terraform plan for $(ENV) environment..."
 	cd $(ENV_DIR) && terraform plan -out=terraform.plan
 	@echo "Plan created: $(ENV_DIR)/terraform.plan"
@@ -105,7 +116,7 @@ destroy: $(ENV_DIR)/terraform.destroy.plan
 
 fmt: terraform/.fmt
 
-terraform/.fmt: terraform/environments/*/*.tf terraform/modules/ses-mail/*.tf
+terraform/.fmt: terraform/environments/*/*.tf $(MODULE_DIR)/*.tf
 	cd terraform && terraform fmt -recursive
 	touch $@
 
@@ -126,4 +137,7 @@ clean:
 	rm -f $(ENV_DIR)/*.tfstate.backup
 	rm -f $(MODULE_DIR)/lambda/*.zip
 	rm -rf $(MODULE_DIR)/lambda/package
+	rm -rf $(MODULE_DIR)/lambda/layer
+	rm -rf $(MODULE_DIR)/lambda/gmail_forwarder_package
+	rm -rf $(MODULE_DIR)/canary/python/dns*
 	@echo "Clean-up complete for $(ENV) environment"

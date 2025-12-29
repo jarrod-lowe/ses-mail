@@ -1,9 +1,33 @@
-# Archive the router enrichment Lambda function code with dependencies
+# ===========================
+# Shared Lambda Layer
+# ===========================
+
+# Archive the shared Lambda layer (contains aws_xray_sdk and aws-lambda-powertools)
+# Note: boto3 and botocore are provided by AWS Lambda Python runtime
+data "archive_file" "shared_layer_zip" {
+  type        = "zip"
+  source_dir  = "${path.module}/lambda/layer"
+  output_path = "${path.module}/lambda/shared_layer.zip"
+}
+
+# Shared Lambda layer for common dependencies
+resource "aws_lambda_layer_version" "shared_deps" {
+  layer_name          = "ses-mail-shared-deps-${var.environment}"
+  filename            = data.archive_file.shared_layer_zip.output_path
+  source_code_hash    = data.archive_file.shared_layer_zip.output_base64sha256
+  compatible_runtimes = ["python3.12"]
+  description         = "Shared dependencies: aws_xray_sdk, aws-lambda-powertools (boto3 provided by runtime)"
+}
+
+# ===========================
+# Lambda Function Archives
+# ===========================
+
+# Archive the router enrichment Lambda function (single file)
 data "archive_file" "router_zip" {
   type        = "zip"
-  source_dir  = "${path.module}/lambda/package"
+  source_file = "${path.module}/lambda/router_enrichment.py"
   output_path = "${path.module}/lambda/router_enrichment.zip"
-  excludes    = ["__pycache__", "*.pyc", ".DS_Store", "email_processor.py"]
 }
 
 # Lambda function for router enrichment (used by EventBridge Pipes)
@@ -16,6 +40,9 @@ resource "aws_lambda_function" "router_enrichment" {
   runtime          = "python3.12"
   timeout          = 30
   memory_size      = 128
+
+  # Shared dependencies layer
+  layers = [aws_lambda_layer_version.shared_deps.arn]
 
   # Enable X-Ray tracing for distributed tracing
   tracing_config {
@@ -43,12 +70,11 @@ resource "aws_cloudwatch_log_group" "lambda_router_logs" {
   retention_in_days = 30
 }
 
-# Archive the Gmail forwarder Lambda function code with dependencies
+# Archive the Gmail forwarder Lambda function code with dependencies (includes Google libs)
 data "archive_file" "gmail_forwarder_zip" {
   type        = "zip"
-  source_dir  = "${path.module}/lambda/package"
+  source_dir  = "${path.module}/lambda/gmail_forwarder_package"
   output_path = "${path.module}/lambda/gmail_forwarder.zip"
-  excludes    = ["__pycache__", "*.pyc", ".DS_Store", "email_processor.py", "router_enrichment.py"]
 }
 
 # Lambda function for Gmail forwarding (triggered by SQS)
@@ -61,6 +87,9 @@ resource "aws_lambda_function" "gmail_forwarder" {
   runtime          = "python3.12"
   timeout          = 10
   memory_size      = 128
+
+  # Shared dependencies layer
+  layers = [aws_lambda_layer_version.shared_deps.arn]
 
   # Enable X-Ray tracing for distributed tracing
   tracing_config {
@@ -91,13 +120,11 @@ resource "aws_cloudwatch_log_group" "lambda_gmail_forwarder_logs" {
   retention_in_days = 30
 }
 
-# Archive the bouncer Lambda function code with dependencies
-# Uses the same package directory as other lambdas to share dependencies
+# Archive the bouncer Lambda function (single file)
 data "archive_file" "bouncer_zip" {
   type        = "zip"
-  source_dir  = "${path.module}/lambda/package"
+  source_file = "${path.module}/lambda/bouncer.py"
   output_path = "${path.module}/lambda/bouncer.zip"
-  excludes    = ["__pycache__", "*.pyc", ".DS_Store", "email_processor.py", "router_enrichment.py", "gmail_forwarder.py"]
 }
 
 # Lambda function for bouncing emails (triggered by SQS)
@@ -110,6 +137,9 @@ resource "aws_lambda_function" "bouncer" {
   runtime          = "python3.12"
   timeout          = 30
   memory_size      = 128
+
+  # Shared dependencies layer
+  layers = [aws_lambda_layer_version.shared_deps.arn]
 
   # Enable X-Ray tracing for distributed tracing
   tracing_config {
@@ -136,13 +166,11 @@ resource "aws_cloudwatch_log_group" "lambda_bouncer_logs" {
   retention_in_days = 30
 }
 
-# Archive the SMTP credential manager Lambda function code with dependencies
-# Uses the same package directory as other lambdas to share dependencies (aws_xray_sdk, boto3)
+# Archive the SMTP credential manager Lambda function (single file)
 data "archive_file" "smtp_credential_manager_zip" {
   type        = "zip"
-  source_dir  = "${path.module}/lambda/package"
+  source_file = "${path.module}/lambda/smtp_credential_manager.py"
   output_path = "${path.module}/lambda/smtp_credential_manager.zip"
-  excludes    = ["__pycache__", "*.pyc", ".DS_Store", "email_processor.py", "router_enrichment.py", "gmail_forwarder.py", "bouncer.py"]
 }
 
 # Lambda function for SMTP credential management (triggered by DynamoDB Streams)
@@ -155,6 +183,9 @@ resource "aws_lambda_function" "smtp_credential_manager" {
   runtime          = "python3.12"
   timeout          = 60
   memory_size      = 256
+
+  # Shared dependencies layer
+  layers = [aws_lambda_layer_version.shared_deps.arn]
 
   # Enable X-Ray tracing for distributed tracing
   tracing_config {

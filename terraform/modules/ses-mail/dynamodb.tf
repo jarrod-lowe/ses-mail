@@ -30,6 +30,12 @@ resource "aws_dynamodb_table" "email_routing" {
     enabled = true
   }
 
+  # Enable TTL for automatic cleanup of temporary records (e.g., canary completion records)
+  ttl {
+    attribute_name = "ttl"
+    enabled        = true
+  }
+
   # Enable DynamoDB Streams to trigger Lambda functions for SMTP credential management
   stream_enabled   = true
   stream_view_type = "NEW_AND_OLD_IMAGES" # Capture both old and new item images for INSERT and MODIFY events

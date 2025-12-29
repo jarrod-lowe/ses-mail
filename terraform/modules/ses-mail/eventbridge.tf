@@ -52,7 +52,8 @@ data "aws_iam_policy_document" "eventbridge_sqs_access" {
     ]
     resources = [
       aws_sqs_queue.gmail_forwarder.arn,
-      aws_sqs_queue.bouncer.arn
+      aws_sqs_queue.bouncer.arn,
+      aws_sqs_queue.canary_monitor.arn
     ]
   }
 }

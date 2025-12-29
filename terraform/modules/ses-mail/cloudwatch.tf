@@ -18,7 +18,9 @@ resource "aws_cloudwatch_dashboard" "ses_mail" {
             [".", "GmailForwardSuccess", { stat = "Sum", label = "Gmail Success", color = "#1f77b4" }],
             [".", "GmailForwardFailure", { stat = "Sum", label = "Gmail Failure", color = "#ff7f0e" }],
             [".", "BounceSendSuccess", { stat = "Sum", label = "Bounce Success", color = "#9467bd" }],
-            [".", "BounceSendFailure", { stat = "Sum", label = "Bounce Failure", color = "#8c564b" }]
+            [".", "BounceSendFailure", { stat = "Sum", label = "Bounce Failure", color = "#8c564b" }],
+            [".", "CanaryMonitorSuccess", { stat = "Sum", label = "Canary Success", color = "#17becf" }],
+            [".", "CanaryMonitorFailure", { stat = "Sum", label = "Canary Failure", color = "#bcbd22" }]
           ]
           period = 300
           stat   = "Sum"
@@ -42,7 +44,8 @@ resource "aws_cloudwatch_dashboard" "ses_mail" {
           metrics = [
             ["AWS/Lambda", "Errors", "FunctionName", aws_lambda_function.router_enrichment.function_name, { stat = "Sum", label = "Router" }],
             ["...", aws_lambda_function.gmail_forwarder.function_name, { stat = "Sum", label = "Gmail Forwarder" }],
-            ["...", aws_lambda_function.bouncer.function_name, { stat = "Sum", label = "Bouncer" }]
+            ["...", aws_lambda_function.bouncer.function_name, { stat = "Sum", label = "Bouncer" }],
+            ["...", aws_lambda_function.canary_monitor.function_name, { stat = "Sum", label = "Canary Monitor" }]
           ]
           period = 300
           stat   = "Sum"
@@ -66,7 +69,8 @@ resource "aws_cloudwatch_dashboard" "ses_mail" {
           metrics = [
             ["AWS/Lambda", "Invocations", "FunctionName", aws_lambda_function.router_enrichment.function_name, { stat = "Sum", label = "Router" }],
             ["...", aws_lambda_function.gmail_forwarder.function_name, { stat = "Sum", label = "Gmail Forwarder" }],
-            ["...", aws_lambda_function.bouncer.function_name, { stat = "Sum", label = "Bouncer" }]
+            ["...", aws_lambda_function.bouncer.function_name, { stat = "Sum", label = "Bouncer" }],
+            ["...", aws_lambda_function.canary_monitor.function_name, { stat = "Sum", label = "Canary Monitor" }]
           ]
           period = 300
           stat   = "Sum"
@@ -89,7 +93,8 @@ resource "aws_cloudwatch_dashboard" "ses_mail" {
         properties = {
           metrics = [
             ["AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", aws_sqs_queue.gmail_forwarder.name, { stat = "Average", label = "Gmail Queue" }],
-            ["...", aws_sqs_queue.bouncer.name, { stat = "Average", label = "Bouncer Queue" }]
+            ["...", aws_sqs_queue.bouncer.name, { stat = "Average", label = "Bouncer Queue" }],
+            ["...", aws_sqs_queue.canary_monitor.name, { stat = "Average", label = "Canary Queue" }]
           ]
           period = 300
           stat   = "Average"
@@ -112,7 +117,8 @@ resource "aws_cloudwatch_dashboard" "ses_mail" {
         properties = {
           metrics = [
             ["AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", aws_sqs_queue.gmail_forwarder_dlq.name, { stat = "Average", label = "Gmail DLQ" }],
-            ["...", aws_sqs_queue.bouncer_dlq.name, { stat = "Average", label = "Bouncer DLQ" }]
+            ["...", aws_sqs_queue.bouncer_dlq.name, { stat = "Average", label = "Bouncer DLQ" }],
+            ["...", aws_sqs_queue.canary_monitor_dlq.name, { stat = "Average", label = "Canary DLQ" }]
           ]
           period = 300
           stat   = "Average"
@@ -136,7 +142,8 @@ resource "aws_cloudwatch_dashboard" "ses_mail" {
           metrics = [
             ["AWS/Lambda", "Duration", "FunctionName", aws_lambda_function.router_enrichment.function_name, { stat = "Average", label = "Router (avg)" }],
             ["...", aws_lambda_function.gmail_forwarder.function_name, { stat = "Average", label = "Gmail (avg)" }],
-            ["...", aws_lambda_function.bouncer.function_name, { stat = "Average", label = "Bouncer (avg)" }]
+            ["...", aws_lambda_function.bouncer.function_name, { stat = "Average", label = "Bouncer (avg)" }],
+            ["...", aws_lambda_function.canary_monitor.function_name, { stat = "Average", label = "Canary (avg)" }]
           ]
           period = 300
           stat   = "Average"
@@ -222,7 +229,7 @@ resource "aws_cloudwatch_dashboard" "ses_mail" {
         y      = 30
         properties = {
           query   = <<-EOT
-SOURCE '${aws_cloudwatch_log_group.lambda_router_logs.name}' | SOURCE '${aws_cloudwatch_log_group.lambda_gmail_forwarder_logs.name}' | SOURCE '${aws_cloudwatch_log_group.lambda_bouncer_logs.name}' | filter message = "Routing decision" or message = "Action result"
+SOURCE '${aws_cloudwatch_log_group.lambda_router_logs.name}' | SOURCE '${aws_cloudwatch_log_group.lambda_gmail_forwarder_logs.name}' | SOURCE '${aws_cloudwatch_log_group.lambda_bouncer_logs.name}' | SOURCE '${aws_cloudwatch_log_group.lambda_canary_monitor_logs.name}' | filter message = "Routing decision" or message = "Action result"
 | fields @timestamp, messageId, sender, subject, recipient, action, result, error, lookupKey, target, resultId, xray_trace_id
 | sort @timestamp desc
 | limit 50
@@ -293,6 +300,47 @@ EOT
             right = {
               min       = 0
               label     = "Count"
+              showUnits = false
+            }
+          }
+        }
+      },
+      # Email Canary Monitoring - Success Rate & Latency
+      {
+        type   = "metric"
+        width  = 12
+        height = 6
+        x      = 0
+        y      = 44
+        properties = {
+          metrics = [
+            ["CloudWatchSynthetics", "SuccessPercent", "CanaryName", aws_synthetics_canary.email_monitor.name, { stat = "Average", label = "Success Rate (%)", yAxis = "left", color = "#2ca02c" }],
+            [".", "Duration", ".", ".", { stat = "Average", label = "Avg Latency (ms)", yAxis = "right", color = "#1f77b4" }],
+            [".", "Failed", ".", ".", { stat = "Sum", label = "Failures", yAxis = "left", color = "#d62728" }]
+          ]
+          period = 300
+          stat   = "Average"
+          region = var.aws_region
+          title  = "Email Canary - End-to-End Monitoring"
+          annotations = {
+            horizontal = [
+              {
+                label = "Target Success Rate"
+                value = 95
+                color = "#2ca02c"
+              }
+            ]
+          }
+          yAxis = {
+            left = {
+              min       = 0
+              max       = 100
+              label     = "Success % / Failures"
+              showUnits = false
+            }
+            right = {
+              min       = 0
+              label     = "Duration (ms)"
               showUnits = false
             }
           }

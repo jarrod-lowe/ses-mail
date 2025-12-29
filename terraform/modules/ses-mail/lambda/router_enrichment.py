@@ -45,19 +45,17 @@ _integration_test_token = None
 def _load_integration_test_token() -> Optional[str]:
     """
     Load integration test bypass token from SSM Parameter Store.
-    Only loads in test environment. Cached for Lambda lifetime.
+    Available in all environments for canary monitoring. Cached for Lambda lifetime.
 
     Returns:
-        str: Token value or None if not in test environment
+        str: Token value or None if not available
     """
     global _integration_test_token
 
     if _integration_test_token is not None:
         return _integration_test_token
 
-    if ENVIRONMENT != 'test':
-        return None
-
+    # Integration test token available in all environments for canary monitoring
     try:
         parameter_name = f'/ses-mail/{ENVIRONMENT}/integration-test-token'
         response = ssm.get_parameter(Name=parameter_name, WithDecryption=True)
@@ -114,6 +112,7 @@ def lambda_handler(event, context):
                 "store": {"count": 0, "targets": []},
                 "forward-to-gmail": {"count": 0, "targets": []},
                 "bounce": {"count": 0, "targets": []},
+                "canary-monitor": {"count": 0, "targets": []},
             }
 
             for action_type, dest in routing_results:
@@ -226,6 +225,7 @@ def decide_action(ses_message: Dict[str, Any]) -> List[Tuple[str, Optional[Any]]
         "forward-to-gmail": 0,
         "store": 0,
         "bounce": 0,
+        "canary-monitor": 0,
     }
 
     for target in ses_message["receipt"]["recipients"]:
