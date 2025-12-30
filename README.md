@@ -89,21 +89,53 @@ terraform/
    # domain should be a list: ["mail.example.com", "mail2.example.com"]
    ```
 
-1. Deploy the infrastructure (first pass):
+1. **Choose deployment mode** (shared account vs separate accounts):
+
+   **Shared AWS Account:**
+
+   If test and prod share the same AWS account, configure test to join prod's SES ruleset (AWS SES only allows one active receipt ruleset per account):
 
    ```bash
-   # For test environment
-   make init ENV=test   # Initialize Terraform and create state bucket
-   make plan ENV=test   # Package Lambda and create a plan file
-   make apply ENV=test  # Apply the plan (creates resources and outputs DNS records)
-
-   # For production environment
-   make init ENV=prod   # Initialize Terraform and create state bucket
-   make plan ENV=prod   # Package Lambda and create a plan file
-   make apply ENV=prod  # Apply the plan (creates resources and outputs DNS records)
+   # In terraform/environments/test/terraform.tfvars, add:
+   join_existing_deployment = "prod"
    ```
 
-   **Note:** The `make plan` target automatically packages the Lambda function with its dependencies. If MTA-STS is enabled, the first apply will create the ACM certificate but CloudFront creation will fail. This is expected - continue to step 4.
+   When using shared account mode:
+   - Deploy prod FIRST, then test
+   - Only one SES ruleset will be active (prod's)
+   - Test rules are added to prod's ruleset
+   - Test maintains its own inactive ruleset for reference
+
+   **Separate AWS Accounts:**
+
+   If test and prod use different AWS accounts, no configuration needed. Each environment manages its own active SES ruleset independently.
+
+1. Deploy the infrastructure:
+
+   **For shared account (prod and test in same AWS account):**
+
+   ```bash
+   # Deploy prod FIRST
+   AWS_PROFILE=ses-mail make init ENV=prod
+   AWS_PROFILE=ses-mail make apply ENV=prod
+
+   # Then deploy test (requires prod to be deployed)
+   AWS_PROFILE=ses-mail make init ENV=test
+   AWS_PROFILE=ses-mail make apply ENV=test
+   ```
+
+   **For separate accounts:**
+
+   ```bash
+   # Deploy in any order
+   AWS_PROFILE=ses-mail-test make init ENV=test
+   AWS_PROFILE=ses-mail-test make apply ENV=test
+
+   AWS_PROFILE=ses-mail-prod make init ENV=prod
+   AWS_PROFILE=ses-mail-prod make apply ENV=prod
+   ```
+
+   **Note:** The `make apply` target automatically runs `make plan` which packages the Lambda function with its dependencies. If MTA-STS is enabled, the first apply will create the ACM certificate but CloudFront creation will fail. This is expected - continue to step 5.
 
 1. Configure DNS records in Route53:
 

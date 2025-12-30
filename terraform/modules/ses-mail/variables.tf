@@ -115,3 +115,9 @@ variable "migration_mx_hostnames" {
   type        = list(string)
   default     = []
 }
+
+variable "join_existing_deployment" {
+  description = "Name of existing environment to join (e.g., 'prod'). When set, this environment's rules will be added to the target environment's ruleset without activating its own ruleset. The target environment must be deployed first. Set to null for standalone deployment."
+  type        = string
+  default     = null
+}

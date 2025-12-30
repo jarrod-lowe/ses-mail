@@ -20,7 +20,7 @@ When writing terraform, never use `jsonencode` where an
 AWS_PROFILE=ses-mail make plan ENV=test >/dev/null
 
 # Show the plan for test environment (will run plan if required)
-AWS_PROFILE=ses-mail make show-plan ENV=test >/dev/null
+AWS_PROFILE=ses-mail make show-plan ENV=test
 
 # Apply changes for test environment (will run plan if required)
 AWS_PROFILE=ses-mail make apply ENV=test >/dev/null
@@ -40,6 +40,15 @@ The Makefile handles:
 - Backend configuration with environment-specific state keys
 - Lambda function packaging with dependencies
 - Plan file creation and clean-up
+
+#### Deployment Order
+
+When test and prod share the same AWS account (`join_existing_deployment = "prod"` in test environment), deploy in this order:
+
+1. **Prod first**: `AWS_PROFILE=ses-mail make apply ENV=prod >/dev/null`
+2. **Test second**: `AWS_PROFILE=ses-mail make apply ENV=test >/dev/null`
+
+This is required because test adds rules to prod's active SES ruleset. If environments use separate AWS accounts, they can be deployed in any order.
 
 ### DynamoDB Routing Rules Management
 
@@ -177,6 +186,11 @@ terraform/
 
 ### Multi-Environment Management
 
+- Environments can share an AWS account or use separate accounts
+- When sharing an account (`join_existing_deployment` set in test), the test environment:
+  - Creates its own ruleset (for reference) but doesn't activate it
+  - Adds rules to the prod environment's active ruleset
+  - Must be deployed after the prod environment
 - Environments are isolated via separate terraform.tfvars and state files
 - State key format: `ses-mail/{environment}.tfstate`
 - Common module in `modules/ses-mail/` shared across environments
@@ -212,6 +226,14 @@ Lambda functions are in `terraform/modules/ses-mail/lambda/`:
 ### AWS Profile
 
 Always use `AWS_PROFILE=ses-mail` for all AWS CLI and Terraform operations.
+
+### SES Ruleset Sharing
+
+AWS SES allows only one active receipt ruleset per account. When test and prod share an account, test joins prod's ruleset via `join_existing_deployment = "prod"` in `terraform/environments/test/terraform.tfvars`. This ensures:
+
+- Test creates its own ruleset but doesn't activate it
+- Test adds its rules to prod's active ruleset
+- Both environments can receive email using the same SES configuration
 
 ### Single-Table Design
 
