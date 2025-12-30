@@ -20,10 +20,11 @@ resource "aws_s3_bucket_public_access_block" "mta_sts" {
 
 # MTA-STS policy file content
 locals {
-  # Build list of all MX servers (primary SES + backups)
+  # Build list of all MX servers (primary SES + backups + migration MXs)
   all_mx_servers = concat(
     ["inbound-smtp.${var.aws_region}.amazonaws.com"],
-    [for mx in var.backup_mx_records : mx.hostname]
+    [for mx in var.backup_mx_records : mx.hostname],
+    var.migration_mx_hostnames
   )
 
   mta_sts_policy = <<-EOT

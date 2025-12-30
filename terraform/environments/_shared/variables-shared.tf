@@ -86,3 +86,9 @@ variable "backup_mx_records" {
   }))
   default = []
 }
+
+variable "migration_mx_hostnames" {
+  description = "Additional MX hostnames to include in MTA-STS policy during migration (e.g., mail-in.rrod.net). These are added to the MTA-STS policy but not used for actual email routing."
+  type        = list(string)
+  default     = []
+}

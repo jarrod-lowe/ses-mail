@@ -1,16 +1,14 @@
 # Generate random UUID for integration test token (test environment only)
 resource "random_uuid" "integration_test_token" {
-  count = var.environment == "test" ? 1 : 0
 }
 
 # SSM Parameter for integration test bypass token (test environment only)
 resource "aws_ssm_parameter" "integration_test_token" {
-  count = var.environment == "test" ? 1 : 0
 
   name        = "/ses-mail/${var.environment}/integration-test-token"
   description = "Secret token for bypassing spam checks in integration tests (${var.environment})"
   type        = "SecureString"
-  value       = random_uuid.integration_test_token[0].result
+  value       = random_uuid.integration_test_token.result
 
   tags = {
     Name        = "integration-test-token-${var.environment}"
@@ -152,7 +150,7 @@ data "aws_iam_policy_document" "lambda_router_dynamodb_access" {
         "ssm:GetParameter"
       ]
       resources = [
-        aws_ssm_parameter.integration_test_token[0].arn
+        aws_ssm_parameter.integration_test_token.arn
       ]
     }
   }

@@ -77,4 +77,5 @@ module "ses_mail" {
   spf_mx_records                 = var.spf_mx_records
   spf_policy                     = var.spf_policy
   backup_mx_records              = var.backup_mx_records
+  migration_mx_hostnames         = var.migration_mx_hostnames
 }
