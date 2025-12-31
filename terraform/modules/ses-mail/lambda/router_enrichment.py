@@ -33,6 +33,7 @@ dynamodb = boto3.client('dynamodb')
 cloudwatch = boto3.client('cloudwatch')
 eventbridge = boto3.client('events')
 ssm = boto3.client('ssm')
+s3 = boto3.client('s3')
 
 from aws_xray_sdk.core import xray_recorder
 from aws_xray_sdk.core import patch_all
@@ -64,6 +65,135 @@ def _load_integration_test_token() -> Optional[str]:
     except Exception as e:
         logger.error("Failed to load integration test token", extra={"error": str(e)})
         return None
+
+
+def extract_s3_info(ses_message: Dict[str, Any]) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Extract S3 bucket and object key from SES receipt action.
+
+    Args:
+        ses_message: SES event message
+
+    Returns:
+        Tuple of (bucket_name, object_key) or (None, None) if not found
+    """
+    try:
+        action = ses_message.get('receipt', {}).get('action', {})
+        if action.get('type') == 'S3':
+            bucket = action.get('bucketName')
+            key = action.get('objectKey')
+            if bucket and key:
+                return bucket, key
+    except Exception as e:
+        logger.warning("Failed to extract S3 info", extra={"error": str(e)})
+    return None, None
+
+
+def sanitize_tag_value(value: Any, max_length: int = 256) -> str:
+    """
+    Sanitize value for AWS S3 tag compliance.
+    Allowed characters: a-z, A-Z, 0-9, space, + - = . _ : / @
+
+    Args:
+        value: Value to sanitize (converted to string)
+        max_length: Maximum allowed length (AWS limit: 256 chars)
+
+    Returns:
+        Sanitized string value safe for S3 tags
+    """
+    if value is None:
+        return "(empty)"
+
+    # Convert to string
+    value_str = str(value)
+    if not value_str:
+        return "(empty)"
+
+    # Define allowed characters
+    allowed_chars = set('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 +-=._:/@')
+
+    # Filter to only allowed characters, replace invalid with underscore
+    sanitized = ''.join(c if c in allowed_chars else '_' for c in value_str)
+
+    # Collapse multiple consecutive underscores/spaces
+    import re
+    sanitized = re.sub(r'[_\s]+', '_', sanitized)
+    sanitized = sanitized.strip('_').strip()
+
+    # Truncate to max_length
+    if len(sanitized) > max_length:
+        sanitized = sanitized[:max_length-3] + "..."
+
+    return sanitized or "(empty)"
+
+
+def tag_s3_object(bucket: str, key: str, routing_tags: Dict[str, str]) -> None:
+    """
+    Apply routing metadata tags to S3 object.
+
+    Note: S3 objects created by SES have no tags by default, so we don't need
+    to merge with existing tags - just set our tags directly.
+
+    Args:
+        bucket: S3 bucket name
+        key: S3 object key
+        routing_tags: Dictionary of routing metadata tags (already sanitized)
+
+    Raises:
+        ClientError: If S3 API call fails (except NoSuchKey which is handled)
+    """
+    try:
+        # Convert to S3 TagSet format
+        tag_set = [{'Key': k, 'Value': v} for k, v in routing_tags.items()]
+
+        # Apply tags directly (no need to get existing tags first)
+        s3.put_object_tagging(
+            Bucket=bucket,
+            Key=key,
+            Tagging={'TagSet': tag_set}
+        )
+
+        logger.info("Successfully tagged S3 object", extra={
+            "bucket": bucket,
+            "key": key,
+            "tagCount": len(tag_set)
+        })
+
+    except ClientError as e:
+        error_code = e.response.get('Error', {}).get('Code')
+
+        if error_code == 'NoSuchKey':
+            # Object was deleted (likely by Gmail forwarder) - this is normal, not an error
+            logger.info("S3 object already deleted, skipping tagging", extra={
+                "bucket": bucket,
+                "key": key
+            })
+            return
+
+        # For any other error, log and re-raise
+        logger.error("S3 tagging failed", extra={
+            "bucket": bucket,
+            "key": key,
+            "errorCode": error_code,
+            "error": str(e)
+        })
+        raise
+
+
+def publish_s3_tagging_failure_metric() -> None:
+    """Publish CloudWatch metric when S3 tagging fails."""
+    try:
+        cloudwatch.put_metric_data(
+            Namespace=f'SESMail/{ENVIRONMENT}',
+            MetricData=[{
+                'MetricName': 'S3TaggingFailures',
+                'Value': 1,
+                'Unit': 'Count',
+                'StorageResolution': 60
+            }]
+        )
+    except Exception as e:
+        logger.exception("Error publishing S3 tagging failure metric", extra={"error": str(e)})
 
 
 def lambda_handler(event, context):
@@ -214,6 +344,9 @@ def decide_action(ses_message: Dict[str, Any]) -> List[Tuple[str, Optional[Any]]
     source = mail.get('source', 'unknown')
     subject = extract_subject(ses_message, max_length=64)
 
+    # Extract S3 info for tagging (do this once per message)
+    ses_message_s3_bucket, ses_message_s3_key = extract_s3_info(ses_message)
+
     subsegment.put_annotation('messageId', message_id)
     subsegment.put_annotation('source', source)
 
@@ -257,6 +390,53 @@ def decide_action(ses_message: Dict[str, Any]) -> List[Tuple[str, Optional[Any]]
                 "target": destination if routing_decision == 'forward-to-gmail' else target
             })
         counts[results[-1][0]] += 1
+
+    # Tag S3 object with routing metadata (non-blocking, best-effort)
+    # This happens AFTER routing decisions are made and logged
+    if ses_message_s3_bucket and ses_message_s3_key:
+        # Collect all recipient addresses (space-separated)
+        recipients = ses_message["receipt"]["recipients"]
+        all_recipients = ' '.join(recipients)
+
+        # Collect all actions and targets (space-separated, same order as recipients)
+        all_actions = []
+        all_targets = []
+        for action_type, destination_info in results:
+            all_actions.append(action_type)
+            target_value = destination_info.get('destination') or destination_info.get('target', '')
+            all_targets.append(target_value)
+
+        actions_str = ' '.join(all_actions)
+        targets_str = ' '.join(all_targets)
+
+        # Create routing tags (all values pre-sanitized)
+        # AWS S3 limit: maximum 10 tags per object
+        # Current: 6 routing tags + 4 terraform default tags = 10 tags (at limit)
+        routing_tags = {
+            'messageId': sanitize_tag_value(message_id),
+            'sender': sanitize_tag_value(source),
+            'subject': sanitize_tag_value(subject),
+            'recipient': sanitize_tag_value(all_recipients),
+            'action': sanitize_tag_value(actions_str),
+            'target': sanitize_tag_value(targets_str),
+            # Terraform default tags (for cost accounting)
+            'Project': 'ses-mail',
+            'ManagedBy': 'terraform',
+            'Environment': ENVIRONMENT,
+            'Application': f'ses-mail-{ENVIRONMENT}'
+        }
+
+        # Tag the S3 object (non-blocking)
+        try:
+            tag_s3_object(ses_message_s3_bucket, ses_message_s3_key, routing_tags)
+        except Exception as tag_error:
+            logger.error("Failed to tag S3 object", extra={
+                "error": str(tag_error),
+                "bucket": ses_message_s3_bucket,
+                "key": ses_message_s3_key
+            })
+            # Don't fail the lambda - tagging is best-effort
+            publish_s3_tagging_failure_metric()
 
     subsegment.put_annotation('recipient_count', len(results))
     for key, value in counts.items():

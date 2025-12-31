@@ -297,6 +297,28 @@ EOT
             }
           }
         }
+      },
+      # S3 Object Tagging Failures
+      {
+        type   = "metric"
+        width  = 12
+        height = 6
+        x      = 0
+        y      = 18
+        properties = {
+          metrics = [
+            ["SESMail/${var.environment}", "S3TaggingFailures", { stat = "Sum", label = "Tagging Failures", color = "#d62728" }]
+          ]
+          period = 300
+          stat   = "Sum"
+          region = var.aws_region
+          title  = "S3 Object Tagging Failures"
+          yAxis = {
+            left = {
+              min = 0
+            }
+          }
+        }
       }
     ]
   })
@@ -506,6 +528,23 @@ resource "aws_cloudwatch_metric_alarm" "token_monitor_stepfunction_failed" {
   dimensions = {
     StateMachineArn = aws_sfn_state_machine.token_monitor.arn
   }
+
+  alarm_actions = [var.alarm_sns_topic_arn]
+  ok_actions    = [var.alarm_sns_topic_arn]
+}
+
+# CloudWatch Alarm for S3 tagging failures
+resource "aws_cloudwatch_metric_alarm" "s3_tagging_failures" {
+  alarm_name          = "ses-mail-s3-tagging-failures-${var.environment}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "S3TaggingFailures"
+  namespace           = "SESMail/${var.environment}"
+  period              = 300
+  statistic           = "Sum"
+  threshold           = 0
+  alarm_description   = "Alert when S3 object tagging fails (${var.environment}). May indicate IAM permission issues or S3 API throttling. Note: NoSuchKey errors (object already deleted) are not counted as failures."
+  treat_missing_data  = "notBreaching"
 
   alarm_actions = [var.alarm_sns_topic_arn]
   ok_actions    = [var.alarm_sns_topic_arn]

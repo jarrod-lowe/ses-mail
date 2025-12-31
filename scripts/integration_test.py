@@ -53,6 +53,7 @@ class IntegrationTest:
 
         # Initialize AWS clients
         self.ses = boto3.client('ses', region_name=self.region)
+        self.s3 = boto3.client('s3', region_name=self.region)
         self.sqs = boto3.client('sqs', region_name=self.region)
         self.dynamodb = boto3.client('dynamodb', region_name=self.region)
         self.logs = boto3.client('logs', region_name=self.region)
@@ -414,6 +415,71 @@ class IntegrationTest:
         except Exception as e:
             logger.error(f"Error checking DLQ: {e}")
             return 0
+
+    def verify_s3_tags(
+        self,
+        bucket: str,
+        key: str,
+        expected_values: Dict[str, str]
+    ) -> Dict[str, Any]:
+        """
+        Verify S3 object tags match expected values.
+
+        Args:
+            bucket: S3 bucket name
+            key: S3 object key
+            expected_values: Expected tag key-value pairs to verify
+
+        Returns:
+            dict: Verification results with status and details
+        """
+        try:
+            response = self.s3.get_object_tagging(Bucket=bucket, Key=key)
+            actual_tags = {tag['Key']: tag['Value'] for tag in response.get('TagSet', [])}
+
+            verification = {
+                'found': True,
+                'tag_count': len(actual_tags),
+                'expected_tags': {},
+                'unexpected_tags': {},
+                'missing_tags': [],
+                'all_match': True
+            }
+
+            # Check each expected tag
+            for tag_key, expected_value in expected_values.items():
+                if tag_key in actual_tags:
+                    matches = actual_tags[tag_key] == expected_value
+                    verification['expected_tags'][tag_key] = {
+                        'expected': expected_value,
+                        'actual': actual_tags[tag_key],
+                        'matches': matches
+                    }
+                    if not matches:
+                        verification['all_match'] = False
+                else:
+                    verification['missing_tags'].append(tag_key)
+                    verification['all_match'] = False
+
+            # Check for unexpected tags
+            for tag_key in actual_tags:
+                if tag_key not in expected_values:
+                    verification['unexpected_tags'][tag_key] = actual_tags[tag_key]
+
+            return verification
+
+        except ClientError as e:
+            if e.response.get('Error', {}).get('Code') == 'NoSuchKey':
+                return {
+                    'found': False,
+                    'error': 'S3 object not found',
+                    'all_match': False
+                }
+            return {
+                'found': False,
+                'error': str(e),
+                'all_match': False
+            }
 
     def get_router_logs(
         self,
@@ -912,6 +978,153 @@ class IntegrationTest:
 
         return result
 
+    def test_store(
+        self,
+        from_addr: str,
+        to_addr: str
+    ) -> Dict[str, Any]:
+        """
+        Test the store routing action and verify S3 tags.
+
+        Args:
+            from_addr: Sender email address
+            to_addr: Recipient email address
+
+        Returns:
+            dict: Test results including S3 tag verification
+        """
+        test_name = "Store Email with S3 Tags"
+        logger.info(f"\n{'='*60}")
+        logger.info(f"Test: {test_name}")
+        logger.info(f"{'='*60}")
+
+        result = {
+            'name': test_name,
+            'status': 'FAIL',
+            'details': {},
+            'errors': []
+        }
+
+        try:
+            # 1. Create routing rule
+            logger.info("Step 1: Creating test routing rule...")
+            self.create_test_routing_rule(
+                recipient=to_addr,
+                action='store',
+                target='',
+                description='Integration test: store email and verify S3 tags'
+            )
+            result['details']['routing_rule_created'] = True
+
+            # 2. Send test email with special characters in subject for sanitization testing
+            logger.info("Step 2: Sending test email...")
+            subject = f"Integration Test! @Store #Action - {int(time.time())}"
+            body = f"This email should be stored with S3 tags.\nTimestamp: {datetime.now(timezone.utc).isoformat()}"
+
+            message_id = self.send_test_email(from_addr, to_addr, subject, body)
+            result['details']['message_id'] = message_id
+            result['details']['email_sent'] = True
+
+            # 3. Wait for router processing
+            logger.info("Step 3: Waiting for router enrichment...")
+            time.sleep(15)
+
+            # 4. Check router logs for routing decision
+            logger.info("Step 4: Checking router logs...")
+            router_logs = self.get_router_logs(message_id, since_minutes=2)
+            if router_logs:
+                result['details']['router_processed'] = True
+                for log in router_logs:
+                    if 'store' in log.get('message', ''):
+                        result['details']['routing_decision'] = 'store'
+                        break
+
+            # 5. Verify S3 object exists
+            logger.info("Step 5: Verifying S3 object exists...")
+            bucket = f"ses-mail-storage-{self.account_id}-{self.environment}"
+            s3_key = f"emails/{message_id}"
+
+            try:
+                self.s3.head_object(Bucket=bucket, Key=s3_key)
+                result['details']['s3_object_exists'] = True
+                result['details']['s3_bucket'] = bucket
+                result['details']['s3_key'] = s3_key
+            except ClientError as e:
+                error_code = e.response.get('Error', {}).get('Code')
+                result['errors'].append(f"S3 object not found: {error_code}")
+                return result
+
+            # 6. Verify S3 tags
+            logger.info("Step 6: Verifying S3 object tags...")
+
+            # Expected tags based on what router lambda should set
+            # Note: Tag values are sanitized using the same logic as the lambda
+            # Allowed chars: a-z, A-Z, 0-9, space, + - = . _ : / @
+            # Invalid chars replaced with underscore, consecutive underscores/spaces collapsed
+            import re
+            allowed_chars = set('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 +-=._:/@')
+            sanitized_subject = ''.join(c if c in allowed_chars else '_' for c in subject)
+            sanitized_subject = re.sub(r'[_\s]+', '_', sanitized_subject)
+            sanitized_subject = sanitized_subject.strip('_').strip()
+            if len(sanitized_subject) > 64:
+                sanitized_subject = sanitized_subject[:61] + "..."
+
+            expected_tags = {
+                'messageId': message_id,
+                'sender': from_addr,
+                'subject': sanitized_subject,
+                'recipient': to_addr,
+                'action': 'store',
+                'target': to_addr,  # For store action, target equals recipient
+                'Project': 'ses-mail',
+                'ManagedBy': 'terraform',
+                'Environment': self.environment,
+                'Application': f'ses-mail-{self.environment}'
+            }
+
+            tag_verification = self.verify_s3_tags(bucket, s3_key, expected_tags)
+            result['details']['tag_verification'] = tag_verification
+
+            if not tag_verification.get('all_match', False):
+                result['errors'].append("S3 tags do not match expected values")
+
+                # Log detailed tag mismatches for debugging
+                if tag_verification.get('missing_tags'):
+                    logger.error(f"Missing tags: {tag_verification['missing_tags']}")
+
+                for tag_key, tag_info in tag_verification.get('expected_tags', {}).items():
+                    if not tag_info.get('matches', True):
+                        logger.error(f"Tag mismatch - {tag_key}: expected='{tag_info['expected']}', actual='{tag_info['actual']}'")
+
+            # 7. Wait for X-Ray trace (optional, for consistency with other tests)
+            logger.info("Step 7: Retrieving X-Ray trace...")
+            trace = self.wait_for_xray_trace(message_id, timeout_seconds=90)
+            if trace:
+                result['details']['xray_trace_found'] = True
+                result['details']['trace_id'] = trace.get('Id')
+
+                segment_verification = self.verify_trace_segments(trace)
+                result['details']['trace_segments'] = segment_verification
+            else:
+                result['errors'].append("X-Ray trace not found")
+
+            # 8. Determine overall status
+            if not result['errors']:
+                result['status'] = 'PASS'
+
+            # Log S3 object details for manual verification
+            logger.info(f"\nS3 Object Details:")
+            logger.info(f"  Bucket: {bucket}")
+            logger.info(f"  Key: {s3_key}")
+            logger.info(f"  Tag Count: {tag_verification.get('tag_count', 0)}")
+            logger.info(f"  All Tags Match: {tag_verification.get('all_match', False)}")
+
+        except Exception as e:
+            logger.error(f"Test failed with exception: {e}", exc_info=True)
+            result['errors'].append(str(e))
+
+        return result
+
     def cleanup_test_rules(self, recipients: List[str]) -> None:
         """Clean up test routing rules."""
         logger.info("\nCleaning up test routing rules...")
@@ -1002,6 +1215,17 @@ class IntegrationTest:
         # Clean up test 2 rule only if test completed (successfully or not)
         if not skip_cleanup:
             self.delete_test_routing_rule(to_addr)
+
+        # Test 3: Store with S3 tag verification
+        to_addr = f"test-store@{test_domain}"
+        test_recipients.append(to_addr)
+        result = self.test_store(from_addr, to_addr)
+        self.results['tests'].append(result)
+
+        # Clean up test 3 rule (but S3 object is left for manual inspection)
+        if not skip_cleanup:
+            self.delete_test_routing_rule(to_addr)
+            # Note: S3 object is intentionally NOT deleted for manual verification
 
         # Generate report
         self.generate_report()
