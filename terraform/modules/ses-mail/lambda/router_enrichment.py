@@ -45,18 +45,15 @@ _integration_test_token = None
 def _load_integration_test_token() -> Optional[str]:
     """
     Load integration test bypass token from SSM Parameter Store.
-    Only loads in test environment. Cached for Lambda lifetime.
+    Cached for Lambda lifetime.
 
     Returns:
-        str: Token value or None if not in test environment
+        str: Token value or None if not available
     """
     global _integration_test_token
 
     if _integration_test_token is not None:
         return _integration_test_token
-
-    if ENVIRONMENT != 'test':
-        return None
 
     try:
         parameter_name = f'/ses-mail/{ENVIRONMENT}/integration-test-token'
@@ -316,22 +313,21 @@ def check_spam(ses_message: Dict[str, Any]) -> bool:
     Returns:
         bool: True if email is spam, False otherwise
     """
-    # Skip spam checks for integration test emails only in test environment
+    # Skip spam checks for integration test emails
     # Requires secret token in X-Integration-Test-Token header that matches SSM parameter
-    if ENVIRONMENT == 'test':
-        expected_token = _load_integration_test_token()
-        if expected_token:
-            # Look for X-Integration-Test-Token header in email
-            headers = ses_message.get('mail', {}).get('headers', [])
-            for header in headers:
-                if header.get('name', '').lower() == 'x-integration-test-token':
-                    provided_token = header.get('value', '')
-                    if provided_token == expected_token:
-                        logger.info("Valid integration test token found - skipping spam checks")
-                        return False
-                    else:
-                        logger.warning("Invalid integration test token provided")
-                        break
+    expected_token = _load_integration_test_token()
+    if expected_token:
+        # Look for X-Integration-Test-Token header in email
+        headers = ses_message.get('mail', {}).get('headers', [])
+        for header in headers:
+            if header.get('name', '').lower() == 'x-integration-test-token':
+                provided_token = header.get('value', '')
+                if provided_token == expected_token:
+                    logger.info("Valid integration test token found - skipping spam checks")
+                    return False
+                else:
+                    logger.warning("Invalid integration test token provided")
+                    break
 
     receipt = ses_message['receipt']
     if receipt["spamVerdict"]["status"].lower() == "fail":

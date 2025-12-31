@@ -66,13 +66,13 @@ class IntegrationTest:
         self.account_id = sts.get_caller_identity()['Account']
 
         # Resource names
-        self.table_name = f'ses-email-routing-{environment}'
-        self.input_queue_name = f'ses-email-input-{environment}'
-        self.gmail_queue_name = f'ses-gmail-forwarder-{environment}'
-        self.bouncer_queue_name = f'ses-bouncer-{environment}'
-        self.gmail_dlq_name = f'ses-gmail-forwarder-dlq-{environment}'
-        self.bouncer_dlq_name = f'ses-bouncer-dlq-{environment}'
-        self.event_bus_name = f'ses-email-routing-{environment}'
+        self.table_name = f'ses-mail-email-routing-{environment}'
+        self.input_queue_name = f'ses-mail-email-input-{environment}'
+        self.gmail_queue_name = f'ses-mail-gmail-forwarder-{environment}'
+        self.bouncer_queue_name = f'ses-mail-bouncer-{environment}'
+        self.gmail_dlq_name = f'ses-mail-gmail-forwarder-dlq-{environment}'
+        self.bouncer_dlq_name = f'ses-mail-bouncer-dlq-{environment}'
+        self.event_bus_name = f'ses-mail-email-routing-{environment}'
         self.pipe_name = f'ses-email-router-{environment}'
 
         # Load integration test bypass token (test environment only)
@@ -92,10 +92,6 @@ class IntegrationTest:
         Returns:
             str: Token value or None if not available
         """
-        if self.environment != 'test':
-            logger.info("Not in test environment - no integration test token needed")
-            return None
-
         try:
             parameter_name = f'/ses-mail/{self.environment}/integration-test-token'
             response = self.ssm.get_parameter(Name=parameter_name, WithDecryption=True)

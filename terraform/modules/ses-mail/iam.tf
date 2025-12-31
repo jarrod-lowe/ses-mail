@@ -141,18 +141,15 @@ data "aws_iam_policy_document" "lambda_router_dynamodb_access" {
     ]
   }
 
-  # Allow router lambda to read integration test token in test environment
-  dynamic "statement" {
-    for_each = var.environment == "test" ? [1] : []
-    content {
-      effect = "Allow"
-      actions = [
-        "ssm:GetParameter"
-      ]
-      resources = [
-        aws_ssm_parameter.integration_test_token.arn
-      ]
-    }
+  # Allow router lambda to read integration test token
+  statement {
+    effect = "Allow"
+    actions = [
+      "ssm:GetParameter"
+    ]
+    resources = [
+      aws_ssm_parameter.integration_test_token.arn
+    ]
   }
 }
 

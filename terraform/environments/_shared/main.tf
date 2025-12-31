@@ -71,6 +71,7 @@ module "ses_mail" {
   alarm_rejection_rate_threshold = var.alarm_rejection_rate_threshold
   mta_sts_mode                   = var.mta_sts_mode
   dmarc_rua_prefix               = var.dmarc_rua_prefix
+  dmarc_sp_policy                = var.dmarc_sp_policy
   tlsrpt_rua_prefix              = var.tlsrpt_rua_prefix
   spf_include_domains            = var.spf_include_domains
   spf_a_records                  = var.spf_a_records

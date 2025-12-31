@@ -218,8 +218,8 @@ output "dns_configuration_summary" {
           {
             name    = "_dmarc.${domain}"
             type    = "TXT"
-            value   = var.dmarc_rua_prefix != "" ? "v=DMARC1; p=reject; rua=mailto:${var.dmarc_rua_prefix}@${domain}" : "v=DMARC1; p=reject"
-            purpose = "DMARC policy - prevents domain spoofing"
+            value   = var.dmarc_rua_prefix != "" ? "v=DMARC1; p=reject; sp=${var.dmarc_sp_policy}; rua=mailto:${var.dmarc_rua_prefix}@${domain}" : "v=DMARC1; p=reject; sp=${var.dmarc_sp_policy}"
+            purpose = "DMARC policy - rejects spoofed mail for domain and subdomains"
           }
         ],
         [

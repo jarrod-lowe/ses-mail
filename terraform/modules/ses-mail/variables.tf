@@ -60,6 +60,17 @@ variable "dmarc_rua_prefix" {
   default     = "dmarc"
 }
 
+variable "dmarc_sp_policy" {
+  description = "DMARC subdomain policy (none, quarantine, reject). Recommended: reject for production"
+  type        = string
+  default     = "reject"
+
+  validation {
+    condition     = contains(["none", "quarantine", "reject"], var.dmarc_sp_policy)
+    error_message = "DMARC subdomain policy must be one of: none, quarantine, reject"
+  }
+}
+
 variable "tlsrpt_rua_prefix" {
   description = "Email prefix for TLS failure reports (domain will be appended automatically)"
   type        = string
