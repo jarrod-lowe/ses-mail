@@ -2,9 +2,23 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Documentation Structure
+
+The project documentation has been reorganized for better accessibility:
+
+- **[README.md](README.md)** - Project overview, quick start, and quick reference
+- **[docs/SETUP.md](docs/SETUP.md)** - Complete setup guide (Google OAuth, AWS, Terraform, DNS)
+- **[docs/OPERATIONS.md](docs/OPERATIONS.md)** - Day-to-day operations, monitoring, troubleshooting
+- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** - Technical deep-dive into system design
+- **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** - Integration testing, contributing guidelines
+
+For user-facing documentation updates, modify the appropriate file in `docs/` rather than adding to README.md.
+
 ## Project Overview
 
 SES Mail is an AWS-based email receiving system that processes emails through SES and forwards them to Gmail via the Gmail API. The system uses a fully event-driven architecture with SNS, SQS, EventBridge, and Lambda functions for routing and processing email.
+
+For detailed architecture information, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Common Commands
 
@@ -52,6 +66,10 @@ This is required because test adds rules to prod's active SES ruleset. If enviro
 
 ### DynamoDB Routing Rules Management
 
+For complete routing rule management, see [docs/OPERATIONS.md#email-routing-management](docs/OPERATIONS.md#email-routing-management).
+
+Quick example:
+
 ```bash
 # Add a routing rule (single-table design pattern)
 AWS_PROFILE=ses-mail aws dynamodb put-item \
@@ -64,26 +82,21 @@ AWS_PROFILE=ses-mail aws dynamodb put-item \
     "action": {"S": "forward-to-gmail"},
     "target": {"S": "your-email@gmail.com"},
     "enabled": {"BOOL": true},
-    "created_at": {"S": "2025-01-18T10:00:00Z"},
-    "updated_at": {"S": "2025-01-18T10:00:00Z"},
+    "created_at": {"S": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"},
+    "updated_at": {"S": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"},
     "description": {"S": "Forward support emails to Gmail"}
   }'
-
-# Query routing rules
-AWS_PROFILE=ses-mail aws dynamodb get-item \
-  --table-name ses-mail-email-routing-test \
-  --key '{"PK": {"S": "ROUTE#support@example.com"}, "SK": {"S": "RULE#v1"}}'
 ```
 
 ### Gmail OAuth Token Management
 
+For complete OAuth token management, see [docs/OPERATIONS.md#oauth-token-management](docs/OPERATIONS.md#oauth-token-management).
+
+Quick command:
+
 ```bash
-# Update Gmail token in SSM Parameter Store
-AWS_PROFILE=ses-mail aws ssm put-parameter \
-  --name "/ses-mail/test/gmail-token" \
-  --value "$(cat token.json)" \
-  --type SecureString \
-  --overwrite
+# Refresh OAuth token
+AWS_PROFILE=ses-mail python3 scripts/refresh_oauth_token.py --env test
 ```
 
 ## Architecture
@@ -91,50 +104,33 @@ AWS_PROFILE=ses-mail aws ssm put-parameter \
 The system uses a fully event-driven architecture:
 
 ```plain
-SES → S3 → SNS → router_enrichment Lambda → EventBridge Event Bus →
+SES → S3 → SNS → SQS → EventBridge Pipes [router Lambda] → Event Bus →
   → SQS (gmail-forwarder) → Lambda (gmail_forwarder) → Gmail API
   → SQS (bouncer) → Lambda (bouncer) → SES Bounce
 ```
 
 **Key components**:
 
-- **SNS with X-Ray tracing**: SES publishes email receipt notifications to SNS topic
-- **Router enrichment Lambda**: Subscribes to SNS, performs DynamoDB lookup for routing rules, publishes to EventBridge Event Bus
-- **EventBridge Event Bus**: Routes messages to appropriate SQS queues based on routing action
-- **Handler lambdas**: Process specific actions (Gmail forwarding via `gmail_forwarder.py`, bouncing via `bouncer.py`)
+- **EventBridge Pipes**: Enriches messages via router lambda (DynamoDB lookup)
+- **EventBridge Event Bus**: Routes messages based on routing action
+- **Handler lambdas**: Process actions (Gmail forwarding, bouncing)
 - **DynamoDB**: Stores routing rules with hierarchical address matching
-- **Retry processing**: Step Functions workflow handles persistent failures with exponential backoff
+- **Step Functions**: Retry workflows for failures and token expiration
+- **X-Ray**: Distributed tracing across entire pipeline
+
+For complete architecture details, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 See `.kiro/specs/*` for complete design documentation.
 
-### DynamoDB Single-Table Design Pattern
+### DynamoDB Single-Table Design
 
-The routing table uses generic PK/SK keys with prefixed values for extensibility:
+**Quick reference**:
+- **Table**: `ses-mail-email-routing-{environment}`
+- **PK Format**: `ROUTE#<pattern>`, `SMTP_USER#<username>` (entity type prefix + identifier)
+- **SK Format**: `RULE#v1`, `CREDENTIALS#v1` (allows versioning)
+- **Lookup order**: Exact → Normalized (remove +tag) → Domain wildcard → Global wildcard
 
-**Table**: `ses-mail-email-routing-{environment}`
-
-- **PK**: `ROUTE#<pattern>` (e.g., `ROUTE#support@example.com`, `ROUTE#*@example.com`, `ROUTE#*`)
-- **SK**: `RULE#v1` (allows future versioning)
-- **Billing**: PAY_PER_REQUEST (no standing costs)
-
-**Denormalized attributes** (key data stored in values):
-
-- `entity_type`: `ROUTE`
-- `recipient`: Email pattern (denormalized from PK)
-- `action`: `forward-to-gmail` | `bounce`
-- `target`: Gmail address or empty string
-- `enabled`: Boolean
-- `created_at`, `updated_at`: ISO timestamps
-- `description`: Human-readable text
-
-**Hierarchical lookup strategy** (router lambda):
-
-1. Exact match: `ROUTE#user+tag@example.com`
-2. Normalized match: `ROUTE#user@example.com` (removes +tag for plus addressing)
-3. Domain wildcard: `ROUTE#*@example.com`
-4. Global wildcard: `ROUTE#*` (default/catch-all)
-
-The generic PK/SK design allows future use cases without schema changes (e.g., `CONFIG#*`, `METRICS#*`).
+For complete schema details and design rationale, see [docs/ARCHITECTURE.md#design-patterns](docs/ARCHITECTURE.md#design-patterns).
 
 ## Project Structure
 
@@ -175,7 +171,7 @@ terraform/
 2. Follow tasks in order from `tasks.md`
 3. A task is not complete until:
    - The code is written
-   - Updated `README.md` with user-facing documentation
+   - Updated appropriate documentation in `docs/` (SETUP.md, OPERATIONS.md, ARCHITECTURE.md, or DEVELOPMENT.md)
    - Ran `AWS_PROFILE=ses-mail make plan ENV=test >/dev/null`
    - Deployed with `AWS_PROFILE=ses-mail make apply ENV=test >/dev/null`
    - It is tested
@@ -246,19 +242,9 @@ When extending DynamoDB table:
 
 ### Email Processing Flow
 
-The event-driven email processing flow:
+**Quick summary**: SES → S3 → SNS → SQS → EventBridge Pipes → Router Lambda (DynamoDB) → Event Bus → Handler Queues → Handler Lambdas → Gmail API / SES Bounce
 
-1. SES receives email → stores in S3 (`emails/{messageId}`) → publishes to SNS topic
-2. Router enrichment Lambda subscribes to SNS → performs DynamoDB lookup for routing rules
-3. Router Lambda publishes routing decision to EventBridge Event Bus
-4. EventBridge rules route to appropriate SQS queues based on action:
-   - `forward-to-gmail` → gmail-forwarder queue
-   - `bounce` → bouncer queue
-5. Handler lambdas process messages from queues:
-   - Gmail forwarder: Fetches email from S3, imports to Gmail API, deletes from S3
-   - Bouncer: Sends bounce email via SES
-6. Failed messages are retried via SQS DLQ and Step Functions workflow
-7. X-Ray distributed tracing tracks requests across the entire pipeline
+For detailed flow diagrams and timing, see [docs/ARCHITECTURE.md#email-processing-flow](docs/ARCHITECTURE.md#email-processing-flow).
 
 ## Monitoring and Operations
 
@@ -269,23 +255,11 @@ The event-driven email processing flow:
 - Metric filters: emails accepted, spam, virus, lambda errors
 - Alarms: high volume, high spam rate, lambda errors (→ SNS topic)
 
-### Email Flow Debugging
+### Debugging Commands
 
-```bash
-# View Lambda logs
-AWS_PROFILE=ses-mail aws logs tail /aws/lambda/ses-mail-router-enrichment-test --follow
-AWS_PROFILE=ses-mail aws logs tail /aws/lambda/ses-mail-gmail-forwarder-test --follow
-AWS_PROFILE=ses-mail aws logs tail /aws/lambda/ses-mail-bouncer-test --follow
-
-# Check email in S3
-AWS_PROFILE=ses-mail aws s3 ls s3://ses-mail-storage-{account-id}-test/emails/
-
-# Check SQS queues
-AWS_PROFILE=ses-mail aws sqs get-queue-attributes --queue-url $(AWS_PROFILE=ses-mail aws sqs get-queue-url --queue-name ses-mail-gmail-forwarder-test --query 'QueueUrl' --output text) --attribute-names ApproximateNumberOfMessages
-
-# View X-Ray traces
-aws xray get-trace-summaries --start-time $(date -u -v-1H +%s) --end-time $(date -u +%s)
-```
+For debugging email flow, monitoring, and troubleshooting, see:
+- [docs/OPERATIONS.md#monitoring-and-troubleshooting](docs/OPERATIONS.md#monitoring-and-troubleshooting) - Complete monitoring guide
+- [docs/OPERATIONS.md#quick-command-reference](docs/OPERATIONS.md#quick-command-reference) - Common operations commands
 
 ## State Management
 
