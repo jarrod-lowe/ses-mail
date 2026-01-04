@@ -9,6 +9,7 @@ This guide covers day-to-day operational tasks for managing the SES Mail system.
 - [Email Routing Management](#email-routing-management)
 - [OAuth Token Management](#oauth-token-management)
 - [SMTP Credential Management](#smtp-credential-management)
+- [Outbound Email Monitoring](#outbound-email-monitoring)
 - [Monitoring, Troubleshooting, and Recovery](#monitoring-troubleshooting-and-recovery) - See [MONITORING.md](MONITORING.md) and [RECOVERY.md](RECOVERY.md)
 - [Backup and Recovery](#backup-and-recovery)
 - [Best Practices](#best-practices)
@@ -605,6 +606,179 @@ terraform output spf_record
 
 - `~all` - Softfail (recommended for testing)
 - `-all` - Fail/reject (recommended for production after confirming SPF works)
+
+## Outbound Email Monitoring
+
+The system automatically tracks all outbound emails sent via SES SMTP using a Configuration Set associated with your domains. Metrics are published to CloudWatch for monitoring delivery success, bounces, and complaints.
+
+### Configuration Set
+
+All emails sent from verified domains automatically use the Configuration Set:
+- **Configuration Set Name**: `ses-mail-outbound-{environment}`
+- **Association**: Automatically configured at domain level (no SMTP client changes needed)
+- **Events Tracked**: Send, Delivery, Bounce, Reject, Complaint
+
+**Verify Configuration Set is associated:**
+```bash
+AWS_PROFILE=ses-mail aws sesv2 get-email-identity \
+  --email-identity YOUR_DOMAIN \
+  --region ap-southeast-2 \
+  --query 'ConfigurationSetName'
+```
+
+### CloudWatch Metrics
+
+Outbound email metrics are published to the `SESMail/{environment}` namespace:
+
+| Metric | Description |
+|--------|-------------|
+| `OutboundSend` | Total emails sent |
+| `OutboundDelivery` | Successfully delivered emails |
+| `OutboundBounce` | Total bounces (hard + soft) |
+| `OutboundBounceHard` | Permanent bounces (bad address) |
+| `OutboundBounceSoft` | Temporary bounces (mailbox full, server down) |
+| `OutboundComplaint` | Spam complaints |
+| `OutboundReject` | Rejected by SES (invalid sender, etc.) |
+
+**View metrics:**
+```bash
+# Check send volume (last hour)
+AWS_PROFILE=ses-mail aws cloudwatch get-metric-statistics \
+  --namespace "SESMail/test" \
+  --metric-name OutboundSend \
+  --start-time $(date -u -v-1H +%Y-%m-%dT%H:%M:%S) \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+  --period 3600 \
+  --statistics Sum \
+  --region ap-southeast-2
+```
+
+### Dashboard Widgets
+
+The CloudWatch dashboard includes 4 outbound email widgets:
+1. **Outbound Email Volume** - Line graph showing sends, deliveries, bounces, complaints, rejects
+2. **Outbound Delivery & Error Rates** - Percentage rates with warning/critical annotations
+3. **Outbound Bounce Types** - Hard vs soft bounces (stacked area)
+4. **AWS SES Reputation Metrics** - Native SES bounce/complaint rates from Configuration Set
+
+**Access dashboard:**
+```bash
+# Get dashboard URL
+AWS_PROFILE=ses-mail make outputs ENV=test | grep cloudwatch_dashboard_url
+```
+
+### CloudWatch Alarms
+
+Two alarms monitor sender reputation:
+
+**High Bounce Rate Alarm:**
+- **Threshold**: 5% (industry standard warning level)
+- **Evaluation**: 2 consecutive 5-minute periods
+- **Action**: SNS notification to alarm topic
+- **Impact**: Sustained >10% bounce rate can result in SES sending suspension
+
+**High Complaint Rate Alarm:**
+- **Threshold**: 0.1% (AWS SES account health threshold)
+- **Evaluation**: 2 consecutive 5-minute periods
+- **Action**: SNS notification to alarm topic
+- **Severity**: CRITICAL - AWS may suspend account above 0.1%
+
+**Check alarm status:**
+```bash
+AWS_PROFILE=ses-mail aws cloudwatch describe-alarms \
+  --region ap-southeast-2 \
+  --alarm-names \
+    ses-mail-outbound-high-bounce-rate-test \
+    ses-mail-outbound-high-complaint-rate-test
+```
+
+### Testing Outbound Metrics
+
+Use the AWS SES Mailbox Simulator to test metrics without affecting sender reputation:
+
+```bash
+# Test successful delivery
+AWS_PROFILE=ses-mail aws ses send-email \
+  --from sender@YOUR_DOMAIN \
+  --destination ToAddresses=success@simulator.amazonses.com \
+  --message Subject={Data="Test"},Body={Text={Data="Metrics test"}} \
+  --region ap-southeast-2
+
+# Test hard bounce (bad address)
+AWS_PROFILE=ses-mail aws ses send-email \
+  --from sender@YOUR_DOMAIN \
+  --destination ToAddresses=bounce@simulator.amazonses.com \
+  --message Subject={Data="Bounce Test"},Body={Text={Data="Test"}} \
+  --region ap-southeast-2
+
+# Test spam complaint
+AWS_PROFILE=ses-mail aws ses send-email \
+  --from sender@YOUR_DOMAIN \
+  --destination ToAddresses=complaint@simulator.amazonses.com \
+  --message Subject={Data="Complaint Test"},Body={Text={Data="Test"}} \
+  --region ap-southeast-2
+```
+
+**Verify metrics are published (wait 60 seconds after sending):**
+```bash
+# Check Lambda logs
+AWS_PROFILE=ses-mail aws logs tail /aws/lambda/ses-mail-outbound-metrics-test \
+  --region ap-southeast-2 \
+  --since 5m \
+  --follow
+
+# Check CloudWatch metric
+AWS_PROFILE=ses-mail aws cloudwatch get-metric-statistics \
+  --namespace "SESMail/test" \
+  --metric-name OutboundSend \
+  --start-time $(date -u -v-10M +%Y-%m-%dT%H:%M:%S) \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+  --period 300 \
+  --statistics Sum \
+  --region ap-southeast-2
+```
+
+### Troubleshooting Outbound Metrics
+
+**Issue: Metrics not appearing after sending email**
+
+1. **Verify Configuration Set association:**
+   ```bash
+   AWS_PROFILE=ses-mail aws sesv2 get-email-identity \
+     --email-identity YOUR_DOMAIN \
+     --region ap-southeast-2
+   ```
+   Should show `"ConfigurationSetName": "ses-mail-outbound-test"`
+
+2. **Check SNS topic subscriptions:**
+   ```bash
+   AWS_PROFILE=ses-mail aws sns list-subscriptions \
+     --region ap-southeast-2 \
+     --query 'Subscriptions[?contains(TopicArn, `outbound`)]'
+   ```
+   All 4 topics should be subscribed to Lambda function
+
+3. **Check Lambda logs for errors:**
+   ```bash
+   AWS_PROFILE=ses-mail aws logs tail /aws/lambda/ses-mail-outbound-metrics-test \
+     --region ap-southeast-2 \
+     --since 1h
+   ```
+
+4. **Verify SES event destinations:**
+   ```bash
+   AWS_PROFILE=ses-mail aws ses describe-configuration-set \
+     --configuration-set-name ses-mail-outbound-test \
+     --region ap-southeast-2
+   ```
+
+**Issue: Alarm triggering frequently**
+
+High bounce/complaint rates indicate deliverability problems:
+- **Review bounce types**: Check `OutboundBounceHard` vs `OutboundBounceSoft` to determine if addresses are invalid (hard) or servers are temporarily unavailable (soft)
+- **Check recipient addresses**: Hard bounces usually mean the email address is invalid or doesn't exist - verify addresses before sending
+- **Review email content**: Complaints may indicate your messages are being flagged as spam by recipient mail servers
+- **Verify SPF/DKIM/DMARC**: Misconfigured email authentication can cause bounces
 
 ## Monitoring, Troubleshooting, and Recovery
 

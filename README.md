@@ -181,13 +181,14 @@ Automated IAM user provisioning for SMTP:
 
 ## Monitoring & Observability
 
-- **CloudWatch Dashboard** - Pre-configured dashboard with key metrics
+- **CloudWatch Dashboard** - Pre-configured dashboard with key metrics including outbound email delivery rates
+- **Outbound Email Metrics** - Automatic tracking of sends, deliveries, bounces, and complaints with no SMTP client changes needed
 - **X-Ray Tracing** - End-to-end distributed tracing from SES to Gmail
 - **Structured Logging** - JSON-formatted logs with correlation IDs
-- **CloudWatch Alarms** - Proactive alerting for failures and thresholds
+- **CloudWatch Alarms** - Proactive alerting for failures, high bounce rates (>5%), and complaint rates (>0.1%)
 - **SNS Notifications** - Email/SMS alerts for critical events
 
-See [docs/MONITORING.md](docs/MONITORING.md) for complete monitoring and troubleshooting guide.
+See [docs/MONITORING.md](docs/MONITORING.md) and [docs/OPERATIONS.md#outbound-email-monitoring](docs/OPERATIONS.md#outbound-email-monitoring) for complete guides.
 
 ## Troubleshooting
 

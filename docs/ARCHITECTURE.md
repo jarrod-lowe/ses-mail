@@ -6,6 +6,7 @@ This document provides a technical deep-dive into the SES Mail system architectu
 
 - [System Overview](#system-overview)
 - [Email Processing Flow](#email-processing-flow)
+- [Outbound Email Metrics Architecture](#outbound-email-metrics-architecture)
 - [Component Details](#component-details)
 - [Design Patterns](#design-patterns)
 - [AWS Integrations](#aws-integrations)
@@ -172,6 +173,296 @@ SES Mail is a serverless email receiving and forwarding system built on AWS that
 ```
 
 **Typical latency**: 5-10 seconds from SES receipt to Gmail inbox
+
+## Outbound Email Metrics Architecture
+
+The system tracks all outbound emails sent via SES SMTP using an event-driven metrics pipeline. Metrics are automatically published to CloudWatch for monitoring delivery success, bounce rates, and spam complaints.
+
+### Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Outbound Email Metrics Pipeline                                │
+│                                                                  │
+│  SMTP Client                                                     │
+│       │                                                          │
+│       ├──> SES SMTP (port 587)                                   │
+│       │         │                                                │
+│       │         ├──> SES Configuration Set (auto-associated)     │
+│       │         │         │                                      │
+│       │         │         ├──> Event Destination: Send           │
+│       │         │         ├──> Event Destination: Delivery       │
+│       │         │         ├──> Event Destination: Bounce/Reject  │
+│       │         │         └──> Event Destination: Complaint      │
+│       │         │                     │                          │
+│       │         │                     v                          │
+│       │         │         ┌───────────────────────┐              │
+│       │         │         │  SNS Topics (4)       │              │
+│       │         │         │  - outbound-send      │              │
+│       │         │         │  - outbound-delivery  │              │
+│       │         │         │  - outbound-bounce    │              │
+│       │         │         │  - outbound-complaint │              │
+│       │         │         └───────────────────────┘              │
+│       │         │                     │                          │
+│       │         │                     v                          │
+│       │         │         ┌───────────────────────┐              │
+│       │         │         │  Lambda Function      │              │
+│       │         │         │  outbound_metrics_    │              │
+│       │         │         │  publisher.py         │              │
+│       │         │         │                       │              │
+│       │         │         │  - Parse SES events   │              │
+│       │         │         │  - Classify bounces   │              │
+│       │         │         │  - Batch metrics      │              │
+│       │         │         └───────────────────────┘              │
+│       │         │                     │                          │
+│       │         │                     v                          │
+│       │         │         ┌───────────────────────┐              │
+│       │         │         │  CloudWatch Metrics   │              │
+│       │         │         │  SESMail/{env}        │              │
+│       │         │         │                       │              │
+│       │         │         │  - OutboundSend       │              │
+│       │         │         │  - OutboundDelivery   │              │
+│       │         │         │  - OutboundBounce     │              │
+│       │         │         │  - OutboundBounceHard │              │
+│       │         │         │  - OutboundBounceSoft │              │
+│       │         │         │  - OutboundComplaint  │              │
+│       │         │         │  - OutboundReject     │              │
+│       │         │         └───────────────────────┘              │
+│       │         │                     │                          │
+│       │         │         ┌───────────┴───────────┐              │
+│       │         │         v                       v              │
+│       │         │   ┌──────────────┐      ┌──────────────┐      │
+│       │         │   │  Dashboard   │      │  Alarms      │      │
+│       │         │   │  4 Widgets   │      │  Bounce >5%  │      │
+│       │         │   │              │      │  Complaint   │      │
+│       │         │   └──────────────┘      │  >0.1%       │      │
+│       │         │                         └──────────────┘      │
+│       │         │                                                │
+│       │         v                                                │
+│       │   Recipient's Inbox                                      │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Component Responsibilities
+
+#### SES Configuration Set
+
+- **Resource**: `aws_ses_configuration_set.outbound`
+- **Purpose**: Enables event tracking for outbound emails
+- **Features**:
+  - Reputation metrics tracking (bounce/complaint rates)
+  - Event destinations for send, delivery, bounce, reject, complaint
+  - Automatically associated with all verified domains
+- **Association**: Via `aws_sesv2_email_identity` with `configuration_set_name`
+- **Impact**: Zero - works transparently without SMTP client changes
+
+#### Event Destinations
+
+Each event type has a dedicated SNS topic:
+- **Send events**: Published when SES accepts email for delivery
+- **Delivery events**: Published when recipient server accepts email
+- **Bounce events**: Published when email bounces (hard or soft)
+- **Reject events**: Published when SES rejects email (invalid sender, etc.)
+- **Complaint events**: Published when recipient marks email as spam
+
+All SNS topics have:
+- X-Ray Active tracing enabled
+- IAM policies allowing SES to publish
+- Lambda subscription for metrics processing
+
+#### Outbound Metrics Publisher Lambda
+
+**Function**: `terraform/modules/ses-mail/lambda/outbound_metrics_publisher.py`
+
+**Responsibilities**:
+1. Parse SNS notifications from SES event destinations
+2. Extract event type (send, delivery, bounce, reject, complaint)
+3. Classify bounce type:
+   - **Hard bounce**: Permanent failure (bad address, domain doesn't exist)
+   - **Soft bounce**: Temporary failure (mailbox full, server down)
+4. Batch metrics (max 20 per PutMetricData call)
+5. Publish to CloudWatch `SESMail/{environment}` namespace
+
+**Runtime**: Python 3.12 with AWS Lambda Powertools
+**Memory**: 256 MB
+**Timeout**: 30 seconds
+**Tracing**: X-Ray Active
+
+**Bounce Classification Logic**:
+```python
+# Hard bounces (permanent failures)
+bounce_type = "Permanent"
+bounce_subtypes = ["General", "NoEmail", "Suppressed"]
+
+# Soft bounces (temporary failures)
+bounce_type = "Transient"
+bounce_subtypes = ["General", "MailboxFull", "MessageTooLarge", "ContentRejected"]
+```
+
+**Error Handling**:
+- Malformed events logged but don't fail function
+- CloudWatch PutMetricData failures logged with stack trace
+- X-Ray subsegments for debugging
+
+#### CloudWatch Metrics
+
+**Namespace**: `SESMail/{environment}`
+
+| Metric | Unit | Description |
+|--------|------|-------------|
+| OutboundSend | Count | Emails accepted by SES |
+| OutboundDelivery | Count | Emails successfully delivered |
+| OutboundBounce | Count | Total bounces (hard + soft) |
+| OutboundBounceHard | Count | Permanent bounces |
+| OutboundBounceSoft | Count | Temporary bounces |
+| OutboundComplaint | Count | Spam complaints |
+| OutboundReject | Count | SES rejections |
+
+**Retention**: Default CloudWatch retention (indefinite for metrics)
+
+#### Dashboard Widgets
+
+Four widgets added to existing `ses-mail-dashboard-{environment}`:
+
+1. **Outbound Email Volume** (line graph, y=44, x=0, 12x6)
+   - Metrics: Send, Delivery, Bounce, Complaint, Reject
+   - Period: 5 minutes
+   - Stat: Sum
+
+2. **Outbound Delivery & Error Rates** (line graph, y=44, x=12, 12x6)
+   - Metric Math:
+     - `delivery_rate = (delivery / send) * 100`
+     - `bounce_rate = (bounce / send) * 100`
+     - `complaint_rate = (complaint / send) * 100`
+   - Annotations:
+     - Warning: 5% bounce rate
+     - Critical: 10% bounce rate
+   - Y-axis: Percentage (0-100%)
+
+3. **Outbound Bounce Types** (stacked area, y=50, x=0, 12x6)
+   - Metrics: BounceHard, BounceSoft
+   - Period: 5 minutes
+   - Helps distinguish address hygiene (hard) vs delivery issues (soft)
+
+4. **AWS SES Reputation Metrics** (line graph, y=50, x=12, 12x6)
+   - Native AWS/SES metrics:
+     - `Reputation.BounceRate`
+     - `Reputation.ComplaintRate`
+   - Dimension: `ConfigurationSet = ses-mail-outbound-{env}`
+   - Annotations:
+     - Warning: 0.1% complaint rate
+     - Critical: 5% bounce rate
+
+#### CloudWatch Alarms
+
+**High Bounce Rate Alarm**:
+- **Metric**: `(OutboundBounce / OutboundSend) * 100`
+- **Threshold**: 5%
+- **Evaluation**: 2 consecutive 5-minute periods
+- **Datapoints**: 2 out of 2
+- **Action**: SNS topic notification
+- **Rationale**: Industry standard; sustained >10% risks SES suspension
+
+**High Complaint Rate Alarm**:
+- **Metric**: `(OutboundComplaint / OutboundSend) * 100`
+- **Threshold**: 0.1%
+- **Evaluation**: 2 consecutive 5-minute periods
+- **Datapoints**: 2 out of 2
+- **Action**: SNS topic notification
+- **Severity**: CRITICAL - AWS may suspend account above 0.1%
+
+### Data Flow
+
+1. **Email Sent** (t=0s)
+   - SMTP client connects to `email-smtp.ap-southeast-2.amazonaws.com:587`
+   - SES receives email from verified domain
+   - Configuration Set automatically applied (domain-level association)
+   - SES publishes "Send" event to SNS topic
+
+2. **Event Processing** (t=0-2s)
+   - SNS delivers notification to Lambda (async)
+   - Lambda parses SES event JSON
+   - Extracts event type, timestamp, messageId
+   - Publishes `OutboundSend=1` to CloudWatch
+
+3. **Delivery/Bounce/Complaint** (t=varies)
+   - SES attempts delivery to recipient server
+   - Outcome event published to appropriate SNS topic:
+     - **Success**: "Delivery" event → `OutboundDelivery=1`
+     - **Bounce**: "Bounce" event → `OutboundBounce=1`, plus Hard/Soft classification
+     - **Complaint**: "Complaint" event (hours/days later) → `OutboundComplaint=1`
+     - **Reject**: "Reject" event → `OutboundReject=1`
+
+4. **Metrics Aggregation** (t=real-time)
+   - CloudWatch aggregates metrics by period (5min default)
+   - Dashboard updates every minute
+   - Alarms evaluate every 5 minutes (2 datapoints required)
+
+### Design Decisions
+
+**Why SESv2 instead of SESv1?**
+- SESv1 (`aws_ses_domain_identity`) doesn't support Configuration Set association
+- SESv2 (`aws_sesv2_email_identity`) allows `configuration_set_name` attribute
+- Migration from v1 to v2 required but DKIM tokens preserved (no DNS changes)
+
+**Why SNS instead of direct CloudWatch Events?**
+- SES event destinations only support SNS, Kinesis Firehose, or Pinpoint
+- SNS provides natural fan-out if we add more subscribers later
+- Lambda can batch multiple SNS messages for efficient CloudWatch puts
+
+**Why custom metrics instead of native SES metrics?**
+- Native SES metrics lack granularity (no send vs delivery breakdown)
+- Custom metrics allow bounce type classification (hard vs soft)
+- Enables metric math for rate calculations (bounce%, complaint%)
+- Metrics in existing `SESMail/{environment}` namespace for consistency
+
+**Why account-level instead of per-domain metrics?**
+- Simpler implementation (no domain extraction from events)
+- Adequate for single-domain deployments
+- Can add domain dimension later if needed (Phase 2)
+
+### Cost Estimate
+
+**Monthly costs for 10,000 outbound emails**:
+- SNS notifications: 40,000 events × $0.50/million = **$0.02**
+- Lambda invocations: 40,000 × $0.20/million = **$0.01** (within free tier)
+- Lambda duration: 40,000 × 200ms × $0.0000166667/GB-sec × 0.256GB = **$0.03**
+- CloudWatch metrics: 7 custom metrics = **$0** (within free tier of 10)
+- CloudWatch dashboard: 1 dashboard = **$3.00**
+- CloudWatch alarms: 2 alarms = **$0** (within free tier of 10)
+
+**Total: ~$3/month** (primarily dashboard cost)
+
+### Scalability
+
+**Current capacity**:
+- SNS: 100,000 messages/sec per topic (far exceeds needs)
+- Lambda: 1,000 concurrent executions (default account limit)
+- CloudWatch: 40 transactions/sec per dimension (publish limit)
+
+**Bottleneck**: CloudWatch PutMetricData at ~40 TPS
+- At 4 events per email (send, delivery, bounce/reject, possible complaint)
+- Theoretical max: ~10 emails/sec = 36,000 emails/hour
+- Well above expected load for single-domain usage
+
+**If scaling needed**:
+- Batch more aggressively (currently max 20 metrics/call)
+- Use embedded metric format (EMF) for higher throughput
+- Request CloudWatch quota increase
+
+### Monitoring the Metrics System
+
+**Health checks**:
+1. SNS topic subscriptions active
+2. Lambda function not throttling/erroring
+3. CloudWatch metrics publishing within 60 seconds
+4. Dashboard widgets displaying data
+
+**Troubleshooting**:
+- Lambda logs: `/aws/lambda/ses-mail-outbound-metrics-{env}`
+- X-Ray traces: Filter by annotation `service=ses-mail-outbound-metrics`
+- Test with SES Mailbox Simulator: `success@simulator.amazonses.com`
 
 ## Component Details
 
