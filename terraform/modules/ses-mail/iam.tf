@@ -627,3 +627,48 @@ resource "aws_iam_role_policy" "lambda_credential_manager_cloudwatch_metrics" {
   role   = aws_iam_role.lambda_credential_manager_execution.id
   policy = data.aws_iam_policy_document.lambda_credential_manager_cloudwatch_metrics.json
 }
+
+# ===========================
+# Outbound Metrics Publisher Lambda IAM
+# ===========================
+
+# IAM role for outbound metrics publisher Lambda function
+resource "aws_iam_role" "lambda_outbound_metrics" {
+  name               = "ses-mail-lambda-outbound-metrics-${var.environment}"
+  assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
+}
+
+# Attach AWS managed policy for basic Lambda execution (CloudWatch Logs)
+resource "aws_iam_role_policy_attachment" "lambda_outbound_metrics_basic_execution" {
+  role       = aws_iam_role.lambda_outbound_metrics.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+# IAM policy document for outbound metrics Lambda CloudWatch metrics access
+data "aws_iam_policy_document" "lambda_outbound_metrics_cloudwatch" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "cloudwatch:PutMetricData"
+    ]
+    resources = ["*"]
+    condition {
+      test     = "StringEquals"
+      variable = "cloudwatch:namespace"
+      values   = ["SESMail/${var.environment}"]
+    }
+  }
+}
+
+# IAM policy for outbound metrics Lambda to publish CloudWatch metrics
+resource "aws_iam_role_policy" "lambda_outbound_metrics_cloudwatch" {
+  name   = "lambda-outbound-metrics-cloudwatch-${var.environment}"
+  role   = aws_iam_role.lambda_outbound_metrics.id
+  policy = data.aws_iam_policy_document.lambda_outbound_metrics_cloudwatch.json
+}
+
+# Attach X-Ray write access for outbound metrics Lambda (for distributed tracing)
+resource "aws_iam_role_policy_attachment" "lambda_outbound_metrics_xray_access" {
+  role       = aws_iam_role.lambda_outbound_metrics.name
+  policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
+}

@@ -351,3 +351,89 @@ resource "aws_lambda_event_source_mapping" "smtp_credential_manager" {
     aws_iam_role_policy.lambda_credential_manager_dynamodb_streams
   ]
 }
+
+# ===========================
+# Outbound Metrics Publisher Lambda
+# ===========================
+
+# Archive the outbound metrics publisher Lambda function code (single file, no dependencies)
+data "archive_file" "outbound_metrics_publisher_zip" {
+  type        = "zip"
+  source_file = "${path.module}/lambda/outbound_metrics_publisher.py"
+  output_path = "${path.module}/lambda/outbound_metrics_publisher.zip"
+}
+
+# Lambda function for publishing outbound email metrics from SES events
+resource "aws_lambda_function" "outbound_metrics_publisher" {
+  filename         = data.archive_file.outbound_metrics_publisher_zip.output_path
+  function_name    = "ses-mail-outbound-metrics-${var.environment}"
+  role             = aws_iam_role.lambda_outbound_metrics.arn
+  handler          = "outbound_metrics_publisher.lambda_handler"
+  source_code_hash = data.archive_file.outbound_metrics_publisher_zip.output_base64sha256
+  runtime          = "python3.12"
+  timeout          = 30
+  memory_size      = 256
+  description      = "Processes SES outbound email events and publishes CloudWatch metrics"
+
+  # Attach shared layer for dependencies (boto3, aws_xray_sdk, aws-lambda-powertools)
+  layers = [aws_lambda_layer_version.shared.arn]
+
+  # Enable X-Ray tracing for distributed tracing
+  tracing_config {
+    mode = "Active"
+  }
+
+  environment {
+    variables = {
+      ENVIRONMENT = var.environment
+    }
+  }
+
+  depends_on = [
+    aws_iam_role_policy_attachment.lambda_outbound_metrics_basic_execution,
+    aws_iam_role_policy.lambda_outbound_metrics_cloudwatch,
+    aws_iam_role_policy_attachment.lambda_outbound_metrics_xray_access
+  ]
+}
+
+# CloudWatch Log Group for outbound metrics publisher Lambda function
+resource "aws_cloudwatch_log_group" "lambda_outbound_metrics_logs" {
+  name              = "/aws/lambda/${aws_lambda_function.outbound_metrics_publisher.function_name}"
+  retention_in_days = 30
+}
+
+# Lambda permission for SNS to invoke outbound metrics publisher (send events)
+resource "aws_lambda_permission" "outbound_metrics_sns_send" {
+  statement_id  = "AllowExecutionFromSNSSend"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.outbound_metrics_publisher.function_name
+  principal     = "sns.amazonaws.com"
+  source_arn    = aws_sns_topic.outbound_send.arn
+}
+
+# Lambda permission for SNS to invoke outbound metrics publisher (delivery events)
+resource "aws_lambda_permission" "outbound_metrics_sns_delivery" {
+  statement_id  = "AllowExecutionFromSNSDelivery"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.outbound_metrics_publisher.function_name
+  principal     = "sns.amazonaws.com"
+  source_arn    = aws_sns_topic.outbound_delivery.arn
+}
+
+# Lambda permission for SNS to invoke outbound metrics publisher (bounce events)
+resource "aws_lambda_permission" "outbound_metrics_sns_bounce" {
+  statement_id  = "AllowExecutionFromSNSBounce"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.outbound_metrics_publisher.function_name
+  principal     = "sns.amazonaws.com"
+  source_arn    = aws_sns_topic.outbound_bounce.arn
+}
+
+# Lambda permission for SNS to invoke outbound metrics publisher (complaint events)
+resource "aws_lambda_permission" "outbound_metrics_sns_complaint" {
+  statement_id  = "AllowExecutionFromSNSComplaint"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.outbound_metrics_publisher.function_name
+  principal     = "sns.amazonaws.com"
+  source_arn    = aws_sns_topic.outbound_complaint.arn
+}

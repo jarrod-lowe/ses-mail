@@ -319,6 +319,139 @@ EOT
             }
           }
         }
+      },
+      # Outbound Email Volume
+      {
+        type   = "metric"
+        width  = 12
+        height = 6
+        x      = 0
+        y      = 44
+        properties = {
+          metrics = [
+            ["SESMail/${var.environment}", "OutboundSend", { stat = "Sum", label = "Sent", color = "#1f77b4" }],
+            [".", "OutboundDelivery", { stat = "Sum", label = "Delivered", color = "#2ca02c" }],
+            [".", "OutboundBounce", { stat = "Sum", label = "Bounces", color = "#d62728" }],
+            [".", "OutboundComplaint", { stat = "Sum", label = "Complaints", color = "#ff7f0e" }],
+            [".", "OutboundReject", { stat = "Sum", label = "Rejects", color = "#9467bd" }]
+          ]
+          period = 300
+          stat   = "Sum"
+          region = var.aws_region
+          title  = "Outbound Email Volume"
+          yAxis = {
+            left = {
+              min = 0
+            }
+          }
+        }
+      },
+      # Outbound Delivery & Error Rates
+      {
+        type   = "metric"
+        width  = 12
+        height = 6
+        x      = 12
+        y      = 44
+        properties = {
+          metrics = [
+            [{ expression = "(delivery / send) * 100", label = "Delivery Rate (%)", id = "e1", yAxis = "left", color = "#2ca02c" }],
+            [{ expression = "(bounce / send) * 100", label = "Bounce Rate (%)", id = "e2", yAxis = "left", color = "#d62728" }],
+            [{ expression = "(complaint / send) * 100", label = "Complaint Rate (%)", id = "e3", yAxis = "left", color = "#ff7f0e" }],
+            ["SESMail/${var.environment}", "OutboundSend", { id = "send", stat = "Sum", visible = false }],
+            [".", "OutboundDelivery", { id = "delivery", stat = "Sum", visible = false }],
+            [".", "OutboundBounce", { id = "bounce", stat = "Sum", visible = false }],
+            [".", "OutboundComplaint", { id = "complaint", stat = "Sum", visible = false }]
+          ]
+          period = 300
+          stat   = "Sum"
+          region = var.aws_region
+          title  = "Outbound Delivery & Error Rates"
+          annotations = {
+            horizontal = [
+              {
+                label = "Warning: Bounce > 5%"
+                value = 5
+                color = "#ff7f0e"
+              },
+              {
+                label = "Critical: Bounce > 10%"
+                value = 10
+                color = "#d62728"
+              }
+            ]
+          }
+          yAxis = {
+            left = {
+              min       = 0
+              max       = 100
+              label     = "Percentage"
+              showUnits = false
+            }
+          }
+        }
+      },
+      # Outbound Bounce Types
+      {
+        type   = "metric"
+        width  = 12
+        height = 6
+        x      = 0
+        y      = 50
+        properties = {
+          metrics = [
+            ["SESMail/${var.environment}", "OutboundBounceHard", { stat = "Sum", label = "Hard Bounces (Permanent)", color = "#d62728" }],
+            [".", "OutboundBounceSoft", { stat = "Sum", label = "Soft Bounces (Transient)", color = "#ff7f0e" }]
+          ]
+          period = 300
+          stat   = "Sum"
+          region = var.aws_region
+          title  = "Outbound Bounce Types"
+          yAxis = {
+            left = {
+              min = 0
+            }
+          }
+        }
+      },
+      # AWS SES Reputation Metrics
+      {
+        type   = "metric"
+        width  = 12
+        height = 6
+        x      = 12
+        y      = 50
+        properties = {
+          metrics = [
+            ["AWS/SES", "Reputation.BounceRate", "ConfigurationSet", aws_ses_configuration_set.outbound.name, { stat = "Average", label = "SES Bounce Rate", yAxis = "left", color = "#d62728" }],
+            [".", "Reputation.ComplaintRate", ".", ".", { stat = "Average", label = "SES Complaint Rate", yAxis = "left", color = "#ff7f0e" }]
+          ]
+          period = 300
+          stat   = "Average"
+          region = var.aws_region
+          title  = "AWS SES Reputation Metrics"
+          annotations = {
+            horizontal = [
+              {
+                label = "Critical: Complaint > 0.1%"
+                value = 0.001
+                color = "#ff7f0e"
+              },
+              {
+                label = "Warning: Bounce > 5%"
+                value = 0.05
+                color = "#d62728"
+              }
+            ]
+          }
+          yAxis = {
+            left = {
+              min       = 0
+              label     = "Rate (decimal)"
+              showUnits = false
+            }
+          }
+        }
       }
     ]
   })
@@ -545,6 +678,132 @@ resource "aws_cloudwatch_metric_alarm" "s3_tagging_failures" {
   threshold           = 0
   alarm_description   = "Alert when S3 object tagging fails (${var.environment}). May indicate IAM permission issues or S3 API throttling. Note: NoSuchKey errors (object already deleted) are not counted as failures."
   treat_missing_data  = "notBreaching"
+
+  alarm_actions = [var.alarm_sns_topic_arn]
+  ok_actions    = [var.alarm_sns_topic_arn]
+}
+
+# ===========================
+# Outbound Email Metric Alarms
+# ===========================
+
+# CloudWatch Alarm for high outbound bounce rate
+resource "aws_cloudwatch_metric_alarm" "outbound_high_bounce_rate" {
+  alarm_name          = "ses-mail-outbound-high-bounce-rate-${var.environment}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  threshold           = 5.0 # 5% bounce rate
+  alarm_description   = "Alert when outbound email bounce rate exceeds 5% (${var.environment}). High bounce rates harm sender reputation and may lead to account suspension."
+  treat_missing_data  = "notBreaching"
+
+  metric_query {
+    id          = "bounce_rate"
+    expression  = "(bounce / send) * 100"
+    label       = "Bounce Rate (%)"
+    return_data = true
+  }
+
+  metric_query {
+    id = "bounce"
+    metric {
+      metric_name = "OutboundBounce"
+      namespace   = "SESMail/${var.environment}"
+      period      = 300
+      stat        = "Sum"
+    }
+  }
+
+  metric_query {
+    id = "send"
+    metric {
+      metric_name = "OutboundSend"
+      namespace   = "SESMail/${var.environment}"
+      period      = 300
+      stat        = "Sum"
+    }
+  }
+
+  alarm_actions = [var.alarm_sns_topic_arn]
+  ok_actions    = [var.alarm_sns_topic_arn]
+}
+
+# CloudWatch Alarm for high outbound complaint rate (CRITICAL)
+resource "aws_cloudwatch_metric_alarm" "outbound_high_complaint_rate" {
+  alarm_name          = "ses-mail-outbound-high-complaint-rate-${var.environment}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  threshold           = 0.1 # 0.1% complaint rate
+  alarm_description   = "CRITICAL: Outbound email complaint rate exceeds 0.1% (${var.environment}). Risk of SES account suspension! Investigate immediately."
+  treat_missing_data  = "notBreaching"
+
+  metric_query {
+    id          = "complaint_rate"
+    expression  = "(complaint / send) * 100"
+    label       = "Complaint Rate (%)"
+    return_data = true
+  }
+
+  metric_query {
+    id = "complaint"
+    metric {
+      metric_name = "OutboundComplaint"
+      namespace   = "SESMail/${var.environment}"
+      period      = 300
+      stat        = "Sum"
+    }
+  }
+
+  metric_query {
+    id = "send"
+    metric {
+      metric_name = "OutboundSend"
+      namespace   = "SESMail/${var.environment}"
+      period      = 300
+      stat        = "Sum"
+    }
+  }
+
+  alarm_actions = [var.alarm_sns_topic_arn]
+  ok_actions    = [var.alarm_sns_topic_arn]
+}
+
+# CloudWatch Alarm for SES reputation bounce rate (native AWS metric)
+resource "aws_cloudwatch_metric_alarm" "ses_reputation_bounce" {
+  alarm_name          = "ses-mail-reputation-bounce-rate-${var.environment}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "Reputation.BounceRate"
+  namespace           = "AWS/SES"
+  period              = 300
+  statistic           = "Average"
+  threshold           = 0.05 # 5% as decimal
+  alarm_description   = "Alert when SES reputation bounce rate exceeds 5% (${var.environment})"
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    ConfigurationSet = aws_ses_configuration_set.outbound.name
+  }
+
+  alarm_actions = [var.alarm_sns_topic_arn]
+  ok_actions    = [var.alarm_sns_topic_arn]
+}
+
+# CloudWatch Alarm for SES reputation complaint rate (CRITICAL - native AWS metric)
+resource "aws_cloudwatch_metric_alarm" "ses_reputation_complaint" {
+  alarm_name          = "ses-mail-reputation-complaint-rate-${var.environment}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "Reputation.ComplaintRate"
+  namespace           = "AWS/SES"
+  period              = 300
+  statistic           = "Average"
+  threshold           = 0.001 # 0.1% as decimal
+  alarm_description   = "CRITICAL: SES reputation complaint rate exceeds 0.1% (${var.environment}). Immediate action required to prevent account suspension!"
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    ConfigurationSet = aws_ses_configuration_set.outbound.name
+  }
 
   alarm_actions = [var.alarm_sns_topic_arn]
   ok_actions    = [var.alarm_sns_topic_arn]

@@ -1,18 +1,18 @@
 # Outputs for DNS configuration (grouped by domain)
 
-output "domain_verification_tokens" {
-  description = "TXT record values for domain verification (by domain)"
+output "domain_verification_status" {
+  description = "Domain verification status (verified via DKIM in SESv2)"
   value = {
-    for domain, identity in aws_ses_domain_identity.main :
-    domain => identity.verification_token
+    for domain, identity in aws_sesv2_email_identity.main :
+    domain => identity.verification_status
   }
 }
 
 output "dkim_tokens" {
   description = "DKIM tokens for email authentication (by domain)"
   value = {
-    for domain, dkim in aws_ses_domain_dkim.main :
-    domain => dkim.dkim_tokens
+    for domain, identity in aws_sesv2_email_identity.main :
+    domain => try(identity.dkim_signing_attributes[0].tokens, [])
   }
 }
 
@@ -174,16 +174,10 @@ output "spf_record" {
 output "dns_configuration_summary" {
   description = "Summary of all DNS records to configure in Route53, grouped by domain"
   value = {
-    note = "Add these records to your Route53 hosted zone in the other AWS account"
+    note = "Add these records to your Route53 hosted zone in the other AWS account. SESv2 uses DKIM records for both authentication and verification."
     domains = {
       for domain in var.domain : domain => concat(
         [
-          {
-            name    = "_amazonses.${domain}"
-            type    = "TXT"
-            value   = aws_ses_domain_identity.main[domain].verification_token
-            purpose = "SES domain verification"
-          },
           {
             name     = domain
             type     = "MX"
@@ -223,11 +217,11 @@ output "dns_configuration_summary" {
           }
         ],
         [
-          for token in aws_ses_domain_dkim.main[domain].dkim_tokens : {
+          for token in try(aws_sesv2_email_identity.main[domain].dkim_signing_attributes[0].tokens, []) : {
             name    = "${token}._domainkey.${domain}"
             type    = "CNAME"
             value   = "${token}.dkim.amazonses.com"
-            purpose = "DKIM authentication"
+            purpose = "DKIM authentication and domain verification (SESv2)"
           }
         ],
         [
@@ -300,4 +294,28 @@ output "gmail_forwarder_retry_queue_url" {
 output "gmail_forwarder_retry_queue_arn" {
   description = "ARN of the Gmail forwarder retry queue"
   value       = aws_sqs_queue.gmail_forwarder_retry.arn
+}
+
+# ===========================
+# Outbound Email Metrics Outputs
+# ===========================
+
+output "ses_configuration_set_name" {
+  description = "Name of the SES Configuration Set for outbound email tracking"
+  value       = aws_ses_configuration_set.outbound.name
+}
+
+output "ses_configuration_set_arn" {
+  description = "ARN of the SES Configuration Set for outbound email tracking"
+  value       = aws_ses_configuration_set.outbound.arn
+}
+
+output "outbound_metrics_lambda_name" {
+  description = "Name of the Lambda function that publishes outbound email metrics"
+  value       = aws_lambda_function.outbound_metrics_publisher.function_name
+}
+
+output "outbound_metrics_lambda_arn" {
+  description = "ARN of the Lambda function that publishes outbound email metrics"
+  value       = aws_lambda_function.outbound_metrics_publisher.arn
 }

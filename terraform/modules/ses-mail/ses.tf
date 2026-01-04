@@ -1,21 +1,31 @@
-# SES domain identity for each domain
-resource "aws_ses_domain_identity" "main" {
+# SESv2 email identity with DKIM and Configuration Set
+# Using v2 API to support automatic Configuration Set association for outbound metrics
+resource "aws_sesv2_email_identity" "main" {
   for_each = toset(var.domain)
-  domain   = each.value
-}
 
-# Enable DKIM signing with AWS managed keys (Easy DKIM)
-resource "aws_ses_domain_dkim" "main" {
-  for_each = aws_ses_domain_identity.main
-  domain   = each.value.domain
+  email_identity         = each.value
+  configuration_set_name = aws_ses_configuration_set.outbound.name
+
+  # Enable Easy DKIM (AWS managed keys)
+  dkim_signing_attributes {
+    next_signing_key_length = "RSA_2048_BIT"
+  }
+
+  tags = {
+    Name        = "ses-mail-identity-${each.value}-${var.environment}"
+    Environment = var.environment
+    Service     = "ses-mail"
+    Purpose     = "Domain identity with DKIM and Configuration Set"
+  }
 }
 
 # Custom MAIL FROM domain for better email deliverability
-resource "aws_ses_domain_mail_from" "main" {
-  for_each               = aws_ses_domain_identity.main
-  domain                 = each.value.domain
-  mail_from_domain       = "${var.mail_from_subdomain}.${each.value.domain}"
-  behavior_on_mx_failure = "RejectMessage"
+resource "aws_sesv2_email_identity_mail_from_attributes" "main" {
+  for_each = toset(var.domain)
+
+  email_identity         = aws_sesv2_email_identity.main[each.value].email_identity
+  mail_from_domain       = "${var.mail_from_subdomain}.${each.value}"
+  behavior_on_mx_failure = "REJECT_MESSAGE"
 }
 
 # SES receipt rule set
@@ -73,4 +83,63 @@ resource "aws_ses_receipt_rule" "shared" {
     aws_s3_bucket_policy.email_storage,
     aws_sns_topic_policy.email_processing
   ]
+}
+
+# SES Configuration Set for outbound email tracking and metrics
+resource "aws_ses_configuration_set" "outbound" {
+  name = "ses-mail-outbound-${var.environment}"
+
+  # Enable reputation metrics tracking (bounce/complaint rates)
+  reputation_metrics_enabled = true
+
+  # Enable email sending through this configuration set
+  sending_enabled = true
+}
+
+# Event destination for send events
+resource "aws_ses_event_destination" "send" {
+  name                   = "send-events"
+  configuration_set_name = aws_ses_configuration_set.outbound.name
+  enabled                = true
+  matching_types         = ["send"]
+
+  sns_destination {
+    topic_arn = aws_sns_topic.outbound_send.arn
+  }
+}
+
+# Event destination for delivery events
+resource "aws_ses_event_destination" "delivery" {
+  name                   = "delivery-events"
+  configuration_set_name = aws_ses_configuration_set.outbound.name
+  enabled                = true
+  matching_types         = ["delivery"]
+
+  sns_destination {
+    topic_arn = aws_sns_topic.outbound_delivery.arn
+  }
+}
+
+# Event destination for bounce events (includes both bounce and reject)
+resource "aws_ses_event_destination" "bounce" {
+  name                   = "bounce-events"
+  configuration_set_name = aws_ses_configuration_set.outbound.name
+  enabled                = true
+  matching_types         = ["bounce", "reject"]
+
+  sns_destination {
+    topic_arn = aws_sns_topic.outbound_bounce.arn
+  }
+}
+
+# Event destination for complaint events
+resource "aws_ses_event_destination" "complaint" {
+  name                   = "complaint-events"
+  configuration_set_name = aws_ses_configuration_set.outbound.name
+  enabled                = true
+  matching_types         = ["complaint"]
+
+  sns_destination {
+    topic_arn = aws_sns_topic.outbound_complaint.arn
+  }
 }
