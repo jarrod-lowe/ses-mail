@@ -52,8 +52,10 @@ resource "aws_cloudwatch_metric_alarm" "gmail_forwarder_dlq_alarm" {
   statistic           = "Average"
   threshold           = 0
   alarm_description   = "Alert when messages appear in Gmail forwarder DLQ"
-  alarm_actions       = [var.alarm_sns_topic_arn]
-  ok_actions          = [var.alarm_sns_topic_arn]
+  treat_missing_data  = "notBreaching"
+
+  alarm_actions = [var.alarm_sns_topic_arn]
+  ok_actions    = [var.alarm_sns_topic_arn]
 
   dimensions = {
     QueueName = aws_sqs_queue.gmail_forwarder_dlq.name
@@ -77,8 +79,10 @@ resource "aws_cloudwatch_metric_alarm" "gmail_forwarder_queue_age_alarm" {
   statistic           = "Maximum"
   threshold           = 300 # 5 minutes
   alarm_description   = "Alert when messages in Gmail forwarder queue are older than 5 minutes"
-  alarm_actions       = [var.alarm_sns_topic_arn]
-  ok_actions          = [var.alarm_sns_topic_arn]
+  treat_missing_data  = "notBreaching"
+
+  alarm_actions = [var.alarm_sns_topic_arn]
+  ok_actions    = [var.alarm_sns_topic_arn]
 
   dimensions = {
     QueueName = aws_sqs_queue.gmail_forwarder.name
@@ -145,8 +149,10 @@ resource "aws_cloudwatch_metric_alarm" "gmail_forwarder_retry_dlq_alarm" {
   statistic           = "Average"
   threshold           = 0
   alarm_description   = "Alert when messages appear in Gmail forwarder retry DLQ"
-  alarm_actions       = [var.alarm_sns_topic_arn]
-  ok_actions          = [var.alarm_sns_topic_arn]
+  treat_missing_data  = "notBreaching"
+
+  alarm_actions = [var.alarm_sns_topic_arn]
+  ok_actions    = [var.alarm_sns_topic_arn]
 
   dimensions = {
     QueueName = aws_sqs_queue.gmail_forwarder_retry_dlq.name
@@ -170,8 +176,10 @@ resource "aws_cloudwatch_metric_alarm" "gmail_forwarder_retry_queue_age_alarm" {
   statistic           = "Maximum"
   threshold           = 900 # 15 minutes
   alarm_description   = "Alert when messages in Gmail forwarder retry queue are older than 15 minutes"
-  alarm_actions       = [var.alarm_sns_topic_arn]
-  ok_actions          = [var.alarm_sns_topic_arn]
+  treat_missing_data  = "notBreaching"
+
+  alarm_actions = [var.alarm_sns_topic_arn]
+  ok_actions    = [var.alarm_sns_topic_arn]
 
   dimensions = {
     QueueName = aws_sqs_queue.gmail_forwarder_retry.name
@@ -195,8 +203,10 @@ resource "aws_cloudwatch_metric_alarm" "gmail_forwarder_retry_queue_depth_alarm"
   statistic           = "Average"
   threshold           = 1 # Alert when >= 1 message (low-usage system, any retry indicates token expiration)
   alarm_description   = "Alert when messages are queued for retry - indicates OAuth token expiration (${var.environment})"
-  alarm_actions       = [var.alarm_sns_topic_arn]
-  ok_actions          = [var.alarm_sns_topic_arn]
+  treat_missing_data  = "notBreaching"
+
+  alarm_actions = [var.alarm_sns_topic_arn]
+  ok_actions    = [var.alarm_sns_topic_arn]
 
   dimensions = {
     QueueName = aws_sqs_queue.gmail_forwarder_retry.name
@@ -263,8 +273,10 @@ resource "aws_cloudwatch_metric_alarm" "bouncer_dlq_alarm" {
   statistic           = "Average"
   threshold           = 0
   alarm_description   = "Alert when messages appear in bouncer DLQ"
-  alarm_actions       = [var.alarm_sns_topic_arn]
-  ok_actions          = [var.alarm_sns_topic_arn]
+  treat_missing_data  = "notBreaching"
+
+  alarm_actions = [var.alarm_sns_topic_arn]
+  ok_actions    = [var.alarm_sns_topic_arn]
 
   dimensions = {
     QueueName = aws_sqs_queue.bouncer_dlq.name
@@ -288,8 +300,10 @@ resource "aws_cloudwatch_metric_alarm" "bouncer_queue_age_alarm" {
   statistic           = "Maximum"
   threshold           = 300 # 5 minutes
   alarm_description   = "Alert when messages in bouncer queue are older than 5 minutes"
-  alarm_actions       = [var.alarm_sns_topic_arn]
-  ok_actions          = [var.alarm_sns_topic_arn]
+  treat_missing_data  = "notBreaching"
+
+  alarm_actions = [var.alarm_sns_topic_arn]
+  ok_actions    = [var.alarm_sns_topic_arn]
 
   dimensions = {
     QueueName = aws_sqs_queue.bouncer.name
