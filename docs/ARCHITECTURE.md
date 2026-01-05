@@ -125,7 +125,8 @@ SES Mail is a serverless email receiving and forwarding system built on AWS that
      - Fetches email from S3
      - Authenticates with Gmail API using OAuth
      - Imports message to Gmail inbox
-     - Deletes email from S3
+     - Does NOT delete from S3 (lifecycle policy handles cleanup after 90 days)
+     - This prevents race conditions when multiple actions process the same email
 
    - **Bouncer Path**:
      - SQS queue: `ses-bouncer-{env}`
@@ -495,7 +496,8 @@ Four widgets added to existing `ses-mail-dashboard-{environment}`:
 
 **Configuration:**
 - Server-side encryption: AES256
-- Lifecycle policy: Delete objects after 7 days
+- Lifecycle policy: Delete objects after 90 days
+- Note: Handler lambdas do NOT delete objects to prevent race conditions with multiple actions
 - Versioning: Disabled (not needed for temporary storage)
 - Public access: Blocked (bucket policy allows SES and Lambdas only)
 

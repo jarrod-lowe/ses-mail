@@ -407,9 +407,11 @@ def process_sqs_record(record, service):
                 'labelIds': gmail_response.get('labelIds')
             })
 
-        # Delete email from S3 after successful import of all targets
-        delete_email_from_s3(message_id)
-        logger.info("Deleted email from S3", extra={"messageId": message_id})
+        # Note: We intentionally do NOT delete the email from S3 here.
+        # Multiple actions may need to process the same email (e.g., store + forward-to-gmail),
+        # and some actions may be delayed (OAuth token refresh delays).
+        # The S3 bucket lifecycle policy will automatically delete emails after 90 days.
+        # See: terraform/modules/ses-mail/s3.tf lifecycle configuration
 
         return {
             'messageId': message_id,
@@ -665,35 +667,6 @@ def fetch_raw_email_from_s3(message_id: str) -> bytes:
         return obj['Body'].read()
     except ClientError as e:
         raise RuntimeError(f"Failed to fetch email from S3: {e}")
-
-
-def delete_email_from_s3(message_id: str) -> None:
-    """
-    Delete the email from S3 after successful import to Gmail.
-
-    Args:
-        message_id: SES message ID
-    """
-    if not EMAIL_BUCKET:
-        raise RuntimeError("EMAIL_BUCKET environment variable must be set")
-
-    # Construct S3 key: emails/{messageId}
-    s3_key = f"{S3_PREFIX}/{message_id}"
-
-    try:
-        s3_client.delete_object(Bucket=EMAIL_BUCKET, Key=s3_key)
-        logger.info("Deleted email from S3", extra={
-            "bucket": EMAIL_BUCKET,
-            "key": s3_key
-        })
-    except ClientError as e:
-        # Log error but don't fail the whole operation
-        # Email is already in Gmail, so S3 cleanup failure is not critical
-        logger.error("Failed to delete email from S3", extra={
-            "bucket": EMAIL_BUCKET,
-            "key": s3_key,
-            "error": str(e)
-        })
 
 
 def gmail_import(service, raw_bytes: bytes, label_ids: List[str]) -> Dict[str, Any]:

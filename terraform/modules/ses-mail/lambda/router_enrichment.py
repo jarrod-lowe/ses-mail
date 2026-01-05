@@ -162,15 +162,7 @@ def tag_s3_object(bucket: str, key: str, routing_tags: Dict[str, str]) -> None:
     except ClientError as e:
         error_code = e.response.get('Error', {}).get('Code')
 
-        if error_code == 'NoSuchKey':
-            # Object was deleted (likely by Gmail forwarder) - this is normal, not an error
-            logger.info("S3 object already deleted, skipping tagging", extra={
-                "bucket": bucket,
-                "key": key
-            })
-            return
-
-        # For any other error, log and re-raise
+        # Log and re-raise all S3 errors
         logger.error("S3 tagging failed", extra={
             "bucket": bucket,
             "key": key,
