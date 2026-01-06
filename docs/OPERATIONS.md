@@ -10,6 +10,7 @@ This guide covers day-to-day operational tasks for managing the SES Mail system.
 - [OAuth Token Management](#oauth-token-management)
 - [SMTP Credential Management](#smtp-credential-management)
 - [Outbound Email Monitoring](#outbound-email-monitoring)
+- [Log Anomaly Detection](#log-anomaly-detection)
 - [Monitoring, Troubleshooting, and Recovery](#monitoring-troubleshooting-and-recovery) - See [MONITORING.md](MONITORING.md) and [RECOVERY.md](RECOVERY.md)
 - [Backup and Recovery](#backup-and-recovery)
 - [Best Practices](#best-practices)
@@ -779,6 +780,151 @@ High bounce/complaint rates indicate deliverability problems:
 - **Check recipient addresses**: Hard bounces usually mean the email address is invalid or doesn't exist - verify addresses before sending
 - **Review email content**: Complaints may indicate your messages are being flagged as spam by recipient mail servers
 - **Verify SPF/DKIM/DMARC**: Misconfigured email authentication can cause bounces
+
+## Log Anomaly Detection
+
+CloudWatch Log Anomaly Detection uses machine learning to automatically identify unusual patterns in Lambda function logs. The system monitors 5 critical Lambda functions for unexpected behavior.
+
+### Configured Detectors
+
+Anomaly detection is enabled for the following Lambda functions:
+- **Router Enrichment** - DynamoDB lookups and routing decisions
+- **Gmail Forwarder** - Gmail API integration and email forwarding
+- **Bouncer** - Email bounce handling
+- **SMTP Credential Manager** - Security-sensitive IAM operations
+- **Outbound Metrics Publisher** - SES reputation tracking
+
+**Configuration:**
+- Evaluation frequency: 15 minutes
+- Anomaly visibility: 7 days
+- Mode: Visibility-only (no automatic alarms)
+
+**Cost:** FREE - anomaly detection is included with log ingestion, no additional charges.
+
+### Viewing Anomalies
+
+**AWS Console:**
+1. Navigate to: CloudWatch → Logs → Anomaly detection → Anomalies
+2. Filter by time range or detector name (e.g., `ses-mail-router-enrichment-test`)
+3. Click an anomaly to view affected log entries and patterns
+
+**CLI:**
+```bash
+# List all anomaly detectors
+AWS_PROFILE=ses-mail aws logs list-log-anomaly-detectors \
+  --region ap-southeast-2
+
+# List anomalies for specific detector
+AWS_PROFILE=ses-mail aws logs list-anomalies \
+  --anomaly-detector-arn <detector-arn> \
+  --region ap-southeast-2
+```
+
+### Anomaly Severity Levels
+
+Anomalies are automatically assigned severity based on log keywords and deviation from baseline:
+
+| Severity | Description | Recommended Action |
+|----------|-------------|-------------------|
+| **LOW** | Minor deviation from learned patterns | Monitor, no immediate action required |
+| **MEDIUM** | Moderate deviation, may indicate emerging issue | Review logs, check for patterns |
+| **HIGH** | Significant deviation, likely indicates real issue | Investigate immediately, cross-reference with metrics/alarms |
+
+### Understanding Anomaly Detection
+
+**Learning Period:** Detectors require 2-4 weeks to establish baseline patterns before accurate anomaly detection. New detectors will show status `TRAINING` or `ANALYZING` initially.
+
+**What Gets Flagged:**
+- Previously unseen log patterns (new error types)
+- Significant changes in log volume or frequency
+- New values for variable fields (IP addresses, resource IDs, error codes)
+- Large deviations from expected token values
+
+**Integration with Existing Monitoring:**
+
+Anomaly detection complements but doesn't replace existing alarms:
+- **Existing Alarms**: Threshold-based, immediate alerts (Lambda errors > 0, high email volume)
+- **Anomaly Detection**: Pattern-based, analytical insights (unusual error patterns, emerging issues)
+
+Use anomaly detection to:
+- Identify subtle issues before they trigger threshold alarms
+- Investigate context during incident analysis
+- Detect changes in log structure or application behavior
+
+### Troubleshooting
+
+**Detector stuck in "TRAINING" status:**
+- Requires minimum log traffic (~10 events/hour) to train
+- Wait full 2-4 weeks before expecting "ACTIVE" or "ANALYZING" status
+- Verify log group has sufficient data
+
+**No anomalies detected:**
+- Good sign - indicates stable, healthy system
+- Validate with intentional error injection to confirm detector is working
+- Check detector status is "ACTIVE" or "ANALYZING" (not "TRAINING")
+
+**Too many false positives:**
+- Normal during initial learning period (first 2-4 weeks)
+- After learning, consider:
+  - Reviewing what patterns are "normal" for your workload
+  - Suppressing specific recurring false positives in the console
+  - Waiting longer for model refinement
+
+### CloudWatch Alarms
+
+CloudWatch alarms automatically trigger SNS notifications when HIGH severity anomalies are detected.
+
+**Alarm Configuration:**
+- Triggers on any HIGH severity anomaly (threshold: 0)
+- Evaluates every 15 minutes
+- Sends notifications via existing alarm SNS topic
+- One alarm per detector (5 total)
+
+**Alarm Names:**
+- `ses-mail-router-anomaly-high-{env}`
+- `ses-mail-gmail-forwarder-anomaly-high-{env}`
+- `ses-mail-bouncer-anomaly-high-{env}`
+- `ses-mail-smtp-credential-manager-anomaly-high-{env}`
+- `ses-mail-outbound-metrics-publisher-anomaly-high-{env}`
+
+**Check alarm status:**
+```bash
+AWS_PROFILE=ses-mail aws cloudwatch describe-alarms \
+  --region ap-southeast-2 \
+  --alarm-name-prefix ses-mail-router-anomaly
+```
+
+**Expected behavior:**
+- During learning period (2-4 weeks): May trigger frequently due to false positives
+- After learning: Should only trigger on genuine unusual patterns
+- Alarms can be muted temporarily via CloudWatch console if needed
+
+**Responding to alarm notifications:**
+1. Check CloudWatch console for anomaly details (navigate to Logs → Anomaly detection → Anomalies)
+2. Review affected log entries to understand the pattern
+3. Cross-reference with other metrics and alarms
+4. If false positive: Suppress the specific anomaly pattern in console
+5. If genuine issue: Investigate and resolve the underlying cause
+
+### Disabling Anomaly Detection
+
+To temporarily disable without destroying detectors:
+
+```hcl
+# In terraform.tfvars or as environment variable
+anomaly_detection_enabled = false
+```
+
+Then redeploy:
+```bash
+AWS_PROFILE=ses-mail make apply ENV=test >/dev/null
+```
+
+To adjust evaluation frequency (cost optimization):
+```hcl
+# Valid values: 300 (5m), 900 (15m), 1800 (30m), 3600 (60m)
+anomaly_detection_evaluation_frequency = 1800  # 30 minutes
+```
 
 ## Monitoring, Troubleshooting, and Recovery
 

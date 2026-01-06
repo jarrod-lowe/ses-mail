@@ -132,3 +132,24 @@ variable "join_existing_deployment" {
   type        = string
   default     = null
 }
+
+# ===========================
+# CloudWatch Anomaly Detection
+# ===========================
+
+variable "anomaly_detection_enabled" {
+  description = "Enable CloudWatch Log Anomaly Detection for Lambda functions. Uses ML to detect unusual patterns in logs. Cost: FREE (included with log ingestion)."
+  type        = bool
+  default     = true
+}
+
+variable "anomaly_detection_evaluation_frequency" {
+  description = "How often to evaluate log groups for anomalies (seconds). Valid values: 300 (5m), 900 (15m), 1800 (30m), 3600 (60m). Default: 900 (15m)."
+  type        = number
+  default     = 900
+
+  validation {
+    condition     = contains([300, 900, 1800, 3600], var.anomaly_detection_evaluation_frequency)
+    error_message = "Evaluation frequency must be one of: 300 (5m), 900 (15m), 1800 (30m), 3600 (60m)"
+  }
+}

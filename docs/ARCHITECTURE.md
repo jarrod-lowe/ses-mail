@@ -853,6 +853,35 @@ Entity types stored in same table using generic PK/SK:
 - Correlation IDs for tracing
 - Log levels: DEBUG, INFO, WARNING, ERROR
 
+**Log Anomaly Detection:**
+- Machine learning-based pattern analysis on 5 Lambda log groups
+- Detectors: router-enrichment, gmail-forwarder, bouncer, smtp-credential-manager, outbound-metrics-publisher
+- Evaluation frequency: 15 minutes
+- Anomaly visibility: 7 days
+- Cost: FREE (included with log ingestion)
+- Learning period: 2-4 weeks to establish baseline patterns
+- Status: TRAINING → ANALYZING → ACTIVE
+
+**Published Metrics:**
+- Namespace: `AWS/Logs`
+- Metric Name: `AnomalyCount`
+- Dimensions: `LogAnomalyDetector` (detector name), `LogAnomalyPriority` (LOW/MEDIUM/HIGH)
+- Available for CloudWatch alarms and dashboards
+
+**CloudWatch Alarms:**
+- 5 alarms configured for HIGH severity anomalies
+- Threshold: 0 (alert on any HIGH severity anomaly)
+- Evaluation period: 15 minutes
+- Actions: SNS notifications via existing alarm topic
+- Naming: `ses-mail-{function}-anomaly-high-{env}`
+
+**Benefits:**
+- Detects unusual error patterns not caught by threshold-based alarms
+- Identifies changes in log volume, structure, or application behavior
+- Provides early warning of emerging issues before threshold breach
+- Automatic notifications for HIGH severity anomalies
+- Aids incident investigation with pattern-based context
+
 ### AWS X-Ray
 
 **Purpose**: Distributed tracing across the email processing pipeline

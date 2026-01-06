@@ -185,6 +185,7 @@ Automated IAM user provisioning for SMTP:
 - **Outbound Email Metrics** - Automatic tracking of sends, deliveries, bounces, and complaints with no SMTP client changes needed
 - **X-Ray Tracing** - End-to-end distributed tracing from SES to Gmail
 - **Structured Logging** - JSON-formatted logs with correlation IDs
+- **Log Anomaly Detection** - ML-based pattern analysis on Lambda logs (FREE, view in CloudWatch Console → Logs → Anomaly detection)
 - **CloudWatch Alarms** - Proactive alerting for failures, high bounce rates (>5%), and complaint rates (>0.1%)
 - **SNS Notifications** - Email/SMS alerts for critical events
 
