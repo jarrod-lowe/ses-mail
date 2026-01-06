@@ -68,7 +68,7 @@ class IntegrationTest:
 
         # Resource names
         self.table_name = f'ses-mail-email-routing-{environment}'
-        self.input_queue_name = f'ses-mail-email-input-{environment}'
+        # Note: No input queue - SNS invokes router lambda directly
         self.gmail_queue_name = f'ses-mail-gmail-forwarder-{environment}'
         self.bouncer_queue_name = f'ses-mail-bouncer-{environment}'
         self.gmail_dlq_name = f'ses-mail-gmail-forwarder-dlq-{environment}'
@@ -773,21 +773,9 @@ class IntegrationTest:
             result['details']['message_id'] = message_id
             result['details']['email_sent'] = True
 
-            # 3. Wait for message in input queue
-            logger.info("Step 3: Checking input queue...")
-            input_queue_url = self.get_queue_url(self.input_queue_name)
-            time.sleep(5)  # Give SES → SNS → SQS time to process
-
-            input_message = self.wait_for_queue_message(input_queue_url, timeout_seconds=30)
-            if input_message:
-                result['details']['input_queue_received'] = True
-            else:
-                result['errors'].append("Message not found in input queue")
-                return result
-
-            # 4. Wait for router processing (check logs)
-            logger.info("Step 4: Waiting for router enrichment...")
-            time.sleep(10)  # Give EventBridge Pipes time to invoke router
+            # 3. Wait for router processing (SNS invokes router lambda directly)
+            logger.info("Step 3: Waiting for router enrichment...")
+            time.sleep(10)  # Give SES → SNS → Router Lambda time to process
             router_logs = self.get_router_logs(message_id, since_minutes=2)
             if router_logs:
                 result['details']['router_processed'] = True
@@ -799,10 +787,10 @@ class IntegrationTest:
             else:
                 result['errors'].append("Router logs not found")
 
-            # 5. Wait for message in gmail forwarder queue
-            logger.info("Step 5: Checking Gmail forwarder queue...")
+            # 4. Wait for message in gmail forwarder queue
+            logger.info("Step 4: Checking Gmail forwarder queue...")
             gmail_queue_url = self.get_queue_url(self.gmail_queue_name)
-            time.sleep(10)  # Give EventBridge Pipes → Event Bus → Queue time
+            time.sleep(10)  # Give Router Lambda → Event Bus → Queue time
 
             gmail_message = self.wait_for_queue_message(gmail_queue_url, timeout_seconds=30)
             if gmail_message:
@@ -810,8 +798,8 @@ class IntegrationTest:
             else:
                 result['errors'].append("Message not found in gmail forwarder queue")
 
-            # 6. Wait for Gmail forwarder lambda to successfully process the message
-            logger.info("Step 6: Waiting for Gmail forwarder lambda to process message...")
+            # 5. Wait for Gmail forwarder lambda to successfully process the message
+            logger.info("Step 5: Waiting for Gmail forwarder lambda to process message...")
             gmail_success = self.wait_for_handler_success(
                 handler_name='gmail-forwarder',
                 message_id=message_id,
@@ -825,16 +813,16 @@ class IntegrationTest:
             else:
                 result['errors'].append("Gmail forwarder lambda did not successfully process message")
 
-            # 7. Check DLQs
-            logger.info("Step 7: Checking dead letter queues...")
+            # 6. Check DLQs
+            logger.info("Step 6: Checking dead letter queues...")
             gmail_dlq_url = self.get_queue_url(self.gmail_dlq_name)
             dlq_count = self.check_dlq_messages(gmail_dlq_url)
             result['details']['dlq_messages'] = dlq_count
             if dlq_count > 0:
                 result['errors'].append(f"Found {dlq_count} messages in DLQ")
 
-            # 8. Wait for X-Ray trace
-            logger.info("Step 8: Retrieving X-Ray trace...")
+            # 7. Wait for X-Ray trace
+            logger.info("Step 7: Retrieving X-Ray trace...")
             trace = self.wait_for_xray_trace(message_id, timeout_seconds=90)
             if trace:
                 result['details']['xray_trace_found'] = True

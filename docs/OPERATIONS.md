@@ -608,6 +608,91 @@ terraform output spf_record
 - `~all` - Softfail (recommended for testing)
 - `-all` - Fail/reject (recommended for production after confirming SPF works)
 
+## Inbound Spam/Virus Monitoring
+
+The system automatically detects security issues with incoming emails:
+
+**Silent Drops** (stored in S3 with `action=silent-drop` tag, auto-deleted after 90 days):
+- Spam detected by SES
+- Virus-infected emails
+- DMARC policy=reject failures
+
+**Bounced** (notification sent to sender):
+- DKIM failures (standalone, without spam/virus/DMARC-reject)
+- SPF failures (standalone, without spam/virus/DMARC-reject)
+- Policy violations (no routing rule configured)
+
+### Security Verdict Metrics
+
+**CloudWatch Metrics** (namespace: `SESMail/{environment}`):
+- `SpamDetected` - Count of spam emails (silent dropped)
+- `VirusDetected` - Count of virus emails (silent dropped)
+- `DmarcRejectDetected` - Count of DMARC policy=reject emails (silent dropped)
+- `AuthFailDetected` - Count of DKIM/SPF failures (bounced to notify sender)
+
+**View spam metrics:**
+```bash
+# Get spam count for last 24 hours
+AWS_PROFILE=ses-mail aws cloudwatch get-metric-statistics \
+  --namespace "SESMail/test" \
+  --metric-name SpamDetected \
+  --start-time $(date -u -v-24H +%Y-%m-%dT%H:%M:%S) \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+  --period 3600 \
+  --statistics Sum
+
+# Get virus count
+AWS_PROFILE=ses-mail aws cloudwatch get-metric-statistics \
+  --namespace "SESMail/test" \
+  --metric-name VirusDetected \
+  --start-time $(date -u -v-24H +%Y-%m-%dT%H:%M:%S) \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+  --period 3600 \
+  --statistics Sum
+```
+
+### Query Silent Dropped Emails in S3
+
+**List silent dropped emails:**
+```bash
+# Get S3 bucket name
+BUCKET=$(AWS_PROFILE=ses-mail aws s3 ls | grep ses-mail-storage | awk '{print $3}')
+
+# List objects tagged as silent-drop
+AWS_PROFILE=ses-mail aws s3api list-objects-v2 \
+  --bucket "$BUCKET" \
+  --prefix emails/ \
+  --query "Contents[?Size>0].Key" \
+  --output text | while read key; do
+    TAGS=$(AWS_PROFILE=ses-mail aws s3api get-object-tagging --bucket "$BUCKET" --key "$key" --output json 2>/dev/null)
+    if echo "$TAGS" | grep -q '"Key":"action","Value":"silent-drop"'; then
+      echo "$key"
+    fi
+  done
+```
+
+### Dashboard Widget
+
+The CloudWatch dashboard includes an "Inbound Security Verdict Detection" widget showing:
+- Spam (dropped) - orange line
+- Virus (dropped) - red line
+- DMARC Reject (dropped) - pink line
+- DKIM/SPF Fail (bounced) - purple line
+
+### Why Not Bounce Spam?
+
+The system uses **smart bounce logic** to prevent **backscatter spam**:
+
+**Silent Drops** (spam/virus/DMARC-reject):
+- Spammers forge sender addresses (bouncing would spam innocent victims)
+- Industry best practice (RFC 5321 Section 3.7): silently drop spam
+- DMARC policy=reject indicates sender wants failed emails dropped
+
+**Bounces** (DKIM/SPF standalone failures):
+- Legitimate senders with misconfigured servers
+- Bounce notification helps them fix the issue
+- Only bounced when spam/virus/DMARC-reject verdicts are NOT present
+
 ## Outbound Email Monitoring
 
 The system automatically tracks all outbound emails sent via SES SMTP using a Configuration Set associated with your domains. Metrics are published to CloudWatch for monitoring delivery success, bounces, and complaints.

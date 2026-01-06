@@ -452,6 +452,31 @@ EOT
             }
           }
         }
+      },
+      # Security Verdict Detection
+      {
+        type   = "metric"
+        width  = 12
+        height = 6
+        x      = 0
+        y      = 56
+        properties = {
+          metrics = [
+            ["SESMail/${var.environment}", "SpamDetected", { stat = "Sum", label = "Spam (dropped)", color = "#ff7f0e" }],
+            [".", "VirusDetected", { stat = "Sum", label = "Virus (dropped)", color = "#d62728" }],
+            [".", "DmarcRejectDetected", { stat = "Sum", label = "DMARC Reject (dropped)", color = "#e377c2" }],
+            [".", "AuthFailDetected", { stat = "Sum", label = "DKIM/SPF Fail (bounced)", color = "#9467bd" }]
+          ]
+          period = 300
+          stat   = "Sum"
+          region = var.aws_region
+          title  = "Inbound Security Verdict Detection"
+          yAxis = {
+            left = {
+              min = 0
+            }
+          }
+        }
       }
     ]
   })

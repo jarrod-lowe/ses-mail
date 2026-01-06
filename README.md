@@ -5,6 +5,7 @@ An AWS-based email receiving system that processes emails through SES and forwar
 ## What It Does
 
 - **Receives emails** via Amazon SES for your custom domains
+- **Filters spam/viruses** automatically (silently dropped, prevents backscatter)
 - **Routes intelligently** based on configurable rules stored in DynamoDB
 - **Forwards to Gmail** using Gmail API for seamless inbox integration
 - **Monitors proactively** with CloudWatch alarms and X-Ray tracing

@@ -172,6 +172,50 @@ def tag_s3_object(bucket: str, key: str, routing_tags: Dict[str, str]) -> None:
         raise
 
 
+def publish_spam_metrics(spam_counts: Dict[str, int]) -> None:
+    """
+    Publish CloudWatch metrics for security verdict detection.
+
+    Metrics published:
+    - SpamDetected: Spam emails (silent dropped)
+    - VirusDetected: Virus emails (silent dropped)
+    - DmarcRejectDetected: DMARC policy=reject emails (silent dropped)
+    - AuthFailDetected: DKIM/SPF failures (bounced to notify sender)
+
+    Args:
+        spam_counts: Dictionary with counts for each security verdict reason
+    """
+    try:
+        metric_data = []
+
+        for reason, count in spam_counts.items():
+            if count > 0:
+                # Map reason to metric name
+                metric_name = {
+                    'spam': 'SpamDetected',
+                    'virus': 'VirusDetected',
+                    'dmarc-reject': 'DmarcRejectDetected',
+                    'auth-fail': 'AuthFailDetected'
+                }.get(reason, 'SpamDetected')
+
+                metric_data.append({
+                    'MetricName': metric_name,
+                    'Value': count,
+                    'Unit': 'Count',
+                    'StorageResolution': 60
+                })
+
+        if metric_data:
+            cloudwatch.put_metric_data(
+                Namespace=f'SESMail/{ENVIRONMENT}',
+                MetricData=metric_data
+            )
+            logger.info("Published security verdict metrics", extra={"metrics": spam_counts})
+    except Exception as e:
+        # Don't fail the lambda if metrics publishing fails
+        logger.exception("Error publishing security verdict metrics", extra={"error": str(e)})
+
+
 def publish_s3_tagging_failure_metric() -> None:
     """Publish CloudWatch metric when S3 tagging fails."""
     try:
@@ -233,6 +277,7 @@ def lambda_handler(event, context):
                 "store": {"count": 0, "targets": []},
                 "forward-to-gmail": {"count": 0, "targets": []},
                 "bounce": {"count": 0, "targets": []},
+                "spam": {"count": 0, "targets": []},
             }
 
             for action_type, dest in routing_results:
@@ -269,7 +314,8 @@ def lambda_handler(event, context):
                 "messageId": detail.get('originalMessageId', 'unknown'),
                 "forward_to_gmail_count": actions.get('forward-to-gmail', {}).get('count', 0),
                 "bounce_count": actions.get('bounce', {}).get('count', 0),
-                "store_count": actions.get('store', {}).get('count', 0)
+                "store_count": actions.get('store', {}).get('count', 0),
+                "spam_count": actions.get('spam', {}).get('count', 0)
             })
 
         try:
@@ -291,6 +337,26 @@ def lambda_handler(event, context):
                 logger.info("Successfully published events to EventBridge", extra={
                     "eventCount": len(events_to_publish)
                 })
+
+                # Publish security verdict metrics to CloudWatch
+                # Aggregate counts by reason from all events
+                spam_counts = {'spam': 0, 'virus': 0, 'dmarc-reject': 0, 'auth-fail': 0}
+                for event in events_to_publish:
+                    detail = json.loads(event['Detail'])
+
+                    # Count silent drops (silent-drop action)
+                    silent_drop_targets = detail.get('actions', {}).get('silent-drop', {}).get('targets', [])
+                    for target_info in silent_drop_targets:
+                        reason = target_info.get('reason', 'spam')
+                        spam_counts[reason] = spam_counts.get(reason, 0) + 1
+
+                    # Count auth-fail bounces (bounce action with reason=auth-fail)
+                    bounce_targets = detail.get('actions', {}).get('bounce', {}).get('targets', [])
+                    for target_info in bounce_targets:
+                        if target_info.get('reason') == 'auth-fail':
+                            spam_counts['auth-fail'] = spam_counts.get('auth-fail', 0) + 1
+
+                publish_spam_metrics(spam_counts)
 
         except Exception as e:
             logger.exception("Error publishing events to EventBridge", extra={
@@ -342,18 +408,35 @@ def decide_action(ses_message: Dict[str, Any]) -> List[Tuple[str, Optional[Any]]
     subsegment.put_annotation('messageId', message_id)
     subsegment.put_annotation('source', source)
 
-    bounce = check_spam(ses_message)
+    security_verdict = check_spam(ses_message)
     results = []
     counts = {
         "forward-to-gmail": 0,
         "store": 0,
         "bounce": 0,
+        "silent-drop": 0,
     }
 
     for target in ses_message["receipt"]["recipients"]:
-        if bounce:
-            results.append(('bounce', {"target": target, "reason": "security"}))
-            # Log routing decision for bounced emails
+        # Handle security verdicts
+        if security_verdict in ["spam", "virus", "dmarc-reject"]:
+            # Route to "silent-drop" action (prevents backscatter)
+            results.append(('silent-drop', {"target": target, "reason": security_verdict}))
+            # Log routing decision for spam/virus/DMARC-reject emails
+            logger.info("Routing decision", extra={
+                "messageId": message_id,
+                "sender": source,
+                "subject": subject,
+                "recipient": target,
+                "action": "silent-drop",
+                "lookupKey": None,
+                "target": target,
+                "reason": security_verdict
+            })
+        elif security_verdict == "auth-fail":
+            # Route standalone DKIM/SPF failures to bounce (notify sender of misconfiguration)
+            results.append(('bounce', {"target": target, "reason": "auth-fail"}))
+            # Log routing decision for auth failures
             logger.info("Routing decision", extra={
                 "messageId": message_id,
                 "sender": source,
@@ -362,9 +445,10 @@ def decide_action(ses_message: Dict[str, Any]) -> List[Tuple[str, Optional[Any]]
                 "action": "bounce",
                 "lookupKey": None,
                 "target": target,
-                "reason": "security"
+                "reason": "auth-fail"
             })
         else:
+            # Normal email - follow routing rules
             routing_decision, destination, lookup_key = get_routing_decision(target)
             if routing_decision == 'bounce':
                 results.append((routing_decision, {"target": target, "reason": "policy"}))
@@ -476,14 +560,19 @@ def get_routing_decision(recipient: str) -> Tuple[str, Optional[str], Optional[s
     logger.warning("No routing rule found, defaulting to store", extra={"recipient": recipient})
     return 'store', None, None
 
-def check_spam(ses_message: Dict[str, Any]) -> bool:
+def check_spam(ses_message: Dict[str, Any]) -> Optional[str]:
     """
-    Check if the email is marked as spam based on SES receipt verdicts.
+    Check if the email should be treated specially based on SES receipt verdicts.
 
     Args:
         ses_message: SES event message
     Returns:
-        bool: True if email is spam, False otherwise
+        Optional[str]: Security verdict reason:
+            - 'spam': Spam detected → silent drop (prevents backscatter)
+            - 'virus': Virus detected → silent drop (prevents malware)
+            - 'dmarc-reject': DMARC policy reject → silent drop (honor sender policy)
+            - 'auth-fail': DKIM/SPF failure only → bounce (notify sender of misconfiguration)
+            - None: Normal email → follow routing rules
     """
     # Skip spam checks for integration test emails
     # Requires secret token in X-Integration-Test-Token header that matches SSM parameter
@@ -496,24 +585,31 @@ def check_spam(ses_message: Dict[str, Any]) -> bool:
                 provided_token = header.get('value', '')
                 if provided_token == expected_token:
                     logger.info("Valid integration test token found - skipping spam checks")
-                    return False
+                    return None
                 else:
                     logger.warning("Invalid integration test token provided")
                     break
 
     receipt = ses_message['receipt']
-    if receipt["spamVerdict"]["status"].lower() == "fail":
-        return True
-    if receipt["virusVerdict"]["status"].lower() == "fail":
-        return True
-    if receipt["dkimVerdict"]["status"].lower() == "fail":
-        return True
-    if receipt["spfVerdict"]["status"].lower() == "fail":
-        return True
-    if receipt["dmarcVerdict"]["status"].lower() == "fail" and receipt["dmarcPolicy"] == "reject":
-        return True
 
-    return False
+    # Check in priority order: virus > spam > DMARC reject > DKIM/SPF failures
+    # Virus/spam/DMARC-reject are silent dropped (prevent backscatter)
+    # Standalone DKIM/SPF failures are bounced (notify legitimate misconfigured senders)
+    if receipt["virusVerdict"]["status"].lower() == "fail":
+        return "virus"
+    if receipt["spamVerdict"]["status"].lower() == "fail":
+        return "spam"
+    if receipt["dmarcVerdict"]["status"].lower() == "fail" and receipt.get("dmarcPolicy") == "reject":
+        return "dmarc-reject"
+
+    # Standalone DKIM/SPF failures (without spam/virus/DMARC-reject) should bounce
+    # This notifies legitimate senders they have misconfigured servers
+    if receipt["dkimVerdict"]["status"].lower() == "fail":
+        return "auth-fail"
+    if receipt["spfVerdict"]["status"].lower() == "fail":
+        return "auth-fail"
+
+    return None
 
 
 

@@ -115,7 +115,9 @@ SES Mail is a serverless email receiving and forwarding system built on AWS that
    - Event Bus: `ses-mail-email-routing-{env}`
    - Evaluates routing rules based on `action` field:
      - `forward-to-gmail` → routes to Gmail forwarder queue
-     - `bounce` → routes to bouncer queue
+     - `bounce` → routes to bouncer queue (policy violations only)
+     - `spam` → stored in S3, auto-deleted after 90 days (spam/virus/auth-fail)
+     - `store` → stored in S3 only (no forwarding or bouncing)
    - Multiple targets can receive same event
 
 8. **Handler Processing (SQS → Lambda)**
@@ -131,8 +133,19 @@ SES Mail is a serverless email receiving and forwarding system built on AWS that
    - **Bouncer Path**:
      - SQS queue: `ses-bouncer-{env}`
      - Lambda: `ses-mail-bouncer-{env}`
-     - Generates bounce message
+     - Generates bounce message for:
+       - Policy violations (no routing rule configured)
+       - Authentication failures (DKIM/SPF failures without spam/virus/DMARC-reject)
      - Sends via SES
+
+   - **Silent Drop Path** (No Handler):
+     - Action: `silent-drop`
+     - No queue or lambda handler
+     - Email stored in S3 with `action=silent-drop` tag
+     - Auto-deleted after 90 days by S3 lifecycle rule
+     - Prevents backscatter spam (bouncing spam to forged sender addresses)
+     - Reasons for silent drop: spam detected, virus detected, DMARC policy=reject
+     - Note: Standalone DKIM/SPF failures are bounced (not silent dropped) to notify legitimate senders of misconfiguration
 
 9. **Error Handling**
    - Each queue has Dead Letter Queue (DLQ)
