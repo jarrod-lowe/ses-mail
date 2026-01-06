@@ -4,7 +4,31 @@ resource "aws_cloudwatch_dashboard" "ses_mail" {
 
   dashboard_body = jsonencode({
     widgets = [
-      # Handler Success/Failure Rates
+      # Handler Success Rates
+      {
+        type   = "metric"
+        width  = 12
+        height = 6
+        x      = 0
+        y      = 0
+        properties = {
+          metrics = [
+            ["SESMail/${var.environment}", "RouterEnrichmentSuccess", { stat = "Sum", label = "Router Success", color = "#2ca02c" }],
+            [".", "GmailForwardSuccess", { stat = "Sum", label = "Gmail Success", color = "#1f77b4" }],
+            [".", "BounceSendSuccess", { stat = "Sum", label = "Bounce Success", color = "#9467bd" }]
+          ]
+          period = 300
+          stat   = "Sum"
+          region = var.aws_region
+          title  = "Handler Success Rates"
+          yAxis = {
+            left = {
+              min = 0
+            }
+          }
+        }
+      },
+      # Handler Failure Rates
       {
         type   = "metric"
         width  = 12
@@ -13,17 +37,14 @@ resource "aws_cloudwatch_dashboard" "ses_mail" {
         y      = 0
         properties = {
           metrics = [
-            ["SESMail/${var.environment}", "RouterEnrichmentSuccess", { stat = "Sum", label = "Router Success", color = "#2ca02c" }],
-            [".", "RouterEnrichmentFailure", { stat = "Sum", label = "Router Failure", color = "#d62728" }],
-            [".", "GmailForwardSuccess", { stat = "Sum", label = "Gmail Success", color = "#1f77b4" }],
+            ["SESMail/${var.environment}", "RouterEnrichmentFailure", { stat = "Sum", label = "Router Failure", color = "#d62728" }],
             [".", "GmailForwardFailure", { stat = "Sum", label = "Gmail Failure", color = "#ff7f0e" }],
-            [".", "BounceSendSuccess", { stat = "Sum", label = "Bounce Success", color = "#9467bd" }],
             [".", "BounceSendFailure", { stat = "Sum", label = "Bounce Failure", color = "#8c564b" }]
           ]
           period = 300
           stat   = "Sum"
           region = var.aws_region
-          title  = "Handler Success/Failure Rates"
+          title  = "Handler Failure Rates"
           yAxis = {
             left = {
               min = 0
