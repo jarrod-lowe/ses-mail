@@ -4,13 +4,26 @@ resource "aws_cloudwatch_dashboard" "ses_mail" {
 
   dashboard_body = jsonencode({
     widgets = [
+      # ===========================
+      # Section 1: Inbound Email Processing
+      # ===========================
+      {
+        type   = "text"
+        width  = 24
+        height = 1
+        x      = 0
+        y      = 0
+        properties = {
+          markdown = "# Inbound Email Processing"
+        }
+      },
       # Handler Success Rates
       {
         type   = "metric"
         width  = 12
         height = 6
         x      = 0
-        y      = 0
+        y      = 1
         properties = {
           metrics = [
             ["SESMail/${var.environment}", "RouterEnrichmentSuccess", { stat = "Sum", label = "Router Success", color = "#2ca02c" }],
@@ -34,7 +47,7 @@ resource "aws_cloudwatch_dashboard" "ses_mail" {
         width  = 12
         height = 6
         x      = 12
-        y      = 0
+        y      = 1
         properties = {
           metrics = [
             ["SESMail/${var.environment}", "RouterEnrichmentFailure", { stat = "Sum", label = "Router Failure", color = "#d62728" }],
@@ -52,13 +65,47 @@ resource "aws_cloudwatch_dashboard" "ses_mail" {
           }
         }
       },
+      # Routing Action Statistics (Pie Chart)
+      {
+        type   = "log"
+        width  = 12
+        height = 6
+        x      = 0
+        y      = 7
+        properties = {
+          query   = <<-EOT
+SOURCE '${aws_cloudwatch_log_group.lambda_router_logs.name}'
+| filter message = "Routing decision"
+| stats count() as count by action
+| sort count desc
+EOT
+          region  = var.aws_region
+          stacked = false
+          view    = "pie"
+          title   = "Routing Actions Distribution"
+        }
+      },
+
+      # ===========================
+      # Section 2: Lambda Functions
+      # ===========================
+      {
+        type   = "text"
+        width  = 24
+        height = 1
+        x      = 0
+        y      = 13
+        properties = {
+          markdown = "# Lambda Functions"
+        }
+      },
       # Lambda Function Errors
       {
         type   = "metric"
         width  = 12
         height = 6
         x      = 0
-        y      = 6
+        y      = 14
         properties = {
           metrics = [
             ["AWS/Lambda", "Errors", "FunctionName", aws_lambda_function.router_enrichment.function_name, { stat = "Sum", label = "Router" }],
@@ -82,7 +129,7 @@ resource "aws_cloudwatch_dashboard" "ses_mail" {
         width  = 12
         height = 6
         x      = 12
-        y      = 6
+        y      = 14
         properties = {
           metrics = [
             ["AWS/Lambda", "Invocations", "FunctionName", aws_lambda_function.router_enrichment.function_name, { stat = "Sum", label = "Router" }],
@@ -100,13 +147,51 @@ resource "aws_cloudwatch_dashboard" "ses_mail" {
           }
         }
       },
+      # Lambda Duration
+      {
+        type   = "metric"
+        width  = 12
+        height = 6
+        x      = 0
+        y      = 20
+        properties = {
+          metrics = [
+            ["AWS/Lambda", "Duration", "FunctionName", aws_lambda_function.router_enrichment.function_name, { stat = "Average", label = "Router (avg)" }],
+            ["...", aws_lambda_function.gmail_forwarder.function_name, { stat = "Average", label = "Gmail (avg)" }],
+            ["...", aws_lambda_function.bouncer.function_name, { stat = "Average", label = "Bouncer (avg)" }]
+          ]
+          period = 300
+          stat   = "Average"
+          region = var.aws_region
+          title  = "Lambda Duration (ms)"
+          yAxis = {
+            left = {
+              min = 0
+            }
+          }
+        }
+      },
+
+      # ===========================
+      # Section 3: Queue Metrics
+      # ===========================
+      {
+        type   = "text"
+        width  = 24
+        height = 1
+        x      = 0
+        y      = 26
+        properties = {
+          markdown = "# Queue Metrics"
+        }
+      },
       # SQS Queue Depths
       {
         type   = "metric"
         width  = 12
         height = 6
         x      = 0
-        y      = 12
+        y      = 27
         properties = {
           metrics = [
             ["AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", aws_sqs_queue.gmail_forwarder.name, { stat = "Average", label = "Gmail Queue" }],
@@ -129,7 +214,7 @@ resource "aws_cloudwatch_dashboard" "ses_mail" {
         width  = 12
         height = 6
         x      = 12
-        y      = 12
+        y      = 27
         properties = {
           metrics = [
             ["AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", aws_sqs_queue.gmail_forwarder_dlq.name, { stat = "Average", label = "Gmail DLQ" }],
@@ -146,28 +231,18 @@ resource "aws_cloudwatch_dashboard" "ses_mail" {
           }
         }
       },
-      # Lambda Duration
+
+      # ===========================
+      # Section 4: Retry & Recovery
+      # ===========================
       {
-        type   = "metric"
-        width  = 12
-        height = 6
+        type   = "text"
+        width  = 24
+        height = 1
         x      = 0
-        y      = 18
+        y      = 33
         properties = {
-          metrics = [
-            ["AWS/Lambda", "Duration", "FunctionName", aws_lambda_function.router_enrichment.function_name, { stat = "Average", label = "Router (avg)" }],
-            ["...", aws_lambda_function.gmail_forwarder.function_name, { stat = "Average", label = "Gmail (avg)" }],
-            ["...", aws_lambda_function.bouncer.function_name, { stat = "Average", label = "Bouncer (avg)" }]
-          ]
-          period = 300
-          stat   = "Average"
-          region = var.aws_region
-          title  = "Lambda Duration (ms)"
-          yAxis = {
-            left = {
-              min = 0
-            }
-          }
+          markdown = "# Retry & Recovery"
         }
       },
       # Retry Queue Metrics
@@ -176,7 +251,7 @@ resource "aws_cloudwatch_dashboard" "ses_mail" {
         width  = 12
         height = 6
         x      = 0
-        y      = 24
+        y      = 34
         properties = {
           metrics = [
             ["AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", aws_sqs_queue.gmail_forwarder_retry.name, { stat = "Average", label = "Retry Queue Depth", color = "#ff7f0e" }],
@@ -207,7 +282,7 @@ resource "aws_cloudwatch_dashboard" "ses_mail" {
         width  = 12
         height = 6
         x      = 12
-        y      = 24
+        y      = 34
         properties = {
           metrics = [
             ["AWS/States", "ExecutionsSucceeded", "StateMachineArn", aws_sfn_state_machine.retry_processor.arn, { stat = "Sum", label = "Succeeded", color = "#2ca02c" }],
@@ -234,44 +309,18 @@ resource "aws_cloudwatch_dashboard" "ses_mail" {
           }
         }
       },
-      # Recent Email Routing & Execution (Table View)
+
+      # ===========================
+      # Section 5: OAuth Token Management
+      # ===========================
       {
-        type   = "log"
+        type   = "text"
         width  = 24
-        height = 8
+        height = 1
         x      = 0
-        y      = 30
+        y      = 40
         properties = {
-          query   = <<-EOT
-SOURCE '${aws_cloudwatch_log_group.lambda_router_logs.name}' | SOURCE '${aws_cloudwatch_log_group.lambda_gmail_forwarder_logs.name}' | SOURCE '${aws_cloudwatch_log_group.lambda_bouncer_logs.name}' | filter message = "Routing decision" or message = "Action result"
-| fields @timestamp, messageId, sender, subject, recipient, action, result, error, lookupKey, target, resultId, xray_trace_id
-| sort @timestamp desc
-| limit 50
-EOT
-          region  = var.aws_region
-          stacked = false
-          view    = "table"
-          title   = "Recent Email Routing & Execution"
-        }
-      },
-      # Routing Action Statistics (Pie Chart)
-      {
-        type   = "log"
-        width  = 12
-        height = 6
-        x      = 0
-        y      = 38
-        properties = {
-          query   = <<-EOT
-SOURCE '${aws_cloudwatch_log_group.lambda_router_logs.name}'
-| filter message = "Routing decision"
-| stats count() as count by action
-| sort count desc
-EOT
-          region  = var.aws_region
-          stacked = false
-          view    = "pie"
-          title   = "Routing Actions Distribution"
+          markdown = "# OAuth Token Management"
         }
       },
       # Gmail OAuth Token Expiration Monitoring
@@ -279,8 +328,8 @@ EOT
         type   = "metric"
         width  = 12
         height = 6
-        x      = 12
-        y      = 38
+        x      = 0
+        y      = 41
         properties = {
           metrics = [
             ["SESMail/${var.environment}", "TokenSecondsUntilExpiration", { stat = "Minimum", id = "m1", visible = false }],
@@ -319,13 +368,27 @@ EOT
           }
         }
       },
+
+      # ===========================
+      # Section 6: S3 Operations
+      # ===========================
+      {
+        type   = "text"
+        width  = 24
+        height = 1
+        x      = 0
+        y      = 47
+        properties = {
+          markdown = "# S3 Operations"
+        }
+      },
       # S3 Object Tagging Failures
       {
         type   = "metric"
         width  = 12
         height = 6
         x      = 0
-        y      = 18
+        y      = 48
         properties = {
           metrics = [
             ["SESMail/${var.environment}", "S3TaggingFailures", { stat = "Sum", label = "Tagging Failures", color = "#d62728" }]
@@ -341,13 +404,27 @@ EOT
           }
         }
       },
+
+      # ===========================
+      # Section 7: Outbound Email
+      # ===========================
+      {
+        type   = "text"
+        width  = 24
+        height = 1
+        x      = 0
+        y      = 54
+        properties = {
+          markdown = "# Outbound Email"
+        }
+      },
       # Outbound Email Volume
       {
         type   = "metric"
         width  = 12
         height = 6
         x      = 0
-        y      = 44
+        y      = 55
         properties = {
           metrics = [
             ["SESMail/${var.environment}", "OutboundSend", { stat = "Sum", label = "Sent", color = "#1f77b4" }],
@@ -373,7 +450,7 @@ EOT
         width  = 12
         height = 6
         x      = 12
-        y      = 44
+        y      = 55
         properties = {
           metrics = [
             [{ expression = "(delivery / send) * 100", label = "Delivery Rate (%)", id = "e1", yAxis = "left", color = "#2ca02c" }],
@@ -418,7 +495,7 @@ EOT
         width  = 12
         height = 6
         x      = 0
-        y      = 50
+        y      = 61
         properties = {
           metrics = [
             ["SESMail/${var.environment}", "OutboundBounceHard", { stat = "Sum", label = "Hard Bounces (Permanent)", color = "#d62728" }],
@@ -441,7 +518,7 @@ EOT
         width  = 12
         height = 6
         x      = 12
-        y      = 50
+        y      = 61
         properties = {
           metrics = [
             ["AWS/SES", "Reputation.BounceRate", "ConfigurationSet", aws_ses_configuration_set.outbound.name, { stat = "Average", label = "SES Bounce Rate", yAxis = "left", color = "#d62728" }],
@@ -474,13 +551,27 @@ EOT
           }
         }
       },
+
+      # ===========================
+      # Section 8: Security
+      # ===========================
+      {
+        type   = "text"
+        width  = 24
+        height = 1
+        x      = 0
+        y      = 67
+        properties = {
+          markdown = "# Security"
+        }
+      },
       # Security Verdict Detection
       {
         type   = "metric"
         width  = 12
         height = 6
         x      = 0
-        y      = 56
+        y      = 68
         properties = {
           metrics = [
             ["SESMail/${var.environment}", "SpamDetected", { stat = "Sum", label = "Spam (dropped)", color = "#ff7f0e" }],
@@ -497,6 +588,40 @@ EOT
               min = 0
             }
           }
+        }
+      },
+
+      # ===========================
+      # Section 9: Recent Activity Logs
+      # ===========================
+      {
+        type   = "text"
+        width  = 24
+        height = 1
+        x      = 0
+        y      = 74
+        properties = {
+          markdown = "# Recent Activity Logs"
+        }
+      },
+      # Recent Email Routing & Execution (Table View)
+      {
+        type   = "log"
+        width  = 24
+        height = 8
+        x      = 0
+        y      = 75
+        properties = {
+          query   = <<-EOT
+SOURCE '${aws_cloudwatch_log_group.lambda_router_logs.name}' | SOURCE '${aws_cloudwatch_log_group.lambda_gmail_forwarder_logs.name}' | SOURCE '${aws_cloudwatch_log_group.lambda_bouncer_logs.name}' | filter message = "Routing decision" or message = "Action result"
+| fields @timestamp, messageId, sender, subject, recipient, action, result, error, lookupKey, target, resultId, xray_trace_id
+| sort @timestamp desc
+| limit 50
+EOT
+          region  = var.aws_region
+          stacked = false
+          view    = "table"
+          title   = "Recent Email Routing & Execution"
         }
       }
     ]
