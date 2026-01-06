@@ -286,3 +286,162 @@ resource "aws_cloudwatch_metric_alarm" "outbound_metrics_publisher_anomaly_high"
     Component   = "monitoring"
   }
 }
+
+# ===========================
+# CloudWatch Alarms for Medium Severity Anomalies
+# ===========================
+
+# Router Enrichment Medium Severity Anomaly Alarm
+resource "aws_cloudwatch_metric_alarm" "router_anomaly_medium" {
+  count = var.anomaly_detection_enabled ? 1 : 0
+
+  alarm_name          = "ses-mail-router-anomaly-medium-${var.environment}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "AnomalyCount"
+  namespace           = "AWS/Logs"
+  period              = 900 # 15 minutes
+  statistic           = "Sum"
+  threshold           = 0
+  alarm_description   = "Alert when MEDIUM severity anomalies detected in router enrichment logs (${var.environment})"
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    LogAnomalyDetector = aws_cloudwatch_log_anomaly_detector.router_enrichment[0].detector_name
+    LogAnomalyPriority = "MEDIUM"
+  }
+
+  alarm_actions = [var.alarm_sns_topic_arn]
+  ok_actions    = [var.alarm_sns_topic_arn]
+
+  tags = {
+    Name        = "router-anomaly-alarm-${var.environment}"
+    Environment = var.environment
+    Service     = "ses-mail"
+    Component   = "monitoring"
+  }
+}
+
+# Gmail Forwarder Medium Severity Anomaly Alarm
+resource "aws_cloudwatch_metric_alarm" "gmail_forwarder_anomaly_medium" {
+  count = var.anomaly_detection_enabled ? 1 : 0
+
+  alarm_name          = "ses-mail-gmail-forwarder-anomaly-medium-${var.environment}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "AnomalyCount"
+  namespace           = "AWS/Logs"
+  period              = 900
+  statistic           = "Sum"
+  threshold           = 0
+  alarm_description   = "Alert when MEDIUM severity anomalies detected in Gmail forwarder logs (${var.environment})"
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    LogAnomalyDetector = aws_cloudwatch_log_anomaly_detector.gmail_forwarder[0].detector_name
+    LogAnomalyPriority = "MEDIUM"
+  }
+
+  alarm_actions = [var.alarm_sns_topic_arn]
+  ok_actions    = [var.alarm_sns_topic_arn]
+
+  tags = {
+    Name        = "gmail-forwarder-anomaly-alarm-${var.environment}"
+    Environment = var.environment
+    Service     = "ses-mail"
+    Component   = "monitoring"
+  }
+}
+
+# Bouncer Medium Severity Anomaly Alarm
+resource "aws_cloudwatch_metric_alarm" "bouncer_anomaly_medium" {
+  count = var.anomaly_detection_enabled ? 1 : 0
+
+  alarm_name          = "ses-mail-bouncer-anomaly-medium-${var.environment}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "AnomalyCount"
+  namespace           = "AWS/Logs"
+  period              = 900
+  statistic           = "Sum"
+  threshold           = 0
+  alarm_description   = "Alert when MEDIUM severity anomalies detected in bouncer logs (${var.environment})"
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    LogAnomalyDetector = aws_cloudwatch_log_anomaly_detector.bouncer[0].detector_name
+    LogAnomalyPriority = "MEDIUM"
+  }
+
+  alarm_actions = [var.alarm_sns_topic_arn]
+  ok_actions    = [var.alarm_sns_topic_arn]
+
+  tags = {
+    Name        = "bouncer-anomaly-alarm-${var.environment}"
+    Environment = var.environment
+    Service     = "ses-mail"
+    Component   = "monitoring"
+  }
+}
+
+# SMTP Credential Manager Medium Severity Anomaly Alarm
+resource "aws_cloudwatch_metric_alarm" "smtp_credential_manager_anomaly_medium" {
+  count = var.anomaly_detection_enabled ? 1 : 0
+
+  alarm_name          = "ses-mail-smtp-credential-manager-anomaly-medium-${var.environment}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "AnomalyCount"
+  namespace           = "AWS/Logs"
+  period              = 900
+  statistic           = "Sum"
+  threshold           = 0
+  alarm_description   = "Alert when MEDIUM severity anomalies detected in SMTP credential manager logs (${var.environment})"
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    LogAnomalyDetector = aws_cloudwatch_log_anomaly_detector.smtp_credential_manager[0].detector_name
+    LogAnomalyPriority = "MEDIUM"
+  }
+
+  alarm_actions = [var.alarm_sns_topic_arn]
+  ok_actions    = [var.alarm_sns_topic_arn]
+
+  tags = {
+    Name        = "smtp-credential-manager-anomaly-alarm-${var.environment}"
+    Environment = var.environment
+    Service     = "ses-mail"
+    Component   = "monitoring"
+  }
+}
+
+# Outbound Metrics Publisher Medium Severity Anomaly Alarm
+resource "aws_cloudwatch_metric_alarm" "outbound_metrics_publisher_anomaly_medium" {
+  count = var.anomaly_detection_enabled ? 1 : 0
+
+  alarm_name          = "ses-mail-outbound-metrics-publisher-anomaly-medium-${var.environment}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "AnomalyCount"
+  namespace           = "AWS/Logs"
+  period              = 900
+  statistic           = "Sum"
+  threshold           = 0
+  alarm_description   = "Alert when MEDIUM severity anomalies detected in outbound metrics publisher logs (${var.environment})"
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    LogAnomalyDetector = aws_cloudwatch_log_anomaly_detector.outbound_metrics_publisher[0].detector_name
+    LogAnomalyPriority = "MEDIUM"
+  }
+
+  alarm_actions = [var.alarm_sns_topic_arn]
+  ok_actions    = [var.alarm_sns_topic_arn]
+
+  tags = {
+    Name        = "outbound-metrics-publisher-anomaly-alarm-${var.environment}"
+    Environment = var.environment
+    Service     = "ses-mail"
+    Component   = "monitoring"
+  }
+}

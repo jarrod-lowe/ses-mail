@@ -882,11 +882,21 @@ Entity types stored in same table using generic PK/SK:
 - Available for CloudWatch alarms and dashboards
 
 **CloudWatch Alarms:**
-- 5 alarms configured for HIGH severity anomalies
-- Threshold: 0 (alert on any HIGH severity anomaly)
+- 10 alarms configured (5 HIGH severity, 5 MEDIUM severity)
+- Threshold: 0 (alert on any anomaly at configured severity)
 - Evaluation period: 15 minutes
 - Actions: SNS notifications via existing alarm topic
-- Naming: `ses-mail-{function}-anomaly-high-{env}`
+- Naming: `ses-mail-{function}-anomaly-{severity}-{env}` (severity: high or medium)
+
+**Alarm Coverage:**
+
+| Lambda Function | HIGH Alarm | MEDIUM Alarm |
+|----------------|-----------|--------------|
+| Router Enrichment | `ses-mail-router-anomaly-high-{env}` | `ses-mail-router-anomaly-medium-{env}` |
+| Gmail Forwarder | `ses-mail-gmail-forwarder-anomaly-high-{env}` | `ses-mail-gmail-forwarder-anomaly-medium-{env}` |
+| Bouncer | `ses-mail-bouncer-anomaly-high-{env}` | `ses-mail-bouncer-anomaly-medium-{env}` |
+| SMTP Credential Manager | `ses-mail-smtp-credential-manager-anomaly-high-{env}` | `ses-mail-smtp-credential-manager-anomaly-medium-{env}` |
+| Outbound Metrics Publisher | `ses-mail-outbound-metrics-publisher-anomaly-high-{env}` | `ses-mail-outbound-metrics-publisher-anomaly-medium-{env}` |
 
 **Benefits:**
 - Detects unusual error patterns not caught by threshold-based alarms

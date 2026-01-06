@@ -882,7 +882,7 @@ Anomaly detection is enabled for the following Lambda functions:
 **Configuration:**
 - Evaluation frequency: 15 minutes
 - Anomaly visibility: 7 days
-- Mode: Visibility-only (no automatic alarms)
+- Alarms: HIGH and MEDIUM severity anomalies trigger SNS notifications
 
 **Cost:** FREE - anomaly detection is included with log ingestion, no additional charges.
 
@@ -909,11 +909,45 @@ AWS_PROFILE=ses-mail aws logs list-anomalies \
 
 Anomalies are automatically assigned severity based on log keywords and deviation from baseline:
 
-| Severity | Description | Recommended Action |
-|----------|-------------|-------------------|
-| **LOW** | Minor deviation from learned patterns | Monitor, no immediate action required |
-| **MEDIUM** | Moderate deviation, may indicate emerging issue | Review logs, check for patterns |
-| **HIGH** | Significant deviation, likely indicates real issue | Investigate immediately, cross-reference with metrics/alarms |
+| Severity | Alarms | Description | Recommended Action |
+|----------|--------|-------------|-------------------|
+| **LOW** | None | Minor deviation from learned patterns | Monitor, no immediate action required |
+| **MEDIUM** | Enabled | Moderate deviation, may indicate emerging issue | Review logs within 4 hours, check for patterns |
+| **HIGH** | Enabled | Significant deviation, likely indicates real issue | Investigate immediately, cross-reference with metrics/alarms |
+
+### Responding to Anomaly Alarms
+
+When you receive an anomaly detection alarm notification:
+
+**1. Check Alarm Severity**
+- Alarm name indicates severity: `ses-mail-{function}-anomaly-{high|medium}-{env}`
+- HIGH: Requires immediate investigation
+- MEDIUM: Review within 4 hours
+
+**2. View Anomaly in CloudWatch Console**
+- Navigate to: CloudWatch → Logs → Anomaly detection → Anomalies
+- Click detector name from alarm (e.g., `ses-mail-router-enrichment-test`)
+- Review affected log entries and deviation score
+- Examine timeline to understand pattern changes
+
+**3. Cross-Reference with Metrics**
+- Check CloudWatch Dashboard for concurrent spikes/errors
+- Review Lambda error rates and duration metrics
+- Look for correlation with other alarms
+
+**4. Investigate Root Cause**
+- Examine affected log entries for error patterns
+- Check X-Ray traces for failed requests (if available)
+- Review recent deployments or configuration changes
+- Compare with baseline behavior from previous days
+
+**5. Take Action**
+- **HIGH severity**: Immediate investigation and remediation required
+- **MEDIUM severity**: Schedule investigation within 4 hours, monitor for escalation
+- Document findings and resolution steps
+- Update routing rules or configuration if needed
+
+**Note:** During the 2-4 week learning period after deployment, anomaly detectors may produce false positives as they establish baseline patterns. Review these carefully but don't be alarmed by occasional false alerts during this period.
 
 ### Understanding Anomaly Detection
 
