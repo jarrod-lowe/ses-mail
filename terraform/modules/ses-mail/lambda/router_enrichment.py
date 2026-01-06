@@ -28,6 +28,10 @@ DYNAMODB_TABLE_NAME = os.environ.get('DYNAMODB_TABLE_NAME')
 ENVIRONMENT = os.environ.get('ENVIRONMENT', 'unknown')
 EVENT_BUS_NAME = f"ses-mail-email-routing-{ENVIRONMENT}"
 
+# S3 tag value for empty/missing fields
+# Must only contain AWS S3 allowed characters: a-z, A-Z, 0-9, space, +-=._:/@
+TAG_EMPTY_VALUE = "EMPTY"
+
 # Initialize AWS clients
 dynamodb = boto3.client('dynamodb')
 cloudwatch = boto3.client('cloudwatch')
@@ -102,12 +106,12 @@ def sanitize_tag_value(value: Any, max_length: int = 256) -> str:
         Sanitized string value safe for S3 tags
     """
     if value is None:
-        return "(empty)"
+        return TAG_EMPTY_VALUE
 
     # Convert to string
     value_str = str(value)
     if not value_str:
-        return "(empty)"
+        return TAG_EMPTY_VALUE
 
     # Define allowed characters
     allowed_chars = set('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 +-=._:/@')
@@ -124,7 +128,7 @@ def sanitize_tag_value(value: Any, max_length: int = 256) -> str:
     if len(sanitized) > max_length:
         sanitized = sanitized[:max_length-3] + "..."
 
-    return sanitized or "(empty)"
+    return sanitized or TAG_EMPTY_VALUE
 
 
 def tag_s3_object(bucket: str, key: str, routing_tags: Dict[str, str]) -> None:
