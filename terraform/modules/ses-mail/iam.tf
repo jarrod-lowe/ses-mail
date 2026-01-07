@@ -736,3 +736,21 @@ resource "aws_iam_role_policy" "lambda_canary_sender_ses" {
   role   = aws_iam_role.lambda_canary_sender.id
   policy = data.aws_iam_policy_document.lambda_canary_sender_ses.json
 }
+
+# IAM policy document for canary sender Lambda DynamoDB access
+data "aws_iam_policy_document" "lambda_canary_sender_dynamodb" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "dynamodb:PutItem"
+    ]
+    resources = [aws_dynamodb_table.email_routing.arn]
+  }
+}
+
+# IAM policy for canary sender Lambda to write tracking records to DynamoDB
+resource "aws_iam_role_policy" "lambda_canary_sender_dynamodb" {
+  name   = "lambda-canary-sender-dynamodb-${var.environment}"
+  role   = aws_iam_role.lambda_canary_sender.id
+  policy = data.aws_iam_policy_document.lambda_canary_sender_dynamodb.json
+}

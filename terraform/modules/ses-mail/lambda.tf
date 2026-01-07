@@ -471,9 +471,10 @@ resource "aws_lambda_function" "canary_sender" {
 
   environment {
     variables = {
-      ENVIRONMENT  = var.environment
-      CANARY_EMAIL = "ses-canary-${var.environment}@${var.domain[0]}"
-      DOMAIN       = var.domain[0]
+      ENVIRONMENT         = var.environment
+      CANARY_EMAIL        = "ses-canary-${var.environment}@${var.domain[0]}"
+      DOMAIN              = var.domain[0]
+      DYNAMODB_TABLE_NAME = aws_dynamodb_table.email_routing.name
     }
   }
 
@@ -481,7 +482,8 @@ resource "aws_lambda_function" "canary_sender" {
     aws_iam_role_policy_attachment.lambda_canary_sender_basic_execution,
     aws_iam_role_policy.lambda_canary_sender_cloudwatch_metrics,
     aws_iam_role_policy_attachment.lambda_canary_sender_xray_access,
-    aws_iam_role_policy.lambda_canary_sender_ses
+    aws_iam_role_policy.lambda_canary_sender_ses,
+    aws_iam_role_policy.lambda_canary_sender_dynamodb
   ]
 }
 

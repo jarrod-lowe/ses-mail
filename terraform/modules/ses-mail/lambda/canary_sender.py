@@ -12,7 +12,7 @@ Environment Variables:
 """
 
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from email.mime.text import MIMEText
 from email.utils import formatdate, make_msgid
 from typing import Dict
@@ -26,6 +26,7 @@ tracer = Tracer()
 
 # Initialize AWS clients
 ses_client = boto3.client('ses')
+dynamodb_client = boto3.client('dynamodb')
 
 
 class DNSValidationError(Exception):
@@ -218,11 +219,9 @@ def send_canary_email(
 
 
 @tracer.capture_method
-def write_tracking_record(canary_id: str, sent_at: str) -> None:
+def write_tracking_record(canary_id: str, sent_at: str, ses_message_id: str) -> None:
     """
     Write canary tracking record to DynamoDB.
-
-    TODO: Implement DynamoDB write in Phase 3
 
     Record structure:
     {
@@ -232,16 +231,44 @@ def write_tracking_record(canary_id: str, sent_at: str) -> None:
         "canary_id": canary_id,
         "status": "pending",
         "sent_at": sent_at,
-        "ttl": <7 days from now>
+        "ses_message_id": ses_message_id,
+        "ttl": <10 minutes from now>
     }
 
     Args:
         canary_id: Unique identifier for this canary test
         sent_at: ISO 8601 timestamp when email was sent
+        ses_message_id: SES message ID from send operation
     """
-    # TODO: Implement DynamoDB write in Phase 3
-    logger.info(f"TODO: Write tracking record for canary {canary_id} (sent_at: {sent_at})")
-    logger.info("DynamoDB write not implemented yet - will be added in Phase 3")
+    table_name = os.environ.get("DYNAMODB_TABLE_NAME")
+    if not table_name:
+        raise ValueError("DYNAMODB_TABLE_NAME environment variable is required")
+
+    logger.info(f"Writing tracking record for canary {canary_id} to DynamoDB table {table_name}")
+
+    # Calculate TTL (10 minutes from now - records are only valuable during the canary test)
+    ttl = int((datetime.now(timezone.utc) + timedelta(minutes=10)).timestamp())
+
+    # Write tracking record to DynamoDB
+    try:
+        dynamodb_client.put_item(
+            TableName=table_name,
+            Item={
+                'PK': {'S': f'CANARY#{canary_id}'},
+                'SK': {'S': 'TRACKING#v1'},
+                'entity_type': {'S': 'CANARY_TRACKING'},
+                'canary_id': {'S': canary_id},
+                'status': {'S': 'pending'},
+                'sent_at': {'S': sent_at},
+                'ses_message_id': {'S': ses_message_id},
+                'ttl': {'N': str(ttl)}
+            }
+        )
+        logger.info(f"Successfully wrote tracking record for canary {canary_id}")
+    except Exception as e:
+        error_msg = f"Failed to write tracking record to DynamoDB: {e}"
+        logger.error(error_msg)
+        raise
 
 
 @logger.inject_lambda_context
@@ -301,9 +328,9 @@ def lambda_handler(event: Dict, context) -> Dict:
             environment=environment
         )
 
-        # Step 3: Write tracking record (TODO - Phase 2b)
-        logger.info("Step 3: Writing tracking record")
-        write_tracking_record(canary_id, sent_at)
+        # Step 3: Write tracking record
+        logger.info("Step 3: Writing tracking record to DynamoDB")
+        write_tracking_record(canary_id, sent_at, ses_message_id)
 
         # Return result for Step Functions
         result = {
