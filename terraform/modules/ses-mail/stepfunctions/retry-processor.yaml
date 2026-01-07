@@ -1,4 +1,5 @@
 Comment: "Process retry queue messages and invoke Gmail Forwarder Lambda"
+# TODO: Convert to JSONata
 StartAt: "ReadMessagesFromQueue"
 States:
   # Read messages from the retry queue using AWS SDK integration

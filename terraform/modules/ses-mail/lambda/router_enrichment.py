@@ -574,7 +574,7 @@ def check_spam(ses_message: Dict[str, Any]) -> Optional[str]:
         Optional[str]: Security verdict reason:
             - 'spam': Spam detected → silent drop (prevents backscatter)
             - 'virus': Virus detected → silent drop (prevents malware)
-            - 'dmarc-reject': DMARC policy reject → silent drop (honor sender policy)
+            - 'dmarc-reject': DMARC policy reject → silent drop (honour sender policy)
             - 'auth-fail': DKIM/SPF failure only → bounce (notify sender of misconfiguration)
             - None: Normal email → follow routing rules
     """
