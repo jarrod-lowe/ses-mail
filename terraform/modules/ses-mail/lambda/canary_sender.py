@@ -59,7 +59,7 @@ def validate_dns(domain: str) -> Dict[str, bool]:
     Raises:
         DNSValidationError: If critical DNS records are missing or invalid
     """
-    logger.info(f"Validating DNS records for domain: {domain}")
+    logger.info("Validating DNS records", domain=domain)
     results = {
         "mx": False,
         "spf": False,
@@ -73,13 +73,14 @@ def validate_dns(domain: str) -> Dict[str, bool]:
         mx_records = dns.resolver.resolve(domain, 'MX')
         if mx_records:
             results["mx"] = True
-            logger.info(f"MX records found: {[r.exchange.to_text() for r in mx_records]}")
+            mx_list = [r.exchange.to_text() for r in mx_records]
+            logger.info("MX records found", domain=domain, mx_records=mx_list)
         else:
             errors.append(f"No MX records found for {domain}")
     except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer) as e:
         errors.append(f"MX lookup failed for {domain}: {e}")
     except Exception as e:
-        logger.warning(f"Unexpected error checking MX records: {e}")
+        logger.warning("Unexpected error checking MX records", domain=domain, error=str(e))
         errors.append(f"MX lookup error: {e}")
 
     # Validate SPF records (CRITICAL)
@@ -91,14 +92,14 @@ def validate_dns(domain: str) -> Dict[str, bool]:
             if 'v=spf1' in txt_value:
                 spf_found = True
                 results["spf"] = True
-                logger.info(f"SPF record found: {txt_value}")
+                logger.info("SPF record found", domain=domain, spf_record=txt_value)
                 break
         if not spf_found:
             errors.append(f"No SPF record found for {domain}")
     except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer) as e:
         errors.append(f"SPF lookup failed for {domain}: {e}")
     except Exception as e:
-        logger.warning(f"Unexpected error checking SPF records: {e}")
+        logger.warning("Unexpected error checking SPF records", domain=domain, error=str(e))
         errors.append(f"SPF lookup error: {e}")
 
     # Validate DMARC records (CRITICAL)
@@ -111,14 +112,14 @@ def validate_dns(domain: str) -> Dict[str, bool]:
             if 'v=DMARC1' in txt_value:
                 dmarc_found = True
                 results["dmarc"] = True
-                logger.info(f"DMARC record found: {txt_value}")
+                logger.info("DMARC record found", domain=dmarc_domain, dmarc_record=txt_value)
                 break
         if not dmarc_found:
             errors.append(f"No DMARC record found for {dmarc_domain}")
     except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer) as e:
         errors.append(f"DMARC lookup failed for {dmarc_domain}: {e}")
     except Exception as e:
-        logger.warning(f"Unexpected error checking DMARC records: {e}")
+        logger.warning("Unexpected error checking DMARC records", domain=dmarc_domain, error=str(e))
         errors.append(f"DMARC lookup error: {e}")
 
     # Validate MTA-STS records (WARNING - not critical)
@@ -131,22 +132,22 @@ def validate_dns(domain: str) -> Dict[str, bool]:
             if 'v=STSv1' in txt_value:
                 mta_sts_found = True
                 results["mta_sts"] = True
-                logger.info(f"MTA-STS record found: {txt_value}")
+                logger.info("MTA-STS record found", domain=mta_sts_domain, mta_sts_record=txt_value)
                 break
         if not mta_sts_found:
-            logger.warning(f"No MTA-STS record found for {mta_sts_domain}")
+            logger.warning("No MTA-STS record found", domain=mta_sts_domain)
     except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
-        logger.warning(f"MTA-STS lookup failed for {mta_sts_domain} (not critical)")
+        logger.warning("MTA-STS lookup failed (not critical)", domain=mta_sts_domain)
     except Exception as e:
-        logger.warning(f"Unexpected error checking MTA-STS records: {e}")
+        logger.warning("Unexpected error checking MTA-STS records", domain=mta_sts_domain, error=str(e))
 
     # Fail if critical records are missing
     if errors:
         error_msg = "; ".join(errors)
-        logger.error(f"DNS validation failed: {error_msg}")
+        logger.error("DNS validation failed", domain=domain, errors=error_msg)
         raise DNSValidationError(error_msg)
 
-    logger.info(f"DNS validation passed: {results}")
+    logger.info("DNS validation passed", domain=domain, results=results)
     return results
 
 
@@ -176,7 +177,7 @@ def send_canary_email(
     Raises:
         SMTPSendError: If SES send fails
     """
-    logger.info(f"Sending canary email: {canary_id}")
+    logger.info("Sending canary email", canary_id=canary_id, environment=environment)
 
     # Construct email message
     msg = MIMEText(
@@ -199,7 +200,7 @@ def send_canary_email(
 
     # Send via SES SendRawEmail API
     try:
-        logger.info(f"Sending email via SES API: {from_address} → {to_address}")
+        logger.info("Sending email via SES API", from_address=from_address, to_address=to_address)
         response = ses_client.send_raw_email(
             Source=from_address,
             Destinations=[to_address],
@@ -209,12 +210,12 @@ def send_canary_email(
         )
 
         message_id = response['MessageId']
-        logger.info(f"Canary email sent successfully: {canary_id}, SES MessageId: {message_id}")
+        logger.info("Canary email sent successfully", canary_id=canary_id, ses_message_id=message_id)
         return message_id
 
     except Exception as e:
         error_msg = f"Unexpected error sending email: {e}"
-        logger.error(error_msg)
+        logger.error("Failed to send canary email", canary_id=canary_id, error=str(e))
         raise SMTPSendError(error_msg)
 
 
@@ -244,7 +245,7 @@ def write_tracking_record(canary_id: str, sent_at: str, ses_message_id: str) -> 
     if not table_name:
         raise ValueError("DYNAMODB_TABLE_NAME environment variable is required")
 
-    logger.info(f"Writing tracking record for canary {canary_id} to DynamoDB table {table_name}")
+    logger.info("Writing tracking record to DynamoDB", canary_id=canary_id, table_name=table_name)
 
     # Calculate TTL (10 minutes from now - records are only valuable during the canary test)
     ttl = int((datetime.now(timezone.utc) + timedelta(minutes=10)).timestamp())
@@ -264,10 +265,9 @@ def write_tracking_record(canary_id: str, sent_at: str, ses_message_id: str) -> 
                 'ttl': {'N': str(ttl)}
             }
         )
-        logger.info(f"Successfully wrote tracking record for canary {canary_id}")
+        logger.info("Successfully wrote tracking record", canary_id=canary_id, ttl=ttl)
     except Exception as e:
-        error_msg = f"Failed to write tracking record to DynamoDB: {e}"
-        logger.error(error_msg)
+        logger.error("Failed to write tracking record to DynamoDB", canary_id=canary_id, error=str(e))
         raise
 
 
@@ -304,9 +304,7 @@ def lambda_handler(event: Dict, context) -> Dict:
     if not canary_email or not domain:
         raise ValueError("CANARY_EMAIL and DOMAIN environment variables are required")
 
-    logger.info(f"Environment: {environment}")
-    logger.info(f"Canary email: {canary_email}")
-    logger.info(f"Domain: {domain}")
+    logger.info("Canary test configuration", environment=environment, canary_email=canary_email, domain=domain)
 
     # Generate canary ID (timestamp-based for uniqueness)
     now = datetime.now(timezone.utc)
@@ -317,7 +315,7 @@ def lambda_handler(event: Dict, context) -> Dict:
         # Step 1: Validate DNS records
         logger.info("Step 1: Validating DNS records")
         dns_results = validate_dns(domain)
-        logger.info(f"DNS validation passed: {dns_results}")
+        logger.info("DNS validation passed", dns_results=dns_results)
 
         # Step 2: Send canary email via SES API
         logger.info("Step 2: Sending canary email via SES API")
@@ -341,15 +339,15 @@ def lambda_handler(event: Dict, context) -> Dict:
             "dns_validation": dns_results
         }
 
-        logger.info(f"Canary test completed successfully: {result}")
+        logger.info("Canary test completed successfully", canary_id=canary_id, ses_message_id=ses_message_id, status="sent")
         return result
 
     except DNSValidationError as e:
-        logger.error(f"DNS validation failed: {e}")
+        logger.error("DNS validation failed", error=str(e))
         raise
     except SMTPSendError as e:
-        logger.error(f"SMTP send failed: {e}")
+        logger.error("SMTP send failed", error=str(e))
         raise
     except Exception as e:
-        logger.error(f"Unexpected error in canary test: {e}")
+        logger.error("Unexpected error in canary test", error=str(e))
         raise
