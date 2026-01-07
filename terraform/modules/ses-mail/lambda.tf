@@ -437,3 +437,56 @@ resource "aws_lambda_permission" "outbound_metrics_sns_complaint" {
   principal     = "sns.amazonaws.com"
   source_arn    = aws_sns_topic.outbound_complaint.arn
 }
+
+# ===========================
+# Canary Sender Lambda
+# ===========================
+
+# Archive the canary sender Lambda function code (single file, no dependencies)
+data "archive_file" "canary_sender_zip" {
+  type        = "zip"
+  source_file = "${path.module}/lambda/canary_sender.py"
+  output_path = "${path.module}/lambda/canary_sender.zip"
+}
+
+# Lambda function for sending canary test emails
+resource "aws_lambda_function" "canary_sender" {
+  filename         = data.archive_file.canary_sender_zip.output_path
+  function_name    = "ses-mail-canary-sender-${var.environment}"
+  role             = aws_iam_role.lambda_canary_sender.arn
+  handler          = "canary_sender.lambda_handler"
+  source_code_hash = data.archive_file.canary_sender_zip.output_base64sha256
+  runtime          = "python3.12"
+  timeout          = 60
+  memory_size      = 128
+  description      = "Sends canary test emails and validates DNS records"
+
+  # Attach shared layer for dependencies (boto3, aws_xray_sdk, aws-lambda-powertools, dnspython)
+  layers = [aws_lambda_layer_version.shared.arn]
+
+  # Enable X-Ray tracing for distributed tracing
+  tracing_config {
+    mode = "Active"
+  }
+
+  environment {
+    variables = {
+      ENVIRONMENT  = var.environment
+      CANARY_EMAIL = "ses-canary-${var.environment}@${var.domain[0]}"
+      DOMAIN       = var.domain[0]
+    }
+  }
+
+  depends_on = [
+    aws_iam_role_policy_attachment.lambda_canary_sender_basic_execution,
+    aws_iam_role_policy.lambda_canary_sender_cloudwatch_metrics,
+    aws_iam_role_policy_attachment.lambda_canary_sender_xray_access,
+    aws_iam_role_policy.lambda_canary_sender_ses
+  ]
+}
+
+# CloudWatch Log Group for canary sender Lambda function
+resource "aws_cloudwatch_log_group" "lambda_canary_sender_logs" {
+  name              = "/aws/lambda/${aws_lambda_function.canary_sender.function_name}"
+  retention_in_days = 30
+}

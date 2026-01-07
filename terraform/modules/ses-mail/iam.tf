@@ -672,3 +672,67 @@ resource "aws_iam_role_policy_attachment" "lambda_outbound_metrics_xray_access" 
   role       = aws_iam_role.lambda_outbound_metrics.name
   policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
 }
+
+# ===========================
+# Canary Sender Lambda IAM
+# ===========================
+
+# IAM role for canary sender Lambda function
+resource "aws_iam_role" "lambda_canary_sender" {
+  name               = "ses-mail-lambda-canary-sender-${var.environment}"
+  assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
+  description        = "Role for canary sender Lambda function"
+}
+
+# Attach AWS managed policy for basic Lambda execution (CloudWatch Logs)
+resource "aws_iam_role_policy_attachment" "lambda_canary_sender_basic_execution" {
+  role       = aws_iam_role.lambda_canary_sender.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+# IAM policy document for canary sender Lambda CloudWatch metrics access
+data "aws_iam_policy_document" "lambda_canary_sender_cloudwatch_metrics" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "cloudwatch:PutMetricData"
+    ]
+    resources = ["*"]
+    condition {
+      test     = "StringEquals"
+      variable = "cloudwatch:namespace"
+      values   = ["SESMail/${var.environment}"]
+    }
+  }
+}
+
+# IAM policy for canary sender Lambda to publish CloudWatch metrics
+resource "aws_iam_role_policy" "lambda_canary_sender_cloudwatch_metrics" {
+  name   = "lambda-canary-sender-cloudwatch-metrics-${var.environment}"
+  role   = aws_iam_role.lambda_canary_sender.id
+  policy = data.aws_iam_policy_document.lambda_canary_sender_cloudwatch_metrics.json
+}
+
+# Attach X-Ray write access for canary sender Lambda (for distributed tracing)
+resource "aws_iam_role_policy_attachment" "lambda_canary_sender_xray_access" {
+  role       = aws_iam_role.lambda_canary_sender.name
+  policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
+}
+
+# IAM policy document for canary sender Lambda SES access
+data "aws_iam_policy_document" "lambda_canary_sender_ses" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "ses:SendRawEmail"
+    ]
+    resources = ["*"]
+  }
+}
+
+# IAM policy for canary sender Lambda to send emails via SES
+resource "aws_iam_role_policy" "lambda_canary_sender_ses" {
+  name   = "lambda-canary-sender-ses-${var.environment}"
+  role   = aws_iam_role.lambda_canary_sender.id
+  policy = data.aws_iam_policy_document.lambda_canary_sender_ses.json
+}
