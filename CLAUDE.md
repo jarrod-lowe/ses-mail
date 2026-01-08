@@ -125,6 +125,7 @@ See `.kiro/specs/*` for complete design documentation.
 ### DynamoDB Single-Table Design
 
 **Quick reference**:
+
 - **Table**: `ses-mail-email-routing-{environment}`
 - **PK Format**: `ROUTE#<pattern>`, `SMTP_USER#<username>` (entity type prefix + identifier)
 - **SK Format**: `RULE#v1`, `CREDENTIALS#v1` (allows versioning)
@@ -258,6 +259,7 @@ For detailed flow diagrams and timing, see [docs/ARCHITECTURE.md#email-processin
 ### Debugging Commands
 
 For debugging email flow, monitoring, and troubleshooting, see:
+
 - [docs/OPERATIONS.md#monitoring-and-troubleshooting](docs/OPERATIONS.md#monitoring-and-troubleshooting) - Complete monitoring guide
 - [docs/OPERATIONS.md#quick-command-reference](docs/OPERATIONS.md#quick-command-reference) - Common operations commands
 

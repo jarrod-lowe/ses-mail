@@ -1,0 +1,186 @@
+Comment: "Canary test orchestration - Send email, wait, verify completion"
+QueryLanguage: "JSONata"
+StartAt: "InvokeCanarySender"
+States:
+  # Step 1: Invoke canary sender Lambda
+  InvokeCanarySender:
+    Type: "Task"
+    Resource: "arn:aws:states:::lambda:invoke"
+    Arguments:
+      FunctionName: "${canary_sender_lambda_arn}"
+      Payload: {}
+    Output: "{% $states.result.Payload %}"
+    Next: "WaitForEmailProcessing"
+    Catch:
+      - ErrorEquals:
+          - "States.ALL"
+        Next: "HandleCanarySenderError"
+
+  # Step 2: Wait for email to be processed through pipeline
+  WaitForEmailProcessing:
+    Type: "Wait"
+    Seconds: 90
+    Comment: "Wait for email to be sent, received, routed, and forwarded to Gmail"
+    Next: "QueryCompletionRecord"
+
+  # Step 3: Query DynamoDB for canary completion record
+  QueryCompletionRecord:
+    Type: "Task"
+    Resource: "arn:aws:states:::aws-sdk:dynamodb:getItem"
+    Arguments:
+      TableName: "${dynamodb_table_name}"
+      Key:
+        PK:
+          S: "{% 'CANARY#' & $states.input.canary_id %}"
+        SK:
+          S: "TRACKING#v1"
+    Next: "CheckCompletionStatus"
+    Catch:
+      - ErrorEquals:
+          - "States.ALL"
+        Next: "HandleQueryError"
+
+  # Step 4: Check if record exists
+  CheckCompletionStatus:
+    Type: "Choice"
+    Choices:
+      # Record found - check status value
+      - Condition: "{% $exists($states.input.Item) %}"
+        Next: "CheckStatus"
+    # Record not found (Item is null/missing)
+    Default: "HandleMissingRecord"
+
+  # Step 5: Route to appropriate extraction based on status
+  CheckStatus:
+    Type: "Choice"
+    Choices:
+      # Success: status='completed'
+      - Condition: "{% $states.input.Item.status.S = 'completed' %}"
+        Next: "ExtractCompletedData"
+      # Failure: status='failed'
+      - Condition: "{% $states.input.Item.status.S = 'failed' %}"
+        Next: "ExtractFailedData"
+    # status='sent' or unknown value (email not processed in time)
+    Default: "HandleIncompleteRecord"
+
+  # Step 6: Extract data when status='completed' (only fields that exist)
+  ExtractCompletedData:
+    Type: "Pass"
+    Output:
+      canary_id: "{% $states.input.Item.canary_id.S %}"
+      status: "{% $states.input.Item.status.S %}"
+      sent_at: "{% $states.input.Item.sent_at.S %}"
+      completed_at: "{% $states.input.Item.completed_at.S %}"
+      gmail_message_id: "{% $states.input.Item.gmail_message_id.S %}"
+      processing_time_seconds: "{% ($toMillis($states.input.Item.completed_at.S) - $toMillis($states.input.Item.sent_at.S)) / 1000 %}"
+    Next: "PublishSuccessMetrics"
+
+  # Step 7: Extract data when status='failed' (different fields exist)
+  ExtractFailedData:
+    Type: "Pass"
+    Output:
+      canary_id: "{% $states.input.Item.canary_id.S %}"
+      status: "{% $states.input.Item.status.S %}"
+      sent_at: "{% $states.input.Item.sent_at.S %}"
+      completed_at: "{% $states.input.Item.completed_at.S %}"
+      error_message: "{% $states.input.Item.error_message.S %}"
+    Next: "PublishFailureMetrics"
+
+  # Step 8: Publish success metrics
+  PublishSuccessMetrics:
+    Type: "Task"
+    Resource: "arn:aws:states:::aws-sdk:cloudwatch:putMetricData"
+    Arguments:
+      Namespace: "SESMail/${environment}"
+      MetricData:
+        - MetricName: "CanarySuccess"
+          Value: 1
+          Unit: "Count"
+        - MetricName: "CanaryProcessingTime"
+          Value: "{% $states.input.processing_time_seconds %}"
+          Unit: "Seconds"
+    Next: "CanarySucceeded"
+    Catch:
+      - ErrorEquals:
+          - "States.ALL"
+        Next: "CanarySucceeded"  # Don't fail canary if metric publish fails
+
+  # Success terminal state
+  CanarySucceeded:
+    Type: "Succeed"
+
+  # Step 7b: Publish failure metrics
+  PublishFailureMetrics:
+    Type: "Task"
+    Resource: "arn:aws:states:::aws-sdk:cloudwatch:putMetricData"
+    Arguments:
+      Namespace: "SESMail/${environment}"
+      MetricData:
+        - MetricName: "CanaryFailure"
+          Value: 1
+          Unit: "Count"
+    Next: "CanaryFailed"
+    Catch:
+      - ErrorEquals:
+          - "States.ALL"
+        Next: "CanaryFailed"  # Proceed to failure even if metric publish fails
+
+  # Failure terminal state with error details
+  CanaryFailed:
+    Type: "Fail"
+    Error: "CanaryTestFailed"
+    Cause: "{% 'Canary ' & $states.input.canary_id & ' failed: ' & $states.input.error_message %}"
+
+  # Error handling: Canary sender Lambda failed
+  HandleCanarySenderError:
+    Type: "Pass"
+    Output:
+      ErrorType: "CanarySenderInvocationFailed"
+      ErrorMessage: "Failed to invoke canary sender Lambda"
+    Next: "PublishErrorMetric"
+
+  # Error handling: DynamoDB query failed
+  HandleQueryError:
+    Type: "Pass"
+    Output:
+      ErrorType: "DynamoDBQueryFailed"
+      ErrorMessage: "Failed to query DynamoDB for completion record"
+    Next: "PublishErrorMetric"
+
+  # Error handling: Completion record not found
+  HandleMissingRecord:
+    Type: "Pass"
+    Output:
+      ErrorType: "CompletionRecordMissing"
+      ErrorMessage: "Canary completion record not found in DynamoDB after 90 seconds"
+    Next: "PublishErrorMetric"
+
+  # Error handling: Canary still in 'sent' status after 90 seconds
+  HandleIncompleteRecord:
+    Type: "Pass"
+    Output:
+      ErrorType: "CanaryIncomplete"
+      ErrorMessage: "{% 'Canary status: ' & $states.input.Item.status.S & ' after 90 seconds - email not processed in time' %}"
+    Next: "PublishErrorMetric"
+
+  # Publish error metric
+  PublishErrorMetric:
+    Type: "Task"
+    Resource: "arn:aws:states:::aws-sdk:cloudwatch:putMetricData"
+    Arguments:
+      Namespace: "SESMail/${environment}"
+      MetricData:
+        - MetricName: "CanaryMonitorErrors"
+          Value: 1
+          Unit: "Count"
+    Catch:
+      - ErrorEquals:
+          - "States.ALL"
+        Next: "MonitoringFailed"
+    Next: "MonitoringFailed"
+
+  # Terminal failure state
+  MonitoringFailed:
+    Type: "Fail"
+    Error: "CanaryMonitoringFailed"
+    Cause: "{% $states.input.ErrorMessage %}"

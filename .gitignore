@@ -10,6 +10,8 @@ terraform/modules/ses-mail/lambda/package/
 terraform/modules/ses-mail/lambda/layer/*/python/
 terraform/.fmt
 
+expired_token.json
+
 # Integration test reports
 integration_test_report_*.json
 

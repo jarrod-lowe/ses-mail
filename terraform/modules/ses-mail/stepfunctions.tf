@@ -419,3 +419,168 @@ resource "aws_sfn_state_machine" "token_monitor" {
   ]
 }
 
+# ===========================
+# Canary Monitor Step Function Resources
+# ===========================
+
+# IAM policy for canary monitor to invoke canary_sender Lambda
+data "aws_iam_policy_document" "stepfunctions_canary_monitor_lambda_invoke" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "lambda:InvokeFunction"
+    ]
+    resources = [aws_lambda_function.canary_sender.arn]
+  }
+}
+
+# IAM policy for canary monitor to query DynamoDB
+data "aws_iam_policy_document" "stepfunctions_canary_monitor_dynamodb_access" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "dynamodb:GetItem"
+    ]
+    resources = [aws_dynamodb_table.email_routing.arn]
+  }
+}
+
+# IAM policy for canary monitor CloudWatch metrics
+data "aws_iam_policy_document" "stepfunctions_canary_monitor_cloudwatch_metrics" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "cloudwatch:PutMetricData"
+    ]
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "cloudwatch:namespace"
+      values   = ["SESMail/${var.environment}"]
+    }
+  }
+}
+
+# IAM policy for canary monitor CloudWatch Logs
+data "aws_iam_policy_document" "stepfunctions_canary_monitor_cloudwatch_logs" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "logs:CreateLogDelivery",
+      "logs:GetLogDelivery",
+      "logs:UpdateLogDelivery",
+      "logs:DeleteLogDelivery",
+      "logs:ListLogDeliveries",
+      "logs:PutResourcePolicy",
+      "logs:DescribeResourcePolicies",
+      "logs:DescribeLogGroups"
+    ]
+    resources = ["*"]
+  }
+
+  statement {
+    effect = "Allow"
+    actions = [
+      "logs:CreateLogGroup",
+      "logs:CreateLogStream",
+      "logs:PutLogEvents"
+    ]
+    resources = ["${aws_cloudwatch_log_group.stepfunction_canary_monitor_logs.arn}:*"]
+  }
+}
+
+# IAM role for canary monitor Step Function
+resource "aws_iam_role" "stepfunction_canary_monitor" {
+  name = "ses-mail-stepfunction-canary-monitor-${var.environment}"
+
+  assume_role_policy = data.aws_iam_policy_document.stepfunctions_assume_role.json
+
+  tags = {
+    Name        = "ses-mail-stepfunction-canary-monitor-${var.environment}"
+    Environment = var.environment
+    Service     = "ses-mail"
+    Purpose     = "Step Function role for canary test orchestration"
+  }
+}
+
+# Attach Lambda invoke policy
+resource "aws_iam_role_policy" "stepfunction_canary_monitor_lambda" {
+  name = "lambda-invoke"
+  role = aws_iam_role.stepfunction_canary_monitor.id
+
+  policy = data.aws_iam_policy_document.stepfunctions_canary_monitor_lambda_invoke.json
+}
+
+# Attach DynamoDB access policy
+resource "aws_iam_role_policy" "stepfunction_canary_monitor_dynamodb" {
+  name = "dynamodb-access"
+  role = aws_iam_role.stepfunction_canary_monitor.id
+
+  policy = data.aws_iam_policy_document.stepfunctions_canary_monitor_dynamodb_access.json
+}
+
+# Attach CloudWatch metrics policy
+resource "aws_iam_role_policy" "stepfunction_canary_monitor_cloudwatch_metrics" {
+  name = "cloudwatch-metrics"
+  role = aws_iam_role.stepfunction_canary_monitor.id
+
+  policy = data.aws_iam_policy_document.stepfunctions_canary_monitor_cloudwatch_metrics.json
+}
+
+# Attach CloudWatch Logs policy
+resource "aws_iam_role_policy" "stepfunction_canary_monitor_logs" {
+  name = "cloudwatch-logs"
+  role = aws_iam_role.stepfunction_canary_monitor.id
+
+  policy = data.aws_iam_policy_document.stepfunctions_canary_monitor_cloudwatch_logs.json
+}
+
+# CloudWatch Log Group for canary monitor Step Function
+resource "aws_cloudwatch_log_group" "stepfunction_canary_monitor_logs" {
+  name              = "/aws/states/ses-mail-canary-monitor-${var.environment}"
+  retention_in_days = 7
+
+  tags = {
+    Name        = "stepfunction-canary-monitor-logs-${var.environment}"
+    Environment = var.environment
+    Service     = "ses-mail"
+  }
+}
+
+# Step Function state machine for canary monitoring
+resource "aws_sfn_state_machine" "canary_monitor" {
+  name     = "ses-mail-canary-monitor-${var.environment}"
+  role_arn = aws_iam_role.stepfunction_canary_monitor.arn
+
+  logging_configuration {
+    log_destination        = "${aws_cloudwatch_log_group.stepfunction_canary_monitor_logs.arn}:*"
+    include_execution_data = true
+    level                  = "ERROR"
+  }
+
+  definition = jsonencode(yamldecode(templatefile(
+    "${path.module}/stepfunctions/canary-monitor.yaml",
+    {
+      canary_sender_lambda_arn = aws_lambda_function.canary_sender.arn
+      dynamodb_table_name      = aws_dynamodb_table.email_routing.name
+      environment              = var.environment
+    }
+  )))
+
+  tags = {
+    Name        = "ses-mail-canary-monitor-${var.environment}"
+    Environment = var.environment
+    Service     = "ses-mail"
+    Purpose     = "Orchestrate canary test execution and validation every hour"
+  }
+
+  depends_on = [
+    aws_iam_role_policy.stepfunction_canary_monitor_lambda,
+    aws_iam_role_policy.stepfunction_canary_monitor_dynamodb,
+    aws_iam_role_policy.stepfunction_canary_monitor_cloudwatch_metrics,
+    aws_iam_role_policy.stepfunction_canary_monitor_logs,
+    aws_cloudwatch_log_group.stepfunction_canary_monitor_logs
+  ]
+}
+
