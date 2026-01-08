@@ -301,7 +301,7 @@ All SNS topics have:
 5. Publish to CloudWatch `SESMail/{environment}` namespace
 
 **Runtime**: Python 3.12 with AWS Lambda Powertools
-**Memory**: 256 MB
+**Memory**: 128 MB
 **Timeout**: 30 seconds
 **Tracing**: X-Ray Active
 
@@ -628,7 +628,7 @@ Four widgets added to existing `ses-mail-dashboard-{environment}`:
 
 **Configuration:**
 - Runtime: Python 3.12
-- Memory: 512 MB (needs memory for email parsing)
+- Memory: 128 MB
 - Timeout: 5 minutes
 - X-Ray Active tracing
 - Lambda layers: Google API client libraries
@@ -665,7 +665,7 @@ Four widgets added to existing `ses-mail-dashboard-{environment}`:
 
 **Configuration:**
 - Runtime: Python 3.12
-- Memory: 256 MB
+- Memory: 128 MB
 - Timeout: 1 minute
 
 **Key Logic:**
@@ -683,7 +683,7 @@ Four widgets added to existing `ses-mail-dashboard-{environment}`:
 
 **Configuration:**
 - Runtime: Python 3.12
-- Memory: 256 MB
+- Memory: 128 MB
 - Timeout: 1 minute
 - Stream batch size: 1
 
@@ -1476,7 +1476,7 @@ Each SMTP IAM user has inline policy restricting `ses:SendEmail` and `ses:SendRa
 
 1. **Long Polling (SQS)**: Reduces receive latency from ~1s to <100ms
 2. **EventBridge Pipes**: Managed polling eliminates cold starts
-3. **Lambda Memory**: 512 MB for Gmail forwarder (faster CPU)
+3. **Lambda Memory**: 128 MB standard allocation (minimal cold start impact)
 4. **DynamoDB Single-Item Queries**: GetItem vs. Scan
 5. **S3 Transfer Acceleration**: Not enabled (not needed for single-region)
 
@@ -1499,7 +1499,7 @@ Each SMTP IAM user has inline policy restricting `ses:SendEmail` and `ses:SendRa
 
 1. **PAY_PER_REQUEST DynamoDB**: No idle capacity costs
 2. **S3 Lifecycle**: Delete emails after 7 days
-3. **Lambda Memory**: Right-sized (128MB router, 512MB forwarder)
+3. **Lambda Memory**: All functions use 128MB (right-sized for workload)
 4. **CloudWatch Log Retention**: 30 days (not indefinite)
 5. **X-Ray Sampling**: 1% (not 100%)
 6. **SQS Long Polling**: Reduces API calls

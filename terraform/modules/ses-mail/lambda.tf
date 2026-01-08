@@ -201,7 +201,7 @@ resource "aws_lambda_function" "smtp_credential_manager" {
   source_code_hash = data.archive_file.smtp_credential_manager_zip.output_base64sha256
   runtime          = "python3.12"
   timeout          = 60
-  memory_size      = 256
+  memory_size      = 128
 
   # Attach shared layer for dependencies
   layers = [aws_lambda_layer_version.shared.arn]
@@ -375,7 +375,7 @@ resource "aws_lambda_function" "outbound_metrics_publisher" {
   source_code_hash = data.archive_file.outbound_metrics_publisher_zip.output_base64sha256
   runtime          = "python3.12"
   timeout          = 30
-  memory_size      = 256
+  memory_size      = 128
   description      = "Processes SES outbound email events and publishes CloudWatch metrics"
 
   # Attach shared layer for dependencies (boto3, aws_xray_sdk, aws-lambda-powertools)
