@@ -473,10 +473,4 @@ resource "aws_cloudwatch_event_target" "canary_monitor" {
   target_id = "canary-monitor-stepfunction"
   arn       = aws_sfn_state_machine.canary_monitor.arn
   role_arn  = aws_iam_role.eventbridge_stepfunctions.arn
-
-  retry_policy {
-    maximum_event_age_in_seconds = 300
-    maximum_retry_attempts       = 2
-  }
 }
-
