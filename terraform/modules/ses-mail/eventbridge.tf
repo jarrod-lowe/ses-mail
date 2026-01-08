@@ -1,3 +1,26 @@
+# CloudWatch alarm for missing canary Step Function invocations (ExecutionsStarted)
+resource "aws_cloudwatch_metric_alarm" "canary_schedule_missing" {
+  alarm_name          = "ses-mail-canary-schedule-missing-${var.environment}"
+  comparison_operator = "LessThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "ExecutionsStarted"
+  namespace           = "AWS/States"
+  period              = 4500 # 75 minutes
+  statistic           = "Sum"
+  threshold           = 1
+  alarm_description   = "Alert if canary Step Function was not started in the last 75 minutes (schedule failure)"
+  alarm_actions       = [var.alarm_sns_topic_arn]
+  ok_actions          = [var.alarm_sns_topic_arn]
+  treat_missing_data  = "breaching"
+  dimensions = {
+    StateMachineArn = aws_sfn_state_machine.canary_monitor.arn
+  }
+  tags = {
+    Name        = "ses-mail-canary-schedule-missing-${var.environment}"
+    Environment = var.environment
+    Service     = "ses-mail"
+  }
+}
 # ===========================
 # EventBridge Event Bus
 # ===========================
