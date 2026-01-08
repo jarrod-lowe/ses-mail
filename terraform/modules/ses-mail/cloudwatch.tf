@@ -623,6 +623,150 @@ EOT
           view    = "table"
           title   = "Recent Email Routing & Execution"
         }
+      },
+
+      # ===========================
+      # Section 10: Canary Monitoring
+      # ===========================
+
+      {
+        type   = "text"
+        width  = 24
+        height = 1
+        x      = 0
+        y      = 83
+        properties = {
+          markdown = "## Canary Monitoring"
+        }
+      },
+
+      # Widget 1: Canary Test Results
+      {
+        type   = "metric"
+        width  = 12
+        height = 6
+        x      = 0
+        y      = 84
+        properties = {
+          metrics = [
+            ["SESMail/${var.environment}", "CanarySuccess",
+            { stat = "Sum", label = "Success", color = "#2ca02c" }],
+            [".", "CanaryFailure",
+            { stat = "Sum", label = "Failure", color = "#d62728" }],
+            [".", "CanaryMonitorErrors",
+            { stat = "Sum", label = "Monitor Errors", color = "#ff7f0e" }]
+          ]
+          period = 300
+          stat   = "Sum"
+          region = var.aws_region
+          title  = "Canary Test Results (Hourly)"
+          yAxis = {
+            left = {
+              min       = 0
+              label     = "Test Count"
+              showUnits = false
+            }
+          }
+        }
+      },
+
+      # Widget 2: Email Processing Time
+      {
+        type   = "metric"
+        width  = 12
+        height = 6
+        x      = 12
+        y      = 84
+        properties = {
+          metrics = [
+            ["SESMail/${var.environment}", "CanaryProcessingTime",
+            { stat = "Average", label = "Average", color = "#1f77b4" }],
+            ["...",
+            { stat = "Maximum", label = "Maximum", color = "#ff7f0e" }],
+            ["...",
+            { stat = "Minimum", label = "Minimum", color = "#2ca02c" }],
+            ["...",
+            { stat = "p99", label = "p99", color = "#9467bd" }]
+          ]
+          period = 300
+          stat   = "Average"
+          region = var.aws_region
+          title  = "Email Processing Time"
+          yAxis = {
+            left = {
+              min       = 0
+              label     = "Seconds"
+              showUnits = false
+            }
+          }
+        }
+      },
+
+      # Widget 3: Step Function Executions
+      {
+        type   = "metric"
+        width  = 12
+        height = 6
+        x      = 0
+        y      = 90
+        properties = {
+          metrics = [
+            ["AWS/States", "ExecutionsSucceeded", "StateMachineArn", aws_sfn_state_machine.canary_monitor.arn,
+            { stat = "Sum", label = "Succeeded", color = "#2ca02c" }],
+            [".", "ExecutionsFailed", ".", ".",
+            { stat = "Sum", label = "Failed", color = "#d62728" }],
+            [".", "ExecutionsTimedOut", ".", ".",
+            { stat = "Sum", label = "Timed Out", color = "#ff7f0e" }],
+            [".", "ExecutionThrottled", ".", ".",
+            { stat = "Sum", label = "Throttled", color = "#9467bd" }],
+            [".", "ExecutionTime", ".", ".",
+            { stat = "Average", label = "Duration (ms)", yAxis = "right", color = "#1f77b4" }]
+          ]
+          period = 300
+          stat   = "Sum"
+          region = var.aws_region
+          title  = "Canary Monitor Step Function"
+          yAxis = {
+            left = {
+              min       = 0
+              label     = "Execution Count"
+              showUnits = false
+            }
+            right = {
+              min       = 0
+              label     = "Duration (ms)"
+              showUnits = false
+            }
+          }
+        }
+      },
+
+      # Widget 4: Canary Success Rate
+      {
+        type   = "metric"
+        width  = 12
+        height = 6
+        x      = 12
+        y      = 90
+        properties = {
+          metrics = [
+            ["SESMail/${var.environment}", "CanarySuccess", { id = "m1", visible = false }],
+            [".", "CanaryFailure", { id = "m2", visible = false }],
+            [{ expression = "(m1/(m1+m2))*100", label = "Success Rate", color = "#2ca02c" }]
+          ]
+          period = 3600 # 1 hour to match canary frequency
+          stat   = "Sum"
+          region = var.aws_region
+          title  = "Canary Success Rate"
+          yAxis = {
+            left = {
+              min       = 0
+              max       = 100
+              label     = "Percentage"
+              showUnits = false
+            }
+          }
+        }
       }
     ]
   })
@@ -978,4 +1122,84 @@ resource "aws_cloudwatch_metric_alarm" "ses_reputation_complaint" {
 
   alarm_actions = [var.alarm_sns_topic_arn]
   ok_actions    = [var.alarm_sns_topic_arn]
+}
+
+# ===========================
+# Canary Monitoring Alarms
+# ===========================
+
+# CloudWatch Alarm for canary test failures
+resource "aws_cloudwatch_metric_alarm" "canary_failure_detected" {
+  alarm_name          = "ses-mail-canary-failure-detected-${var.environment}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "CanaryFailure"
+  namespace           = "SESMail/${var.environment}"
+  period              = 3600 # 1 hour period
+  statistic           = "Sum"
+  threshold           = 0 # Alert on ANY failure
+  alarm_description   = "Canary test failed - email pipeline may have issues (${var.environment}). Check canary monitor Step Function logs."
+  treat_missing_data  = "notBreaching"
+
+  alarm_actions = [var.alarm_sns_topic_arn]
+  ok_actions    = [var.alarm_sns_topic_arn]
+
+  tags = {
+    Name        = "ses-mail-canary-failure-${var.environment}"
+    Environment = var.environment
+    Service     = "ses-mail"
+    Severity    = "high"
+  }
+}
+
+# CloudWatch Alarm for canary monitoring errors
+resource "aws_cloudwatch_metric_alarm" "canary_monitor_errors" {
+  alarm_name          = "ses-mail-canary-monitor-errors-${var.environment}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "CanaryMonitorErrors"
+  namespace           = "SESMail/${var.environment}"
+  period              = 3600 # 1 hour period
+  statistic           = "Sum"
+  threshold           = 0 # Alert on any monitoring error
+  alarm_description   = "Canary monitoring system encountered errors (${var.environment}). Possible causes: DynamoDB query failure, incomplete canary record, or unknown status. Check Step Function execution history."
+  treat_missing_data  = "notBreaching"
+
+  alarm_actions = [var.alarm_sns_topic_arn]
+  ok_actions    = [var.alarm_sns_topic_arn]
+
+  tags = {
+    Name        = "ses-mail-canary-monitor-errors-${var.environment}"
+    Environment = var.environment
+    Service     = "ses-mail"
+    Severity    = "medium"
+  }
+}
+
+# CloudWatch Alarm for canary monitor Step Function execution failures
+resource "aws_cloudwatch_metric_alarm" "canary_monitor_stepfunction_failed" {
+  alarm_name          = "ses-mail-canary-monitor-stepfunction-failed-${var.environment}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1 # Alert immediately (bedding in period - catch transient issues)
+  metric_name         = "ExecutionsFailed"
+  namespace           = "AWS/States"
+  period              = 3600 # 1 hour period
+  statistic           = "Sum"
+  threshold           = 0 # Any execution failure
+  alarm_description   = "Canary monitor Step Function execution failed (${var.environment}). Check EventBridge rule, Step Function definition, and IAM permissions."
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    StateMachineArn = aws_sfn_state_machine.canary_monitor.arn
+  }
+
+  alarm_actions = [var.alarm_sns_topic_arn]
+  ok_actions    = [var.alarm_sns_topic_arn]
+
+  tags = {
+    Name        = "ses-mail-canary-stepfunction-failed-${var.environment}"
+    Environment = var.environment
+    Service     = "ses-mail"
+    Severity    = "high"
+  }
 }

@@ -90,7 +90,10 @@ data "aws_iam_policy_document" "eventbridge_stepfunctions_access" {
     actions = [
       "states:StartExecution"
     ]
-    resources = [aws_sfn_state_machine.token_monitor.arn]
+    resources = [
+      aws_sfn_state_machine.token_monitor.arn,
+      aws_sfn_state_machine.canary_monitor.arn,
+    ]
   }
 }
 
