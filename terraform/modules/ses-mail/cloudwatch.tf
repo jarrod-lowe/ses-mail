@@ -3,6 +3,7 @@ resource "aws_cloudwatch_dashboard" "ses_mail" {
   dashboard_name = "ses-mail-dashboard-${var.environment}"
 
   dashboard_body = jsonencode({
+    start = "-P7D"
     widgets = [
       # ===========================
       # Section 1: Inbound Email Processing
