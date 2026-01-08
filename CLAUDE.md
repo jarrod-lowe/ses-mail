@@ -64,6 +64,24 @@ When test and prod share the same AWS account (`join_existing_deployment = "prod
 
 This is required because test adds rules to prod's active SES ruleset. If environments use separate AWS accounts, they can be deployed in any order.
 
+#### Clean Operations
+
+**Fast clean** (preserves Lambda layers):
+
+```bash
+AWS_PROFILE=ses-mail make clean ENV=test
+```
+
+Removes Terraform state, plans, and zip files but keeps installed Lambda layers. Use this for normal workflow between deployments.
+
+**Full clean** (forces layer rebuild):
+
+```bash
+AWS_PROFILE=ses-mail make clean-all ENV=test
+```
+
+Removes everything including Lambda layers. Next apply will rebuild layers (~30-60s). Use when troubleshooting dependency issues or forcing complete rebuild.
+
 ### DynamoDB Routing Rules Management
 
 For complete routing rule management, see [docs/OPERATIONS.md#email-routing-management](docs/OPERATIONS.md#email-routing-management).

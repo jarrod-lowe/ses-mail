@@ -1,4 +1,4 @@
-.PHONY: help package init plan show-plan apply plan-destroy destroy clean backup-tfvars restore-tfvars fmt validate outputs
+.PHONY: help package init plan show-plan apply plan-destroy destroy clean clean-all backup-tfvars restore-tfvars fmt validate outputs
 
 # Environment selection (test or prod)
 ENV ?= test
@@ -48,20 +48,30 @@ help:
 
 # Build Lambda layers with dependencies
 # Shared layer: boto3, aws_xray_sdk, aws-lambda-powertools (used by all lambdas)
-$(MODULE_DIR)/lambda/layer/shared/python: $(MODULE_DIR)/lambda/layer/shared/requirements.txt
+# Uses .built file to track when layer was last built (only rebuilds if requirements.txt changes)
+$(MODULE_DIR)/lambda/layer/shared/.built: $(MODULE_DIR)/lambda/layer/shared/requirements.txt
 	@echo "Building shared Lambda layer..."
 	@rm -rf $(MODULE_DIR)/lambda/layer/shared/python
 	@mkdir -p $(MODULE_DIR)/lambda/layer/shared/python
 	@pip3 install -q -r $(MODULE_DIR)/lambda/layer/shared/requirements.txt -t $(MODULE_DIR)/lambda/layer/shared/python
-	@echo "Shared layer created"
+	@touch $(MODULE_DIR)/lambda/layer/shared/.built
+	@echo "Shared layer built at $$(date)"
+
+$(MODULE_DIR)/lambda/layer/shared/python: $(MODULE_DIR)/lambda/layer/shared/.built
+	@# Ensure directory exists (created by .built target)
 
 # Gmail layer: Google API dependencies (only for gmail_forwarder)
-$(MODULE_DIR)/lambda/layer/gmail/python: $(MODULE_DIR)/lambda/layer/gmail/requirements.txt
+# Uses .built file to track when layer was last built (only rebuilds if requirements.txt changes)
+$(MODULE_DIR)/lambda/layer/gmail/.built: $(MODULE_DIR)/lambda/layer/gmail/requirements.txt
 	@echo "Building Gmail Lambda layer..."
 	@rm -rf $(MODULE_DIR)/lambda/layer/gmail/python
 	@mkdir -p $(MODULE_DIR)/lambda/layer/gmail/python
 	@pip3 install -q -r $(MODULE_DIR)/lambda/layer/gmail/requirements.txt -t $(MODULE_DIR)/lambda/layer/gmail/python
-	@echo "Gmail layer created"
+	@touch $(MODULE_DIR)/lambda/layer/gmail/.built
+	@echo "Gmail layer built at $$(date)"
+
+$(MODULE_DIR)/lambda/layer/gmail/python: $(MODULE_DIR)/lambda/layer/gmail/.built
+	@# Ensure directory exists (created by .built target)
 
 # Build all layers
 layers: $(MODULE_DIR)/lambda/layer/shared/python $(MODULE_DIR)/lambda/layer/gmail/python
@@ -124,9 +134,9 @@ validate: $(ENV_DIR)/.terraform
 outputs: $(ENV_DIR)/.terraform
 	cd $(ENV_DIR) && terraform output
 
-# Clean up Terraform files
+# Clean up Terraform files (preserves Lambda layers)
 clean:
-	@echo "Cleaning up Terraform files for $(ENV) environment..."
+	@echo "Cleaning Terraform files for $(ENV) environment..."
 	rm -rf $(ENV_DIR)/.terraform
 	rm -f $(ENV_DIR)/.terraform.lock.hcl
 	rm -f $(ENV_DIR)/terraform.plan
@@ -134,7 +144,14 @@ clean:
 	rm -f $(ENV_DIR)/*.tfstate
 	rm -f $(ENV_DIR)/*.tfstate.backup
 	rm -f $(MODULE_DIR)/lambda/*.zip
+	@echo "Cleaned. Lambda layers preserved - use 'make clean-all' to rebuild layers."
+
+# Full clean - removes everything including Lambda layers
+clean-all: clean
+	@echo "Removing Lambda layers (will trigger rebuild)..."
 	rm -rf $(MODULE_DIR)/lambda/layer/shared/python
+	rm -rf $(MODULE_DIR)/lambda/layer/shared/.built
 	rm -rf $(MODULE_DIR)/lambda/layer/gmail/python
+	rm -rf $(MODULE_DIR)/lambda/layer/gmail/.built
 	rm -rf $(MODULE_DIR)/lambda/package
-	@echo "Clean-up complete for $(ENV) environment"
+	@echo "Complete clean finished."

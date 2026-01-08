@@ -8,6 +8,7 @@ terraform/environments/*/terraform.destroy.plan
 terraform/modules/ses-mail/lambda/*.zip
 terraform/modules/ses-mail/lambda/package/
 terraform/modules/ses-mail/lambda/layer/*/python/
+terraform/modules/ses-mail/lambda/layer/*/.built
 terraform/.fmt
 
 expired_token.json

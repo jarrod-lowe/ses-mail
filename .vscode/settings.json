@@ -10,6 +10,7 @@
         "AWSX",
         "behavior",
         "boto",
+        "chdir",
         "classmethod",
         "cleanup",
         "color",
