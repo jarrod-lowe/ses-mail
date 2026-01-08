@@ -72,6 +72,10 @@ This guide covers day-to-day operational tasks for managing the SES Mail system.
 | **Get Terraform Outputs** | `AWS_PROFILE=ses-mail make outputs ENV=test` |
 | **View CloudWatch Dashboard** | `cd terraform/environments/test && terraform output dashboard_url` |
 | **Check Token Expiration** | `AWS_PROFILE=ses-mail aws cloudwatch get-metric-statistics --namespace "SESMail/test" --metric-name TokenSecondsUntilExpiration ...` |
+| **Check Canary Status** | `AWS_PROFILE=ses-mail aws cloudwatch get-metric-statistics --namespace "SESMail/test" --metric-name CanarySuccess --start-time $(date -u -v-24H +%Y-%m-%dT%H:%M:%S) --end-time $(date -u +%Y-%m-%dT%H:%M:%S) --period 3600 --statistics Sum` |
+| **View Canary Sender Logs** | `AWS_PROFILE=ses-mail aws logs tail /aws/lambda/ses-mail-canary-sender-test --follow` |
+| **List Canary SF Executions** | `AWS_PROFILE=ses-mail aws stepfunctions list-executions --state-machine-arn <arn> --max-results 10` |
+| **Manual Canary Test** | `AWS_PROFILE=ses-mail aws lambda invoke --function-name ses-mail-canary-sender-test --payload '{}' /tmp/response.json` |
 | **Run Integration Tests** | `AWS_PROFILE=ses-mail python3 scripts/integration_test.py --env test` |
 
 ## Email Routing Management
@@ -161,6 +165,29 @@ AWS_PROFILE=ses-mail aws dynamodb put-item \
     "description": {"S": "Default: bounce all unmatched emails"}
   }'
 ```
+
+#### Forward Canary Test Emails (Required for Canary Monitoring)
+
+**IMPORTANT**: The canary monitoring system requires a routing rule for `ses-canary-{env}@domain.com`:
+
+```bash
+AWS_PROFILE=ses-mail aws dynamodb put-item \
+  --table-name ses-mail-email-routing-test \
+  --item '{
+    "PK": {"S": "ROUTE#ses-canary-test@YOUR_DOMAIN"},
+    "SK": {"S": "RULE#v1"},
+    "entity_type": {"S": "ROUTE"},
+    "recipient": {"S": "ses-canary-test@YOUR_DOMAIN"},
+    "action": {"S": "forward-to-gmail"},
+    "target": {"S": "your-email@gmail.com"},
+    "enabled": {"BOOL": true},
+    "created_at": {"S": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"},
+    "updated_at": {"S": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"},
+    "description": {"S": "Canary test email routing - DO NOT DELETE"}
+  }'
+```
+
+**Note**: Without this routing rule, hourly canary tests will fail. The rule is typically created automatically during Terraform deployment.
 
 ### Viewing Routing Rules
 
@@ -865,6 +892,392 @@ High bounce/complaint rates indicate deliverability problems:
 - **Check recipient addresses**: Hard bounces usually mean the email address is invalid or doesn't exist - verify addresses before sending
 - **Review email content**: Complaints may indicate your messages are being flagged as spam by recipient mail servers
 - **Verify SPF/DKIM/DMARC**: Misconfigured email authentication can cause bounces
+
+## Canary Monitoring
+
+The system automatically validates email pipeline health hourly by sending test emails through the complete pipeline (SES → Router → Gmail). This proactive monitoring detects issues before users report them.
+
+### How It Works
+
+**Hourly Canary Cycle:**
+1. **T+0s**: EventBridge triggers canary sender Lambda
+2. **T+1s**: Lambda validates DNS records (MX, SPF, DMARC, MTA-STS)
+3. **T+2s**: Lambda sends test email via SES SendRawEmail to `ses-canary-{env}@domain.com`
+4. **T+3s**: Lambda writes tracking record to DynamoDB (status='sent')
+5. **T+0-10s**: Email flows through pipeline: SES → S3 → SNS → SQS → Router → EventBridge → Gmail Forwarder
+6. **T+10s**: Gmail forwarder detects X-Canary-ID header, updates tracking to status='completed'
+7. **T+60s**: EventBridge triggers canary monitor Step Function
+8. **T+90s**: Step Function queries DynamoDB, finds status='completed', publishes CanarySuccess metric
+9. **T+95s**: CloudWatch dashboard updates, alarms remain in OK state
+
+**What Gets Tested:**
+- DNS configuration (MX, SPF, DMARC, MTA-STS records)
+- SES sending capability (outbound SMTP path with DKIM signing)
+- SES receiving rules (inbound MX routing)
+- S3 email storage
+- SNS notification delivery
+- Router Lambda DynamoDB lookups
+- EventBridge routing rules
+- Gmail API authentication and message import
+- End-to-end latency measurement
+
+### Viewing Canary Metrics
+
+**Access Dashboard:**
+```bash
+# Get dashboard URL
+AWS_PROFILE=ses-mail make outputs ENV=test | grep cloudwatch_dashboard_url
+
+# Or open directly
+open "https://console.aws.amazon.com/cloudwatch/home?region=ap-southeast-2#dashboards:name=ses-mail-dashboard-test"
+```
+
+**Dashboard Widgets** (Section 10: Canary Monitoring):
+1. **Test Results**: Success count (green), Failure count (red), Monitor Errors (orange)
+2. **Processing Time**: Average, Maximum, Minimum, p99 latency in seconds
+3. **Step Function Executions**: Succeeded, Failed, Timed Out, Throttled, Duration
+4. **Success Rate**: Percentage calculation (successes / total tests × 100)
+
+**Check Recent Canary Results:**
+```bash
+# Get success count (last 24 hours)
+AWS_PROFILE=ses-mail aws cloudwatch get-metric-statistics \
+  --namespace "SESMail/test" \
+  --metric-name CanarySuccess \
+  --start-time $(date -u -v-24H +%Y-%m-%dT%H:%M:%S) \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+  --period 3600 \
+  --statistics Sum \
+  --region ap-southeast-2
+
+# Get failure count
+AWS_PROFILE=ses-mail aws cloudwatch get-metric-statistics \
+  --namespace "SESMail/test" \
+  --metric-name CanaryFailure \
+  --start-time $(date -u -v-24H +%Y-%m-%dT%H:%M:%S) \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+  --period 3600 \
+  --statistics Sum \
+  --region ap-southeast-2
+
+# Get average processing time
+AWS_PROFILE=ses-mail aws cloudwatch get-metric-statistics \
+  --namespace "SESMail/test" \
+  --metric-name CanaryProcessingTime \
+  --start-time $(date -u -v-24H +%Y-%m-%dT%H:%M:%S) \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+  --period 3600 \
+  --statistics Average,Maximum \
+  --region ap-southeast-2
+```
+
+### Troubleshooting Canary Failures
+
+#### Step 1: Check Alarm State
+
+```bash
+# List all canary alarms
+AWS_PROFILE=ses-mail aws cloudwatch describe-alarms \
+  --region ap-southeast-2 \
+  --alarm-name-prefix "ses-mail-canary" \
+  --query 'MetricAlarms[*].[AlarmName,StateValue,StateReason]' \
+  --output table
+```
+
+**Alarm Types:**
+- `canary-failure-detected`: Canary test failed (email not delivered or error occurred)
+- `canary-monitor-errors`: Monitoring system issue (DynamoDB query failed, record missing, status still 'sent' after 90s)
+- `canary-monitor-stepfunction-failed`: Step Function execution failed
+- `canary-anomaly-{high|medium}`: Unusual patterns detected in canary lambda logs
+
+#### Step 2: Review Recent Step Function Executions
+
+```bash
+# List recent executions
+AWS_PROFILE=ses-mail aws stepfunctions list-executions \
+  --state-machine-arn $(AWS_PROFILE=ses-mail aws stepfunctions list-state-machines \
+    --query 'stateMachines[?contains(name, `canary-monitor-test`)].stateMachineArn' \
+    --output text) \
+  --max-results 10 \
+  --region ap-southeast-2
+
+# Get specific execution details
+AWS_PROFILE=ses-mail aws stepfunctions describe-execution \
+  --execution-arn <execution-arn> \
+  --region ap-southeast-2
+
+# View execution history (detailed state transitions)
+AWS_PROFILE=ses-mail aws stepfunctions get-execution-history \
+  --execution-arn <execution-arn> \
+  --region ap-southeast-2
+```
+
+**Look for:**
+- Failed state: Which state failed? (InvokeCanarySender, QueryCompletionRecord, CheckStatus)
+- Status value: What was the DynamoDB status? (sent, completed, failed, missing)
+- Error message: What error was returned?
+
+#### Step 3: Check Lambda Logs
+
+**Canary Sender Logs:**
+```bash
+# Tail sender logs
+AWS_PROFILE=ses-mail aws logs tail /aws/lambda/ses-mail-canary-sender-test \
+  --region ap-southeast-2 \
+  --follow
+
+# Search for errors
+AWS_PROFILE=ses-mail aws logs filter-log-events \
+  --log-group-name /aws/lambda/ses-mail-canary-sender-test \
+  --filter-pattern "ERROR" \
+  --start-time $(date -u -v-1H +%s)000 \
+  --region ap-southeast-2
+```
+
+**Gmail Forwarder Logs** (for canary completion):
+```bash
+# Search for canary-related logs
+AWS_PROFILE=ses-mail aws logs filter-log-events \
+  --log-group-name /aws/lambda/ses-mail-gmail-forwarder-test \
+  --filter-pattern "X-Canary-ID" \
+  --start-time $(date -u -v-1H +%s)000 \
+  --region ap-southeast-2
+```
+
+#### Step 4: Query DynamoDB Tracking Record
+
+```bash
+# List recent canary records (requires scan - slow)
+AWS_PROFILE=ses-mail aws dynamodb scan \
+  --table-name ses-mail-email-routing-test \
+  --filter-expression "begins_with(PK, :pk_prefix)" \
+  --expression-attribute-values '{":pk_prefix": {"S": "CANARY#"}}' \
+  --region ap-southeast-2
+
+# Get specific canary record (from Step Function input)
+AWS_PROFILE=ses-mail aws dynamodb get-item \
+  --table-name ses-mail-email-routing-test \
+  --key '{"PK": {"S": "CANARY#canary-2026-01-08T14:00:00Z"}, "SK": {"S": "TRACKING#v1"}}' \
+  --region ap-southeast-2
+```
+
+**Check:**
+- Does record exist? (If not, sender failed to write tracking record)
+- What's the status? (sent = incomplete, completed = success, failed = error in pipeline)
+- What's the sent_at timestamp? (How long ago was it sent?)
+- If failed: What's the error_message?
+
+#### Step 5: Review X-Ray Traces
+
+```bash
+# Get trace IDs for recent canary sends
+AWS_PROFILE=ses-mail aws xray get-trace-summaries \
+  --start-time $(date -u -v-1H +%s) \
+  --end-time $(date -u +%s) \
+  --filter-expression 'annotation.canary_id CONTAINS "canary-"' \
+  --region ap-southeast-2
+
+# Get specific trace details
+AWS_PROFILE=ses-mail aws xray batch-get-traces \
+  --trace-ids <trace-id> \
+  --region ap-southeast-2
+```
+
+### Common Canary Failure Scenarios
+
+#### Scenario 1: DNS Validation Failure
+
+**Symptoms:**
+- CanaryMonitorErrors metric spike
+- Sender logs show: "DNS validation failed"
+- Step Function fails at InvokeCanarySender state
+
+**Causes:**
+- MX record missing or misconfigured
+- SPF record syntax error or missing
+- DMARC record missing at `_dmarc.domain.com`
+- DNS propagation delay after recent changes
+
+**Resolution:**
+```bash
+# Validate DNS records manually
+dig MX YOUR_DOMAIN
+dig TXT YOUR_DOMAIN  # Check for SPF
+dig TXT _dmarc.YOUR_DOMAIN  # Check for DMARC
+dig TXT _mta-sts.YOUR_DOMAIN  # Check for MTA-STS (optional)
+
+# Compare with Terraform outputs
+AWS_PROFILE=ses-mail make outputs ENV=test | grep -E "mx_record|spf_record|dmarc_record"
+```
+
+**Fix:** Update DNS records in Route53 or DNS provider, wait for propagation (5-30 minutes)
+
+#### Scenario 2: Canary Email Not Forwarded to Gmail
+
+**Symptoms:**
+- CanaryFailure or CanaryMonitorErrors metric increase
+- DynamoDB record stuck at status='sent' after 90 seconds
+- Gmail forwarder logs don't show canary processing
+
+**Causes:**
+- Routing rule for `ses-canary-{env}@domain.com` missing or disabled
+- Gmail forwarder Lambda erroring (OAuth token expired, Gmail API quota)
+- SES receipt rule not active
+
+**Resolution:**
+```bash
+# Check routing rule exists
+AWS_PROFILE=ses-mail aws dynamodb get-item \
+  --table-name ses-mail-email-routing-test \
+  --key '{"PK": {"S": "ROUTE#ses-canary-test@YOUR_DOMAIN"}, "SK": {"S": "RULE#v1"}}' \
+  --region ap-southeast-2
+
+# Check if enabled
+# If missing, add routing rule:
+AWS_PROFILE=ses-mail aws dynamodb put-item \
+  --table-name ses-mail-email-routing-test \
+  --item '{
+    "PK": {"S": "ROUTE#ses-canary-test@YOUR_DOMAIN"},
+    "SK": {"S": "RULE#v1"},
+    "entity_type": {"S": "ROUTE"},
+    "recipient": {"S": "ses-canary-test@YOUR_DOMAIN"},
+    "action": {"S": "forward-to-gmail"},
+    "target": {"S": "your-email@gmail.com"},
+    "enabled": {"BOOL": true},
+    "created_at": {"S": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"},
+    "updated_at": {"S": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"},
+    "description": {"S": "Canary test email routing"}
+  }' \
+  --region ap-southeast-2
+
+# Check Gmail forwarder logs
+AWS_PROFILE=ses-mail aws logs tail /aws/lambda/ses-mail-gmail-forwarder-test \
+  --region ap-southeast-2 \
+  --since 1h
+```
+
+#### Scenario 3: Step Function Execution Failed
+
+**Symptoms:**
+- `canary-monitor-stepfunction-failed` alarm triggered
+- No CanarySuccess or CanaryFailure metrics published
+- Step Function shows "Execution Failed" status
+
+**Causes:**
+- IAM permission missing (Lambda invoke, DynamoDB GetItem, CloudWatch PutMetricData)
+- Invalid Step Function definition (syntax error in JSONata)
+- EventBridge rule misconfigured
+
+**Resolution:**
+```bash
+# Check EventBridge rule status
+AWS_PROFILE=ses-mail aws events describe-rule \
+  --name ses-mail-canary-monitor-schedule-test \
+  --region ap-southeast-2
+
+# Verify State: "ENABLED"
+
+# Check IAM role permissions
+AWS_PROFILE=ses-mail aws iam get-role-policy \
+  --role-name ses-mail-stepfunctions-canary-monitor-test \
+  --policy-name stepfunctions-execution-policy \
+  --region ap-southeast-2
+
+# Manually trigger Step Function to test
+AWS_PROFILE=ses-mail aws stepfunctions start-execution \
+  --state-machine-arn $(AWS_PROFILE=ses-mail aws stepfunctions list-state-machines \
+    --query 'stateMachines[?contains(name, `canary-monitor-test`)].stateMachineArn' \
+    --output text) \
+  --region ap-southeast-2
+```
+
+#### Scenario 4: Slow Processing Time (>30 seconds)
+
+**Symptoms:**
+- CanarySuccess metrics normal, but CanaryProcessingTime consistently >30s
+- Dashboard shows high p99 latency
+
+**Causes:**
+- Router Lambda cold starts
+- Gmail API slow responses
+- EventBridge routing delays
+- SQS queue backlog
+
+**Resolution:**
+```bash
+# Check SQS queue depths
+AWS_PROFILE=ses-mail aws sqs get-queue-attributes \
+  --queue-url $(AWS_PROFILE=ses-mail aws sqs list-queues \
+    --queue-name-prefix ses-email-input-test \
+    --query 'QueueUrls[0]' --output text) \
+  --attribute-names ApproximateNumberOfMessages \
+  --region ap-southeast-2
+
+# Check Lambda concurrency
+AWS_PROFILE=ses-mail aws lambda get-function-concurrency \
+  --function-name ses-mail-gmail-forwarder-test \
+  --region ap-southeast-2
+
+# Review X-Ray service map for bottlenecks
+# (AWS Console → X-Ray → Service map)
+```
+
+### Manual Canary Test
+
+To test canary system without waiting for hourly schedule:
+
+```bash
+# Trigger canary sender manually
+AWS_PROFILE=ses-mail aws lambda invoke \
+  --function-name ses-mail-canary-sender-test \
+  --payload '{}' \
+  --region ap-southeast-2 \
+  /tmp/canary-sender-response.json
+
+# Check response
+cat /tmp/canary-sender-response.json | jq
+
+# Wait 90 seconds, then check DynamoDB
+CANARY_ID=$(cat /tmp/canary-sender-response.json | jq -r '.canary_id')
+AWS_PROFILE=ses-mail aws dynamodb get-item \
+  --table-name ses-mail-email-routing-test \
+  --key "{\"PK\": {\"S\": \"CANARY#${CANARY_ID}\"}, \"SK\": {\"S\": \"TRACKING#v1\"}}" \
+  --region ap-southeast-2
+
+# Or trigger full Step Function
+AWS_PROFILE=ses-mail aws stepfunctions start-execution \
+  --state-machine-arn $(AWS_PROFILE=ses-mail aws stepfunctions list-state-machines \
+    --query 'stateMachines[?contains(name, `canary-monitor-test`)].stateMachineArn' \
+    --output text) \
+  --region ap-southeast-2
+```
+
+### Disabling Canary Monitoring
+
+If you need to temporarily disable canary tests (e.g., during maintenance):
+
+```bash
+# Disable EventBridge rules
+AWS_PROFILE=ses-mail aws events disable-rule \
+  --name ses-mail-canary-monitor-schedule-test \
+  --region ap-southeast-2
+
+# Re-enable when ready
+AWS_PROFILE=ses-mail aws events enable-rule \
+  --name ses-mail-canary-monitor-schedule-test \
+  --region ap-southeast-2
+```
+
+**Note**: Disabling canary monitoring removes proactive failure detection. Only disable during confirmed maintenance windows.
+
+### Canary Monitoring Best Practices
+
+1. **Subscribe to alarms**: Ensure canary failure alarms deliver to appropriate SNS topics (email, Pushover, PagerDuty)
+2. **Review weekly**: Check dashboard weekly for trends (success rate dropping, latency increasing)
+3. **Investigate all failures**: Every canary failure indicates a real or potential user-facing issue
+4. **Baseline processing time**: Establish normal latency baseline (typically 5-10s), alert on sustained increases
+5. **Test after changes**: After infrastructure changes, manually trigger canary to validate
+6. **Don't ignore monitor errors**: CanaryMonitorErrors often indicate infrastructure issues (DynamoDB, IAM, EventBridge)
 
 ## Log Anomaly Detection
 

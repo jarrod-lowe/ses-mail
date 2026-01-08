@@ -188,6 +188,8 @@ SES Mail is a serverless email receiving and forwarding system built on AWS that
 
 **Typical latency**: 5-10 seconds from SES receipt to Gmail inbox
 
+**Canary Monitoring**: The canary monitoring system sends test emails through this exact pipeline hourly to validate end-to-end health. See [Canary Monitoring Architecture](#canary-monitoring-architecture) for details.
+
 ## Outbound Email Metrics Architecture
 
 The system tracks all outbound emails sent via SES SMTP using an event-driven metrics pipeline. Metrics are automatically published to CloudWatch for monitoring delivery success, bounce rates, and spam complaints.
@@ -700,6 +702,39 @@ REMOVE event:
 3. Delete IAM user
 4. Publish CloudWatch metrics
 
+#### Canary Sender Lambda
+
+**Function:** `ses-mail-canary-sender-{env}`
+
+**Purpose**: Send hourly test emails to validate end-to-end email pipeline
+
+**Configuration:**
+- Runtime: Python 3.12
+- Memory: 128 MB
+- Timeout: 2 minutes
+- X-Ray Active tracing
+- Lambda layers: dnspython for DNS validation
+
+**Environment Variables:**
+- `ENVIRONMENT`: Deployment environment (test/prod)
+- `CANARY_EMAIL`: Canary recipient address (ses-canary-{env}@domain)
+- `DOMAIN`: Primary domain for DNS validation
+- `DYNAMODB_TABLE_NAME`: Routing table for tracking records
+
+**IAM Permissions:**
+- `ses:SendRawEmail` for sending test emails
+- `dynamodb:PutItem` for tracking records
+- `route53:TestDNSAnswer` for DNS validation (via dnspython library)
+- `logs:*`, `xray:*` for observability
+
+**Key Logic:**
+1. Validate DNS records (MX, SPF, DMARC, MTA-STS) using dnspython
+2. Construct test email with X-Canary-ID header
+3. Send via SES SendRawEmail API to ses-canary-{env}@domain
+4. Write tracking record to DynamoDB with status='sent'
+5. Return canary_id and sent_at for Step Function
+6. Fail fast if DNS validation fails (prevents false failures)
+
 ### Amazon DynamoDB
 
 **Table:** `ses-mail-email-routing-{env}`
@@ -726,11 +761,18 @@ Entity types stored in same table using generic PK/SK:
    - SK: `CREDENTIALS#v1`
    - Attributes: entity_type, username, iam_user_arn, encrypted_credentials, status
 
+3. **Canary Tracking Records**:
+   - PK: `CANARY#<canary-id>`
+   - SK: `TRACKING#v1`
+   - Attributes: entity_type, canary_id, status, sent_at, ses_message_id, dns_validation, completed_at (conditional), gmail_message_id (conditional), error_message (conditional), ttl
+
 **Access Patterns:**
 
 1. Get routing rule: `GetItem` with PK=`ROUTE#email` and SK=`RULE#v1`
 2. List routing rules: `Query` with entity_type=ROUTE (GSI recommended for production)
 3. Get SMTP credentials: `GetItem` with PK=`SMTP_USER#username`
+4. Get canary tracking: `GetItem` with PK=`CANARY#canary-id` and SK=`TRACKING#v1`
+5. Auto-cleanup: TTL attribute set to 10 minutes after creation
 
 **DynamoDB Streams:**
 - Stream ARN: Available via `describe-table`
@@ -823,6 +865,29 @@ Entity types stored in same table using generic PK/SK:
 }
 ```
 
+**State Machine:** `ses-mail-canary-monitor-{env}`
+
+**Purpose**: Orchestrate canary test and validate email pipeline health
+
+**Workflow:**
+1. Invoke canary sender Lambda
+2. Wait 90 seconds for email processing
+3. Query DynamoDB for completion record (GetItem)
+4. Check status value and route:
+   - `completed` → Extract gmail_message_id, calculate processing_time → Publish CanarySuccess + CanaryProcessingTime
+   - `failed` → Extract error_message → Publish CanaryFailure
+   - `sent` or missing → Publish CanaryMonitorErrors
+5. Error handling: Catch all failures → Publish CanaryMonitorErrors
+
+**Execution Trigger:**
+- Scheduled: Every hour via EventBridge Rule
+- Manual: Via AWS Console or CLI for testing
+
+**JSONata Features:**
+- Status routing: `$states.input.Item.status.S = 'completed'`
+- Processing time calculation: `($toMillis(completed_at) - $toMillis(sent_at)) / 1000`
+- Existence checks: `$exists($states.input.Item)`
+
 ### Amazon CloudWatch
 
 **Dashboard:** `ses-mail-dashboard-{env}`
@@ -833,6 +898,7 @@ Entity types stored in same table using generic PK/SK:
 - Queue metrics (depth, age, DLQ)
 - Token expiration countdown
 - SMTP credential operations
+- Canary monitoring (test results, processing time, SF executions, success rate)
 
 **Alarms:**
 
@@ -850,6 +916,12 @@ Entity types stored in same table using generic PK/SK:
 4. **Queue Age Alarms**:
    - Alert if messages older than threshold
 
+5. **Canary Monitoring Alarms**:
+   - `ses-mail-canary-failure-detected-{env}`: Any canary test failure
+   - `ses-mail-canary-monitor-errors-{env}`: Monitoring system errors
+   - `ses-mail-canary-monitor-stepfunction-failed-{env}`: Step Function execution failures
+   - Canary lambda anomaly detection alarms (HIGH and MEDIUM severity)
+
 **Log Groups:**
 - `/aws/lambda/ses-mail-router-enrichment-{env}`
 - `/aws/lambda/ses-mail-gmail-forwarder-{env}`
@@ -858,6 +930,8 @@ Entity types stored in same table using generic PK/SK:
 - `/aws/pipes/ses-email-router-{env}`
 - `/aws/events/ses-mail-email-routing-{env}`
 - `/aws/states/ses-mail-gmail-token-monitor-{env}`
+- `/aws/lambda/ses-mail-canary-sender-{env}`
+- `/aws/states/ses-mail-canary-monitor-{env}`
 
 **Retention:** 30 days (configurable)
 
@@ -1043,6 +1117,197 @@ def lookup_routing_rule(email):
 - Automatic recovery (no manual message replay)
 
 **Production mode**: Move to production OAuth to eliminate 7-day expiration
+
+### Canary Monitoring Architecture
+
+**Challenge**: Detect email pipeline failures before users report them
+
+**Solution**: Automated end-to-end testing with hourly canary emails
+
+**Architecture:**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Canary Monitoring Pipeline (Hourly)                           │
+│                                                                  │
+│  EventBridge (hourly) ──┐                                       │
+│                         │                                        │
+│  ┌──────────────────────▼─────────────────┐                     │
+│  │ Canary Sender Lambda                   │                     │
+│  │ - Validate DNS (MX/SPF/DMARC/MTA-STS) │                     │
+│  │ - Send via SES SendRawEmail API       │                     │
+│  │ - Write tracking record (status=sent)  │                     │
+│  └──────────────────┬─────────────────────┘                     │
+│                     │                                            │
+│                     v                                            │
+│           SES → S3 → SNS → SQS → Router → Gmail                 │
+│           (full email pipeline - same as regular emails)        │
+│                     │                                            │
+│                     v                                            │
+│  ┌──────────────────────────────────────────┐                   │
+│  │ Gmail Forwarder Lambda                   │                   │
+│  │ - Detect X-Canary-ID header              │                   │
+│  │ - Update tracking: status=completed      │                   │
+│  │ - Record gmail_message_id & completed_at │                   │
+│  └──────────────────────────────────────────┘                   │
+│                                                                  │
+│  EventBridge (hourly) ──┐                                       │
+│                         │                                        │
+│  ┌──────────────────────▼─────────────────┐                     │
+│  │ Canary Monitor Step Function            │                     │
+│  │ 1. Invoke canary sender                 │                     │
+│  │ 2. Wait 90 seconds                      │                     │
+│  │ 3. Query DynamoDB for completion        │                     │
+│  │ 4. Check status: completed/failed/sent  │                     │
+│  │ 5. Publish CloudWatch metrics           │                     │
+│  └──────────────────┬─────────────────────┘                     │
+│                     │                                            │
+│                     v                                            │
+│  ┌──────────────────────────────────────┐                       │
+│  │ CloudWatch Metrics & Alarms           │                       │
+│  │ - CanarySuccess / CanaryFailure       │                       │
+│  │ - CanaryProcessingTime                │                       │
+│  │ - CanaryMonitorErrors                 │                       │
+│  │ - Dashboard widgets (4)               │                       │
+│  │ - Alarms → SNS notifications          │                       │
+│  └───────────────────────────────────────┘                       │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Components:**
+
+1. **Canary Sender Lambda** (`canary_sender.py`)
+   - **Function**: `ses-mail-canary-sender-{env}`
+   - **Trigger**: EventBridge hourly schedule
+   - **Runtime**: Python 3.12, 128 MB, 2 min timeout
+   - **DNS Validation**: Checks MX, SPF, DMARC, MTA-STS records before sending
+   - **Email Path**: Uses SES SendRawEmail API to send TO own domain (same path as external senders)
+   - **Tracking**: Writes DynamoDB record with status='sent', ses_message_id, dns_validation results
+   - **Canary Email Address**: `ses-canary-{env}@{domain}` (configured as routing rule)
+
+2. **Canary Monitor Step Function** (`canary-monitor.yaml`)
+   - **State Machine**: `ses-mail-canary-monitor-{env}`
+   - **Trigger**: EventBridge hourly schedule (retries disabled to prevent duplicate tests)
+   - **Query Language**: JSONata (not JSONPath)
+   - **Workflow**:
+     1. Invoke canary sender Lambda
+     2. Wait 90 seconds (typical pipeline latency: 5-10s, margin for delays)
+     3. Query DynamoDB for completion record
+     4. Route by status:
+        - `completed` → Extract gmail_message_id, calculate processing_time → Publish CanarySuccess
+        - `failed` → Extract error_message → Publish CanaryFailure
+        - `sent` (incomplete) → Publish CanaryMonitorErrors (pipeline too slow)
+        - Missing record → Publish CanaryMonitorErrors (tracking write failed)
+     5. Error handling: Catch Lambda invocation failures, DynamoDB errors → Publish CanaryMonitorErrors
+
+3. **DynamoDB Tracking Schema**
+   - **Table**: `ses-mail-email-routing-{env}` (single-table design)
+   - **PK Pattern**: `CANARY#{canary_id}` (e.g., `CANARY#canary-2026-01-08T14:00:00Z`)
+   - **SK**: `TRACKING#v1`
+   - **Entity Type**: `CANARY_TRACKING`
+   - **TTL**: 10 minutes (records auto-deleted after test completes)
+   - **Attributes by Status**:
+     - status='sent' (initial): canary_id, status, sent_at, ses_message_id, dns_validation
+     - status='completed' (success): +completed_at, +gmail_message_id
+     - status='failed' (error): +completed_at, +error_message
+
+4. **Gmail Forwarder Canary Detection**
+   - **Header Check**: Detects `X-Canary-ID` custom header in incoming email
+   - **Completion Update**: Updates DynamoDB tracking record to status='completed'
+   - **Metrics**: Records gmail_message_id and completed_at timestamp
+   - **Error Handling**: On Gmail API failure, updates to status='failed' with error_message
+
+5. **CloudWatch Monitoring**
+   - **Metrics Namespace**: `SESMail/{environment}`
+   - **Metrics Published**:
+     - `CanarySuccess` (Count): Test passed, email delivered to Gmail
+     - `CanaryFailure` (Count): Test failed, error in pipeline
+     - `CanaryProcessingTime` (Seconds): End-to-end latency (sent_at → completed_at)
+     - `CanaryMonitorErrors` (Count): Monitoring system issues (DynamoDB errors, missing records, incomplete after 90s)
+   - **Dashboard Section**: "Canary Monitoring" (4 widgets showing test results, processing time, SF executions, success rate)
+   - **Alarms** (3 total):
+     - `canary_failure_detected`: Alert on ANY canary failure (threshold: 0, period: 1 hour, evaluation_periods: 1)
+     - `canary_monitor_errors`: Alert on monitoring system errors (threshold: 0)
+     - `canary_monitor_stepfunction_failed`: Alert on Step Function execution failures (threshold: 0)
+     - All use `evaluation_periods=1` to catch transient issues during bedding-in period
+
+**Benefits:**
+- **Proactive Failure Detection**: Catch pipeline issues before users report them
+- **End-to-End Validation**: Tests full path from SES → S3 → Router → Gmail (same as real emails)
+- **DNS Health Monitoring**: Validates MX, SPF, DMARC, MTA-STS records hourly
+- **Latency Tracking**: Measures processing time to detect performance degradation
+- **Automated Alerting**: SNS notifications on failures (Pushover, email, SMS)
+- **Zero User Impact**: Canary emails automatically marked as read in Gmail (not implemented yet - future enhancement)
+
+**Design Decisions:**
+
+**Why hourly frequency?**
+- Balances detection speed with cost/noise
+- Catches issues within ~30 minutes on average
+- Avoids SES rate limits and quota consumption
+
+**Why 90-second wait?**
+- Typical pipeline latency: 5-10 seconds
+- Provides margin for: SES delays, Router cold starts, Gmail API latency
+- Alerts if processing takes longer (potential performance issue)
+
+**Why separate sender and monitor?**
+- **Sender**: Simple, focused on email delivery
+- **Monitor**: Complex orchestration (wait, query, metrics, routing)
+- Easier to test and debug independently
+- Sender can be triggered standalone for testing
+
+**Why write tracking record after sending?**
+- Captures ses_message_id from send operation
+- Status='sent' allows monitor to detect "email stuck in pipeline" vs "sender failed"
+- Step Function can differentiate between send failures and pipeline failures
+
+**Why TTL of 10 minutes?**
+- Canary records only valuable during test execution (90 seconds)
+- TTL cleanup prevents table bloat
+- 10 minutes provides buffer for debugging if needed
+
+**Why use SES SendRawEmail instead of SMTP?**
+- **SMTP limitation**: Can't send TO own domain without routing loop
+- **SendRawEmail**: Sends outbound via SMTP (validates SPF/DMARC/DKIM), delivers inbound via MX records
+- **Full validation**: Tests both outbound SMTP path AND inbound MX/receipt rules
+
+**Why JSONata instead of JSONPath?**
+- JSONata supports complex transformations and calculations
+- Enables processing_time calculation: `($toMillis(completed_at) - $toMillis(sent_at)) / 1000`
+- Better error handling with `$exists()` conditionals
+
+**Cost Estimate (10,000 canary tests/month):**
+- Lambda invocations: 20,000 (sender + monitor) × $0.20/million = **$0.004**
+- Lambda duration: 20,000 × 500ms × $0.0000166667/GB-sec × 0.128GB = **$0.02**
+- Step Functions: 10,000 executions × $0.025/1000 = **$0.25**
+- DynamoDB: 30,000 operations (write, read, TTL delete) × $1.25/million = **$0.04**
+- CloudWatch alarms: 3 alarms = **$0** (within free tier of 10)
+- SES canary emails: 10,000 × $0.10/1000 = **$1.00** (outbound only, inbound free)
+- SNS notifications: Variable (depends on alarm frequency)
+
+**Total: ~$1.30/month** (primarily SES sends and Step Functions)
+
+**Monitoring the Canary System:**
+
+**Health Checks:**
+1. Step Function executions succeed hourly
+2. CanarySuccess metric published hourly
+3. Processing time remains under 30 seconds (typical: 5-10s)
+4. No CanaryMonitorErrors metric spikes
+
+**Troubleshooting:**
+- Lambda logs: `/aws/lambda/ses-mail-canary-sender-{env}`, `/aws/lambda/ses-mail-gmail-forwarder-{env}`
+- Step Function logs: `/aws/states/ses-mail-canary-monitor-{env}`
+- X-Ray traces: Filter by annotation `canary_id=canary-*`
+- DynamoDB query: Check tracking record status
+
+**Future Enhancements:**
+1. Auto-mark canary emails as read in Gmail (prevent inbox clutter)
+2. Multi-region canary tests (validate DNS globally)
+3. Canary email with attachments (test S3 large object handling)
+4. Canary email with specific spam/virus characteristics (test security verdicts)
 
 ## AWS Integrations
 
