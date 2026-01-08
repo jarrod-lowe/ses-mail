@@ -444,3 +444,36 @@ resource "aws_cloudwatch_event_target" "token_monitor" {
   }
 }
 
+# ===========================
+# Canary Monitor Scheduling
+# ===========================
+
+# EventBridge rule to trigger canary monitor every hour
+resource "aws_cloudwatch_event_rule" "canary_monitor_schedule" {
+  name                = "ses-mail-canary-monitor-schedule-${var.environment}"
+  description         = "Trigger canary monitor Step Function every hour to validate email processing pipeline"
+  schedule_expression = "rate(1 hour)"
+  state               = "ENABLED"
+
+  tags = {
+    Name        = "ses-mail-canary-monitor-schedule-${var.environment}"
+    Environment = var.environment
+    ManagedBy   = "terraform"
+    Project     = "ses-mail"
+    Purpose     = "Schedule canary test execution"
+  }
+}
+
+# EventBridge target to invoke canary monitor Step Function
+resource "aws_cloudwatch_event_target" "canary_monitor" {
+  rule      = aws_cloudwatch_event_rule.canary_monitor_schedule.name
+  target_id = "canary-monitor-stepfunction"
+  arn       = aws_sfn_state_machine.canary_monitor.arn
+  role_arn  = aws_iam_role.eventbridge_stepfunctions.arn
+
+  retry_policy {
+    maximum_event_age_in_seconds = 300
+    maximum_retry_attempts       = 2
+  }
+}
+
