@@ -128,9 +128,26 @@ resource "aws_cloudwatch_log_anomaly_detector" "outbound_metrics_publisher" {
   }
 }
 
-# ===========================
-# CloudWatch Alarms for High Severity Anomalies
-# ===========================
+# Canary Sender Lambda Anomaly Detector
+# Monitors canary test email sending and DNS validation patterns
+resource "aws_cloudwatch_log_anomaly_detector" "canary_sender" {
+  count = var.anomaly_detection_enabled ? 1 : 0
+
+  detector_name = "ses-mail-canary-sender-${var.environment}"
+  log_group_arn_list = [
+    aws_cloudwatch_log_group.lambda_canary_sender_logs.arn
+  ]
+
+  evaluation_frequency = local.evaluation_frequency
+  enabled              = true
+
+  tags = {
+    Name        = "canary-sender-anomaly-detector-${var.environment}"
+    Environment = var.environment
+    Service     = "ses-mail"
+    Component   = "monitoring"
+  }
+}
 
 # Router Enrichment High Severity Anomaly Alarm
 resource "aws_cloudwatch_metric_alarm" "router_anomaly_high" {
@@ -281,6 +298,37 @@ resource "aws_cloudwatch_metric_alarm" "outbound_metrics_publisher_anomaly_high"
 
   tags = {
     Name        = "outbound-metrics-publisher-anomaly-alarm-${var.environment}"
+    Environment = var.environment
+    Service     = "ses-mail"
+    Component   = "monitoring"
+  }
+}
+
+# Canary Sender High Severity Anomaly Alarm
+resource "aws_cloudwatch_metric_alarm" "canary_sender_anomaly_high" {
+  count = var.anomaly_detection_enabled ? 1 : 0
+
+  alarm_name          = "ses-mail-canary-sender-anomaly-high-${var.environment}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "AnomalyCount"
+  namespace           = "AWS/Logs"
+  period              = 900
+  statistic           = "Sum"
+  threshold           = 0
+  alarm_description   = "Alert when HIGH severity anomalies detected in canary sender logs (${var.environment})"
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    LogAnomalyDetector = aws_cloudwatch_log_anomaly_detector.canary_sender[0].detector_name
+    LogAnomalyPriority = "HIGH"
+  }
+
+  alarm_actions = [var.alarm_sns_topic_arn]
+  ok_actions    = [var.alarm_sns_topic_arn]
+
+  tags = {
+    Name        = "canary-sender-anomaly-alarm-${var.environment}"
     Environment = var.environment
     Service     = "ses-mail"
     Component   = "monitoring"
@@ -440,6 +488,37 @@ resource "aws_cloudwatch_metric_alarm" "outbound_metrics_publisher_anomaly_mediu
 
   tags = {
     Name        = "outbound-metrics-publisher-anomaly-alarm-${var.environment}"
+    Environment = var.environment
+    Service     = "ses-mail"
+    Component   = "monitoring"
+  }
+}
+
+# Canary Sender Medium Severity Anomaly Alarm
+resource "aws_cloudwatch_metric_alarm" "canary_sender_anomaly_medium" {
+  count = var.anomaly_detection_enabled ? 1 : 0
+
+  alarm_name          = "ses-mail-canary-sender-anomaly-medium-${var.environment}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "AnomalyCount"
+  namespace           = "AWS/Logs"
+  period              = 900
+  statistic           = "Sum"
+  threshold           = 0
+  alarm_description   = "Alert when MEDIUM severity anomalies detected in canary sender logs (${var.environment})"
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    LogAnomalyDetector = aws_cloudwatch_log_anomaly_detector.canary_sender[0].detector_name
+    LogAnomalyPriority = "MEDIUM"
+  }
+
+  alarm_actions = [var.alarm_sns_topic_arn]
+  ok_actions    = [var.alarm_sns_topic_arn]
+
+  tags = {
+    Name        = "canary-sender-anomaly-alarm-${var.environment}"
     Environment = var.environment
     Service     = "ses-mail"
     Component   = "monitoring"
