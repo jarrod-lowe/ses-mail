@@ -89,3 +89,45 @@ resource "aws_dynamodb_table" "email_routing" {
 # - CONFIG#setting-name (application configuration)
 # - METRICS#date#counter (usage metrics)
 # - TEMPLATE#template-name (email templates)
+#
+# Canary Tracking Entity:
+#   PK: "CANARY#<canary-id>"
+#   SK: "TRACKING#v1"
+#   Attributes:
+#     - entity_type: "CANARY_TRACKING"
+#     - canary_id: "canary-2026-01-08T12:00:00Z"
+#     - status: "pending" | "completed" | "failed"
+#     - sent_at: "2026-01-08T12:00:00Z"
+#     - completed_at: "2026-01-08T12:01:30Z" (set by gmail_forwarder)
+#     - ses_message_id: "..." (SES message ID)
+#     - gmail_message_id: "..." (Gmail message ID, set by gmail_forwarder)
+#     - ttl: 1736348400 (Unix timestamp for automatic deletion)
+
+# Canary routing rule - creates a routing rule for canary test emails
+# Only created if canary_target_email is set
+resource "aws_dynamodb_table_item" "canary_routing_rule" {
+  count = var.canary_target_email != null ? 1 : 0
+
+  table_name = aws_dynamodb_table.email_routing.name
+  hash_key   = aws_dynamodb_table.email_routing.hash_key
+  range_key  = aws_dynamodb_table.email_routing.range_key
+
+  item = jsonencode({
+    PK          = { S = "ROUTE#ses-canary-${var.environment}@${var.domain[0]}" }
+    SK          = { S = "RULE#v1" }
+    entity_type = { S = "ROUTE" }
+    recipient   = { S = "ses-canary-${var.environment}@${var.domain[0]}" }
+    action      = { S = "forward-to-gmail" }
+    target      = { S = var.canary_target_email }
+    enabled     = { BOOL = true }
+    metadata = {
+      S = jsonencode({
+        canary = true
+        # No Gmail-specific config here - that goes in Lambda environment variables
+      })
+    }
+    created_at  = { S = "2026-01-08T00:00:00Z" }
+    updated_at  = { S = "2026-01-08T00:00:00Z" }
+    description = { S = "Canary test routing rule (${var.environment} environment)" }
+  })
+}

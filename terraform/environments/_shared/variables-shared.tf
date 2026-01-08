@@ -109,3 +109,26 @@ variable "join_existing_deployment" {
   type        = string
   default     = null
 }
+
+variable "canary_gmail_label" {
+  description = "Gmail label name for canary test emails (must pre-exist in Gmail)"
+  type        = string
+  default     = "TRASH"
+}
+
+variable "canary_target_email" {
+  description = "Target Gmail address for canary test emails. If not set, canary routing rule will not be created."
+  type        = string
+  default     = null
+}
+
+variable "mta_sts_mode" {
+  description = "MTA-STS policy mode (testing, enforce, none)"
+  type        = string
+  default     = "enforce"
+
+  validation {
+    condition     = contains(["testing", "enforce", "none"], var.mta_sts_mode)
+    error_message = "MTA-STS mode must be one of: testing, enforce, none"
+  }
+}

@@ -80,4 +80,6 @@ module "ses_mail" {
   backup_mx_records              = var.backup_mx_records
   migration_mx_hostnames         = var.migration_mx_hostnames
   join_existing_deployment       = var.join_existing_deployment
+  canary_gmail_label             = var.canary_gmail_label
+  canary_target_email            = var.canary_target_email
 }

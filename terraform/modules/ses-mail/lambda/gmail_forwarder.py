@@ -34,6 +34,8 @@ GMAIL_REFRESH_TOKEN_PARAMETER = os.environ.get('GMAIL_REFRESH_TOKEN_PARAMETER')
 GMAIL_CLIENT_CREDENTIALS_PARAMETER = os.environ.get('GMAIL_CLIENT_CREDENTIALS_PARAMETER')
 EMAIL_BUCKET = os.environ.get('EMAIL_BUCKET')
 RETRY_QUEUE_URL = os.environ.get('RETRY_QUEUE_URL')
+DYNAMODB_TABLE_NAME = os.environ.get('DYNAMODB_TABLE_NAME')
+CANARY_GMAIL_LABEL = os.environ.get('CANARY_GMAIL_LABEL')  # Required for canary: Gmail label name
 ENVIRONMENT = os.environ.get('ENVIRONMENT', 'unknown')
 S3_PREFIX = 'emails'  # Hardcoded to match ses.tf configuration
 GMAIL_USER_ID = 'me'
@@ -44,6 +46,7 @@ s3_client = boto3.client('s3')
 ssm_client = boto3.client('ssm')
 sqs_client = boto3.client('sqs')
 cloudwatch = boto3.client('cloudwatch')
+dynamodb_client = boto3.client('dynamodb')
 
 
 def extract_subject(ses_message: Dict[str, Any], max_length: int = 64) -> str:
@@ -65,6 +68,89 @@ def extract_subject(ses_message: Dict[str, Any], max_length: int = 64) -> str:
                 # Truncate to max_length characters
                 return subject[:max_length] if len(subject) > max_length else subject
     return '(no subject)'
+
+
+def extract_canary_id(ses_message: Dict[str, Any]) -> str:
+    """
+    Extract canary ID from X-Canary-ID email header.
+
+    Args:
+        ses_message: SES event message
+
+    Returns:
+        str: Canary ID or empty string if not found
+    """
+    headers = ses_message.get('mail', {}).get('headers', [])
+    for header in headers:
+        if header.get('name', '').lower() == 'x-canary-id':
+            return header.get('value', '')
+    return ''
+
+
+def write_canary_completion_record(canary_id: str, gmail_message_id: str, status: str = 'completed', error_message: str = None) -> None:
+    """
+    Write canary completion record to DynamoDB.
+
+    Updates the existing tracking record with completion timestamp and Gmail message ID.
+
+    Args:
+        canary_id: Canary identifier
+        gmail_message_id: Gmail message ID from import (or empty string if failed)
+        status: 'completed' or 'failed'
+        error_message: Error details if status is 'failed'
+    """
+    if not DYNAMODB_TABLE_NAME:
+        logger.warning("DYNAMODB_TABLE_NAME not set, skipping canary completion write")
+        return
+
+    from datetime import datetime, timezone
+
+    logger.info("Writing canary completion record",
+        canary_id=canary_id,
+        status=status,
+        gmail_message_id=gmail_message_id,
+        error=error_message
+    )
+
+    try:
+        update_expression = 'SET #status = :status, completed_at = :completed_at'
+        expression_values = {
+            ':status': {'S': status},
+            ':completed_at': {'S': datetime.now(timezone.utc).isoformat()}
+        }
+
+        # Add gmail_message_id only if we have one (successful import)
+        if gmail_message_id:
+            update_expression += ', gmail_message_id = :gmail_message_id'
+            expression_values[':gmail_message_id'] = {'S': gmail_message_id}
+
+        # Add error_message if we have one (failed status)
+        if error_message:
+            update_expression += ', error_message = :error_message'
+            expression_values[':error_message'] = {'S': error_message}
+
+        dynamodb_client.update_item(
+            TableName=DYNAMODB_TABLE_NAME,
+            Key={
+                'PK': {'S': f'CANARY#{canary_id}'},
+                'SK': {'S': 'TRACKING#v1'}
+            },
+            UpdateExpression=update_expression,
+            ExpressionAttributeNames={
+                '#status': 'status'
+            },
+            ExpressionAttributeValues=expression_values
+        )
+        logger.info("Successfully wrote canary completion record",
+            canary_id=canary_id,
+            status=status
+        )
+    except Exception as e:
+        logger.error("Failed to write canary completion record",
+            canary_id=canary_id,
+            error=str(e)
+        )
+        # Don't raise - canary tracking is best-effort
 
 
 def lambda_handler(event, context):
@@ -360,6 +446,11 @@ def process_sqs_record(record, service):
         for target_info in targets:
             recipient = target_info.get('target')  # Original recipient email
             destination = target_info.get('destination')  # Gmail destination address
+            metadata = target_info.get('metadata', {})  # Routing metadata
+
+            # Check if this is a canary email
+            is_canary = metadata.get('canary', False)
+            canary_id = extract_canary_id(ses_message) if is_canary else None
 
             # Add X-Ray annotations for searchability and correlation
             if subsegment:
@@ -369,23 +460,91 @@ def process_sqs_record(record, service):
                 subsegment.put_annotation('recipient', recipient)
                 subsegment.put_annotation('target', destination)
                 subsegment.put_annotation('subject', subject[0:64])
+                if is_canary:
+                    subsegment.put_annotation('canary', True)
+                    subsegment.put_annotation('canary_id', canary_id)
 
             # Log email metadata
-            logger.info("Processing email forward to Gmail", extra={
-                "messageId": message_id,
-                "from": source,
-                "to": recipient,
-                "subject": subject,
-                "targetGmail": destination
-            })
+            logger.info("Processing email forward to Gmail",
+                messageId=message_id,
+                sender=source,
+                recipient=recipient,
+                subject=subject,
+                targetGmail=destination,
+                is_canary=is_canary,
+                canary_id=canary_id if is_canary else None
+            )
 
-            # Import into Gmail with INBOX and UNREAD labels
-            gmail_response = gmail_import(service, raw_eml, DEFAULT_LABEL_IDS)
+            # For canary emails, wrap everything in try/catch to detect failures
+            canary_success = False
+            canary_error = None
+            gmail_response = None
 
-            logger.info("Successfully imported to Gmail", extra={
-                "messageId": message_id,
-                "gmailId": gmail_response.get('id')
-            })
+            try:
+                # Build label IDs
+                label_ids = list(DEFAULT_LABEL_IDS)  # Start with ['INBOX', 'UNREAD']
+
+                if is_canary:
+                    # For canary emails, use label name from environment variable
+                    # Gmail label ID is just the label name - pass it directly
+                    if not CANARY_GMAIL_LABEL:
+                        # Configuration error - canary label not set!
+                        raise ValueError("CANARY_GMAIL_LABEL environment variable must be set for canary emails")
+
+                    # Remove INBOX/UNREAD, use only the canary label
+                    label_ids = [CANARY_GMAIL_LABEL]
+                    logger.info("Canary email - using label from environment",
+                        canary_id=canary_id,
+                        label=CANARY_GMAIL_LABEL
+                    )
+
+                # Import into Gmail with appropriate labels
+                gmail_response = gmail_import(service, raw_eml, label_ids)
+
+                # If we got here without exception, canary succeeded
+                if is_canary:
+                    canary_success = True
+
+                logger.info("Successfully imported to Gmail",
+                    messageId=message_id,
+                    gmailId=gmail_response.get('id'),
+                    is_canary=is_canary,
+                    labels=label_ids
+                )
+
+            except Exception as e:
+                # Log the error
+                logger.error("Failed to process email",
+                    messageId=message_id,
+                    recipient=recipient,
+                    is_canary=is_canary,
+                    error=str(e),
+                    error_type=type(e).__name__
+                )
+
+                if is_canary and canary_id:
+                    # Record canary failure
+                    canary_error = f"{type(e).__name__}: {str(e)}"
+
+                # Re-raise to trigger SQS retry
+                raise
+
+            finally:
+                # Write canary completion record if this is a canary email
+                if is_canary and canary_id:
+                    if canary_success:
+                        write_canary_completion_record(
+                            canary_id,
+                            gmail_response.get('id'),
+                            status='completed'
+                        )
+                    elif canary_error:
+                        write_canary_completion_record(
+                            canary_id,
+                            '',
+                            status='failed',
+                            error_message=canary_error
+                        )
 
             # Log action result for dashboard
             logger.info("Action result", extra={

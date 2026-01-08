@@ -296,7 +296,7 @@ def lambda_handler(event, context):
                 'Detail': json.dumps({
                     'originalMessageId': ses_message_id,
                     'ses': sns_message,
-                    'actions': actions,
+                    'actions': actions
                 }),
                 'EventBusName': EVENT_BUS_NAME
             }
@@ -453,11 +453,11 @@ def decide_action(ses_message: Dict[str, Any]) -> List[Tuple[str, Optional[Any]]
             })
         else:
             # Normal email - follow routing rules
-            routing_decision, destination, lookup_key = get_routing_decision(target)
+            routing_decision, destination, lookup_key, metadata = get_routing_decision(target)
             if routing_decision == 'bounce':
-                results.append((routing_decision, {"target": target, "reason": "policy"}))
+                results.append((routing_decision, {"target": target, "reason": "policy", "metadata": metadata}))
             else:
-                results.append((routing_decision, {"target": target, "destination": destination}))
+                results.append((routing_decision, {"target": target, "destination": destination, "metadata": metadata}))
 
             # Log routing decision with full context
             logger.info("Routing decision", extra={
@@ -467,7 +467,8 @@ def decide_action(ses_message: Dict[str, Any]) -> List[Tuple[str, Optional[Any]]
                 "recipient": target,
                 "action": routing_decision,
                 "lookupKey": lookup_key,
-                "target": destination if routing_decision == 'forward-to-gmail' else target
+                "target": destination if routing_decision == 'forward-to-gmail' else target,
+                "metadata": metadata
             })
         counts[results[-1][0]] += 1
 
@@ -525,7 +526,7 @@ def decide_action(ses_message: Dict[str, Any]) -> List[Tuple[str, Optional[Any]]
     return results
 
 
-def get_routing_decision(recipient: str) -> Tuple[str, Optional[str], Optional[str]]:
+def get_routing_decision(recipient: str) -> Tuple[str, Optional[str], Optional[str], Dict]:
     """
     Determine routing decision for a recipient using hierarchical DynamoDB lookup.
 
@@ -537,7 +538,7 @@ def get_routing_decision(recipient: str) -> Tuple[str, Optional[str], Optional[s
     Args:
         recipient: Email address to look up
     Returns:
-        tuple: (routing action, target destination, lookup key)
+        tuple: (routing action, target destination, lookup key, metadata dict)
     """
     logger.info("Looking up routing rule for recipient", extra={"recipient": recipient})
 
@@ -557,12 +558,13 @@ def get_routing_decision(recipient: str) -> Tuple[str, Optional[str], Optional[s
 
             action = rule.get('action', 'bounce')
             target = rule.get('target', None)
-            # Return action, target, and lookupKey (removed "Routing decision" log from here)
-            return action, target, lookup_key
+            metadata = rule.get('metadata', {})
+            # Return action, target, lookupKey, and metadata
+            return action, target, lookup_key, metadata
 
     # No rule found - default to store
     logger.warning("No routing rule found, defaulting to store", extra={"recipient": recipient})
-    return 'store', None, None
+    return 'store', None, None, {}
 
 def check_spam(ses_message: Dict[str, Any]) -> Optional[str]:
     """
@@ -727,7 +729,8 @@ def lookup_routing_rule(route_key: str) -> Optional[Dict[str, Any]]:
             'enabled': item.get('enabled', {}).get('BOOL', True),
             'description': item.get('description', {}).get('S', ''),
             'created_at': item.get('created_at', {}).get('S', ''),
-            'updated_at': item.get('updated_at', {}).get('S', '')
+            'updated_at': item.get('updated_at', {}).get('S', ''),
+            'metadata': json.loads(item.get('metadata', {}).get('S', '{}'))
         }
 
         return rule

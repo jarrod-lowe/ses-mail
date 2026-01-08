@@ -153,3 +153,17 @@ variable "anomaly_detection_evaluation_frequency" {
     error_message = "Evaluation frequency must be one of: 300 (5m), 900 (15m), 1800 (30m), 3600 (60m)"
   }
 }
+
+# ===========================
+# Canary Test Configuration
+# ===========================
+
+variable "canary_gmail_label" {
+  description = "Gmail label name for canary test emails (must pre-exist in Gmail)"
+  type        = string
+}
+
+variable "canary_target_email" {
+  description = "Target Gmail address for canary test emails. If not set, canary routing rule will not be created."
+  type        = string
+}

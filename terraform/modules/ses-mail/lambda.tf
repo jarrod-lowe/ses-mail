@@ -118,6 +118,8 @@ resource "aws_lambda_function" "gmail_forwarder" {
       GMAIL_CLIENT_CREDENTIALS_PARAMETER = aws_ssm_parameter.gmail_oauth_client_credentials.name
       EMAIL_BUCKET                       = aws_s3_bucket.email_storage.id
       RETRY_QUEUE_URL                    = aws_sqs_queue.gmail_forwarder_retry.url
+      DYNAMODB_TABLE_NAME                = aws_dynamodb_table.email_routing.name
+      CANARY_GMAIL_LABEL                 = var.canary_gmail_label
       ENVIRONMENT                        = var.environment
     }
   }
@@ -126,7 +128,8 @@ resource "aws_lambda_function" "gmail_forwarder" {
     aws_iam_role_policy_attachment.lambda_gmail_forwarder_basic_execution,
     aws_iam_role_policy.lambda_gmail_forwarder_s3_access,
     aws_iam_role_policy.lambda_gmail_forwarder_ssm_access,
-    aws_iam_role_policy_attachment.lambda_gmail_forwarder_xray_access
+    aws_iam_role_policy_attachment.lambda_gmail_forwarder_xray_access,
+    aws_iam_role_policy.lambda_gmail_forwarder_dynamodb
   ]
 }
 

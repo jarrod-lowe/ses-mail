@@ -429,6 +429,24 @@ resource "aws_iam_role_policy" "lambda_gmail_forwarder_sqs_access" {
   policy = data.aws_iam_policy_document.lambda_gmail_forwarder_sqs_access.json
 }
 
+# IAM policy document for gmail_forwarder Lambda DynamoDB access (for canary tracking)
+data "aws_iam_policy_document" "lambda_gmail_forwarder_dynamodb" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "dynamodb:UpdateItem"
+    ]
+    resources = [aws_dynamodb_table.email_routing.arn]
+  }
+}
+
+# IAM policy for gmail_forwarder Lambda to update canary completion records in DynamoDB
+resource "aws_iam_role_policy" "lambda_gmail_forwarder_dynamodb" {
+  name   = "lambda-gmail-forwarder-dynamodb-${var.environment}"
+  role   = aws_iam_role.lambda_gmail_forwarder_execution.id
+  policy = data.aws_iam_policy_document.lambda_gmail_forwarder_dynamodb.json
+}
+
 # IAM role for bouncer Lambda function
 resource "aws_iam_role" "lambda_bouncer_execution" {
   name               = "ses-mail-lambda-bouncer-${var.environment}"
