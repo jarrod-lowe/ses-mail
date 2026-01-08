@@ -8,6 +8,7 @@ It processes enriched email events from EventBridge and imports emails into Gmai
 import base64
 import json
 import os
+from http import HTTPStatus
 from typing import Dict, Any, List
 
 import boto3
@@ -22,7 +23,6 @@ from google.auth.exceptions import RefreshError
 # X-Ray SDK for distributed tracing
 from aws_xray_sdk.core import xray_recorder
 from aws_xray_sdk.core import patch_all
-from aws_xray_sdk.core.models import http
 patch_all()
 
 # Configure structured JSON logging
@@ -40,6 +40,11 @@ ENVIRONMENT = os.environ.get('ENVIRONMENT', 'unknown')
 S3_PREFIX = 'emails'  # Hardcoded to match ses.tf configuration
 GMAIL_USER_ID = 'me'
 DEFAULT_LABEL_IDS = ['INBOX', 'UNREAD']
+
+# X-Ray HTTP metadata keys (matching aws_xray_sdk.core.models.http)
+XRAY_HTTP_URL = "url"
+XRAY_HTTP_METHOD = "method"
+XRAY_HTTP_STATUS = "status"
 
 # Initialize AWS clients
 s3_client = boto3.client('s3')
@@ -87,7 +92,7 @@ def extract_canary_id(ses_message: Dict[str, Any]) -> str:
     return ''
 
 
-def write_canary_completion_record(canary_id: str, gmail_message_id: str, status: str = 'completed', error_message: str = None) -> None:
+def write_canary_completion_record(canary_id: str, gmail_message_id: str, status: str = 'completed', error_message: str | None = None) -> None:
     """
     Write canary completion record to DynamoDB.
 
@@ -199,7 +204,7 @@ def lambda_handler(event, context):
         })
 
         return {
-            'statusCode': 200,
+            'statusCode': HTTPStatus.OK,
             'batchItemFailures': [
                 {'itemIdentifier': r['receiptHandle']}
                 for r in results
@@ -216,9 +221,9 @@ def lambda_handler(event, context):
             })
 
             # Queue all SQS records for retry
-            from datetime import datetime
+            from datetime import datetime, timezone
             error_context = {
-                'timestamp': datetime.utcnow().isoformat() + 'Z',
+                'timestamp': datetime.now(timezone.utc).isoformat(),
                 'error_type': 'token_expired',
                 'request_id': context.aws_request_id if context else 'unknown',
                 'attempt_count': 1
@@ -245,7 +250,7 @@ def lambda_handler(event, context):
                     batch_item_failures.append({'itemIdentifier': receipt_handle})
 
             return {
-                'statusCode': 200,
+                'statusCode': HTTPStatus.OK,
                 'batchItemFailures': batch_item_failures
             }
 
@@ -278,7 +283,7 @@ def is_token_expired_error(exception: Exception) -> bool:
     # Check for HTTP errors with 401/403 status codes
     if isinstance(exception, HttpError):
         status_code = exception.resp.status
-        if status_code in (401, 403):
+        if status_code in (HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN):
             logger.info("Detected HTTP 401/403 error - token may be expired", extra={
                 "status_code": status_code,
                 "error": str(exception)
@@ -462,7 +467,8 @@ def process_sqs_record(record, service):
                 subsegment.put_annotation('subject', subject[0:64])
                 if is_canary:
                     subsegment.put_annotation('canary', True)
-                    subsegment.put_annotation('canary_id', canary_id)
+                    if canary_id:
+                        subsegment.put_annotation('canary_id', canary_id)
 
             # Log email metadata
             logger.info("Processing email forward to Gmail",
@@ -533,9 +539,10 @@ def process_sqs_record(record, service):
                 # Write canary completion record if this is a canary email
                 if is_canary and canary_id:
                     if canary_success:
+                        gmail_message_id = (gmail_response.get('id') if gmail_response else None) or ''
                         write_canary_completion_record(
                             canary_id,
-                            gmail_response.get('id'),
+                            gmail_message_id,
                             status='completed'
                         )
                     elif canary_error:
@@ -587,9 +594,9 @@ def process_sqs_record(record, service):
             })
 
             # Queue the message for retry with error context
-            from datetime import datetime
+            from datetime import datetime, timezone
             error_context = {
-                'timestamp': datetime.utcnow().isoformat() + 'Z',
+                'timestamp': datetime.now(timezone.utc).isoformat(),
                 'error_type': 'token_expired',
                 'request_id': 'unknown',  # Not available at this level
                 'attempt_count': 1
@@ -845,7 +852,8 @@ def gmail_import(service, raw_bytes: bytes, label_ids: List[str]) -> Dict[str, A
 
     try:
         # Mark as external HTTP service
-        subsegment.namespace = 'remote'
+        if subsegment:
+            subsegment.namespace = 'remote'
 
         # Prepare request body
         encoded_email = base64.urlsafe_b64encode(raw_bytes).decode('utf-8')
@@ -855,14 +863,15 @@ def gmail_import(service, raw_bytes: bytes, label_ids: List[str]) -> Dict[str, A
         }
 
         # Set HTTP request metadata
-        api_url = f'https://gmail.googleapis.com/gmail/v1/users/{GMAIL_USER_ID}/messages/import'
-        subsegment.put_http_meta(http.URL, api_url)
-        subsegment.put_http_meta(http.METHOD, 'POST')
+        if subsegment:
+            api_url = f'https://gmail.googleapis.com/gmail/v1/users/{GMAIL_USER_ID}/messages/import'
+            subsegment.put_http_meta(XRAY_HTTP_URL, api_url)
+            subsegment.put_http_meta(XRAY_HTTP_METHOD, 'POST')
 
-        # Add annotations for tracing
-        subsegment.put_annotation('email_size_bytes', len(raw_bytes))
-        subsegment.put_annotation('email_size_base64', len(encoded_email))
-        subsegment.put_annotation('label_count', len(label_ids) if label_ids else 0)
+            # Add annotations for tracing
+            subsegment.put_annotation('email_size_bytes', len(raw_bytes))
+            subsegment.put_annotation('email_size_base64', len(encoded_email))
+            subsegment.put_annotation('label_count', len(label_ids) if label_ids else 0)
 
         # Execute Gmail API call
         response = service.users().messages().import_(
@@ -872,20 +881,22 @@ def gmail_import(service, raw_bytes: bytes, label_ids: List[str]) -> Dict[str, A
         ).execute()
 
         # Set HTTP response metadata
-        subsegment.put_http_meta(http.STATUS, 200)
+        if subsegment:
+            subsegment.put_http_meta(XRAY_HTTP_STATUS, HTTPStatus.OK)
 
-        # Add response annotations
-        subsegment.put_annotation('gmail_message_id', response.get('id', 'unknown'))
-        subsegment.put_annotation('gmail_thread_id', response.get('threadId', 'unknown'))
+            # Add response annotations
+            subsegment.put_annotation('gmail_message_id', response.get('id', 'unknown'))
+            subsegment.put_annotation('gmail_thread_id', response.get('threadId', 'unknown'))
 
         return response
 
     except HttpError as e:
         # Capture HTTP error details
-        status_code = e.resp.status if hasattr(e, 'resp') else 500
-        subsegment.put_http_meta(http.STATUS, status_code)
-        subsegment.put_annotation('error', True)
-        subsegment.put_annotation('error_message', str(e))
+        if subsegment:
+            status_code = e.resp.status if hasattr(e, 'resp') else HTTPStatus.INTERNAL_SERVER_ERROR
+            subsegment.put_http_meta(XRAY_HTTP_STATUS, status_code)
+            subsegment.put_annotation('error', True)
+            subsegment.put_annotation('error_message', str(e))
         raise RuntimeError(f"Gmail API error: {e}")
     finally:
         # Always end the subsegment
@@ -908,15 +919,16 @@ def get_message_details(service, message_id: str) -> Dict[str, Any]:
 
     try:
         # Mark as external HTTP service
-        subsegment.namespace = 'remote'
+        if subsegment:
+            subsegment.namespace = 'remote'
 
-        # Set HTTP request metadata
-        api_url = f'https://gmail.googleapis.com/gmail/v1/users/{GMAIL_USER_ID}/messages/{message_id}'
-        subsegment.put_http_meta(http.URL, api_url)
-        subsegment.put_http_meta(http.METHOD, 'GET')
+            # Set HTTP request metadata
+            api_url = f'https://gmail.googleapis.com/gmail/v1/users/{GMAIL_USER_ID}/messages/{message_id}'
+            subsegment.put_http_meta(XRAY_HTTP_URL, api_url)
+            subsegment.put_http_meta(XRAY_HTTP_METHOD, 'GET')
 
-        # Add annotations for tracing
-        subsegment.put_annotation('gmail_message_id', message_id)
+            # Add annotations for tracing
+            subsegment.put_annotation('gmail_message_id', message_id)
 
         # Execute Gmail API call
         response = service.users().messages().get(
@@ -926,20 +938,22 @@ def get_message_details(service, message_id: str) -> Dict[str, Any]:
         ).execute()
 
         # Set HTTP response metadata
-        subsegment.put_http_meta(http.STATUS, 200)
+        if subsegment:
+            subsegment.put_http_meta(XRAY_HTTP_STATUS, HTTPStatus.OK)
 
-        # Add response annotations
-        label_count = len(response.get('labelIds', []))
-        subsegment.put_annotation('label_count', label_count)
+            # Add response annotations
+            label_count = len(response.get('labelIds', []))
+            subsegment.put_annotation('label_count', label_count)
 
         return response
 
     except HttpError as e:
         # Capture HTTP error details
-        status_code = e.resp.status if hasattr(e, 'resp') else 500
-        subsegment.put_http_meta(http.STATUS, status_code)
-        subsegment.put_annotation('error', True)
-        subsegment.put_annotation('error_message', str(e))
+        if subsegment:
+            status_code = e.resp.status if hasattr(e, 'resp') else HTTPStatus.INTERNAL_SERVER_ERROR
+            subsegment.put_http_meta(XRAY_HTTP_STATUS, status_code)
+            subsegment.put_annotation('error', True)
+            subsegment.put_annotation('error_message', str(e))
         raise RuntimeError(f"Gmail API get error: {e}")
     finally:
         # Always end the subsegment
