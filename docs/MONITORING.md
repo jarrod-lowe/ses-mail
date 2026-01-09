@@ -66,7 +66,7 @@ Use CloudWatch Logs Insights for advanced log analysis:
 
 **Example query - Failed email processing:**
 
-```
+```text
 fields @timestamp, @message
 | filter level = "ERROR"
 | sort @timestamp desc
@@ -75,7 +75,7 @@ fields @timestamp, @message
 
 **Example query - Gmail forwarding successes:**
 
-```
+```text
 fields @timestamp, messageId, destination
 | filter message = "Successfully imported message to Gmail"
 | sort @timestamp desc
@@ -126,6 +126,7 @@ AWS_PROFILE=ses-mail aws sqs get-queue-attributes \
 **Debugging steps:**
 
 1. **Check routing rule exists:**
+
    ```bash
    AWS_PROFILE=ses-mail aws dynamodb get-item \
      --table-name ses-mail-email-routing-test \
@@ -133,21 +134,25 @@ AWS_PROFILE=ses-mail aws sqs get-queue-attributes \
    ```
 
 2. **Check router logs for routing decision:**
+
    ```bash
    AWS_PROFILE=ses-mail aws logs tail /aws/lambda/ses-mail-router-enrichment-test --follow
    ```
 
 3. **Check Gmail forwarder logs for errors:**
+
    ```bash
    AWS_PROFILE=ses-mail aws logs tail /aws/lambda/ses-mail-gmail-forwarder-test --follow
    ```
 
 4. **Check for OAuth token expiration:**
+
    ```bash
    AWS_PROFILE=ses-mail python3 scripts/refresh_oauth_token.py --env test
    ```
 
 5. **Check queue depth (messages may be stuck):**
+
    ```bash
    AWS_PROFILE=ses-mail aws sqs get-queue-attributes --queue-url <queue-url> --attribute-names All
    ```
@@ -159,11 +164,13 @@ AWS_PROFILE=ses-mail aws sqs get-queue-attributes \
 **Debugging:**
 
 1. **Check Lambda logs:**
+
    ```bash
    AWS_PROFILE=ses-mail aws logs tail /aws/lambda/ses-mail-{function}-test --follow
    ```
 
 2. **Check Lambda metrics:**
+
    ```bash
    AWS_PROFILE=ses-mail aws cloudwatch get-metric-statistics \
      --namespace "AWS/Lambda" \
@@ -185,6 +192,7 @@ AWS_PROFILE=ses-mail aws sqs get-queue-attributes \
 **Investigation:**
 
 1. **Check DLQ depth:**
+
    ```bash
    AWS_PROFILE=ses-mail aws sqs get-queue-attributes \
      --queue-url <dlq-url> \
@@ -192,6 +200,7 @@ AWS_PROFILE=ses-mail aws sqs get-queue-attributes \
    ```
 
 2. **Receive and inspect message:**
+
    ```bash
    AWS_PROFILE=ses-mail aws sqs receive-message \
      --queue-url <dlq-url> \
@@ -214,31 +223,39 @@ AWS_PROFILE=ses-mail aws sqs get-queue-attributes \
 ### Gmail API Token Expired
 
 **Symptoms:**
+
 - CloudWatch alarm: `ses-mail-lambda-gmail-forwarder-errors-{environment}`
 - DLQ: `ses-mail-gmail-forwarder-dlq-{environment}` has messages
 - Logs show: "Token expired" or "invalid_grant"
 
 **Resolution:**
+
 1. Refresh Gmail OAuth token (see [OPERATIONS.md#oauth-token-management](OPERATIONS.md#oauth-token-management))
+
    ```bash
    AWS_PROFILE=ses-mail python3 scripts/refresh_oauth_token.py --env test
    ```
+
 2. Wait 2-3 minutes for parameter to propagate
 3. Use DLQ redrive runbook to reprocess failed messages (see [RECOVERY.md](RECOVERY.md))
 
 ### Router Enrichment DynamoDB Errors
 
 **Symptoms:**
+
 - CloudWatch alarm: `ses-mail-lambda-router-errors-{environment}`
 - DLQ: `ses-mail-email-input-dlq-{environment}` has messages
 - Logs show: "DynamoDB timeout" or "ProvisionedThroughputExceededException"
 
 **Resolution:**
+
 1. Check DynamoDB table status:
+
    ```bash
    AWS_PROFILE=ses-mail aws dynamodb describe-table \
      --table-name ses-mail-email-routing-test
    ```
+
 2. If table is throttling, wait for capacity to recover (PAY_PER_REQUEST should auto-scale)
 3. If table doesn't exist, redeploy infrastructure
 4. Use DLQ redrive runbook to reprocess messages
@@ -246,15 +263,19 @@ AWS_PROFILE=ses-mail aws sqs get-queue-attributes \
 ### Bouncer SES Sending Failures
 
 **Symptoms:**
+
 - CloudWatch alarm: `ses-mail-lambda-bouncer-errors-{environment}`
 - DLQ: `ses-mail-bouncer-dlq-{environment}` has messages
 - Logs show: "MessageRejected" or "Account in sandbox mode"
 
 **Resolution:**
+
 1. Check if SES is in sandbox mode (requires verified recipients):
+
    ```bash
    AWS_PROFILE=ses-mail aws ses get-account-sending-enabled
    ```
+
 2. For production, request SES sending limit increase
 3. For sandbox issues, verify sender email address
 4. Review bounce message content for compliance with SES policies
@@ -263,20 +284,26 @@ AWS_PROFILE=ses-mail aws sqs get-queue-attributes \
 ### EventBridge Pipes Failures
 
 **Symptoms:**
+
 - CloudWatch alarm: `eventbridge-pipes-failures-{environment}`
 - DLQ: `ses-mail-email-input-dlq-{environment}` has messages
 - EventBridge Pipes logs show enrichment errors
 
 **Resolution:**
+
 1. Check EventBridge Pipes status:
+
    ```bash
    AWS_PROFILE=ses-mail aws pipes list-pipes --region ap-southeast-2
    ```
+
 2. Check pipe logs:
+
    ```bash
    AWS_PROFILE=ses-mail aws logs tail \
      /aws/vendedlogs/pipes/test/ses-email-router --follow
    ```
+
 3. If router lambda is failing, check router lambda logs
 4. If pipes is stopped, restart it via console or CLI
 5. Use DLQ redrive runbook after resolution
@@ -284,12 +311,15 @@ AWS_PROFILE=ses-mail aws sqs get-queue-attributes \
 ### High Queue Age Alarms
 
 **Symptoms:**
+
 - CloudWatch alarm: `ses-{queue}-queue-age-{environment}`
 - Messages sitting in queue for >5 minutes
 - Dashboard shows increasing queue depth
 
 **Resolution:**
+
 1. Check if downstream lambda is throttled:
+
    ```bash
    # Check lambda concurrent executions
    AWS_PROFILE=ses-mail aws cloudwatch get-metric-statistics \
@@ -301,6 +331,7 @@ AWS_PROFILE=ses-mail aws sqs get-queue-attributes \
      --period 300 \
      --statistics Maximum
    ```
+
 2. Check if lambda is experiencing errors (see lambda error scenarios above)
 3. If lambda is healthy but slow, consider increasing concurrency limit
 4. Monitor queue depth - should decrease as lambda catches up
@@ -312,11 +343,14 @@ AWS_PROFILE=ses-mail aws sqs get-queue-attributes \
 **Definition:** No emails being processed for >15 minutes, multiple alarms firing
 
 **Response:**
+
 1. Run queue health check automation:
+
    ```bash
    AWS_PROFILE=ses-mail aws ssm start-automation-execution \
      --document-name "SESMail-Queue-HealthCheck-test"
    ```
+
 2. Check CloudWatch dashboard for system overview
 3. Review X-Ray service map for failed components
 4. Check AWS Service Health Dashboard for regional issues
@@ -328,6 +362,7 @@ AWS_PROFILE=ses-mail aws sqs get-queue-attributes \
 **Definition:** Some emails failing (DLQ has messages), but system mostly working
 
 **Response:**
+
 1. Identify which queue/lambda is affected from alarms
 2. Follow specific failure scenario procedures above
 3. Check if issue is isolated to specific email addresses or routing rules
@@ -340,6 +375,7 @@ AWS_PROFILE=ses-mail aws sqs get-queue-attributes \
 **Definition:** Emails processing slowly (high queue age) but eventually succeeding
 
 **Response:**
+
 1. Check CloudWatch dashboard "Lambda Duration" widget
 2. Review X-Ray traces for slow operations
 3. Check for AWS API throttling in lambda logs

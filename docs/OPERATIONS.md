@@ -21,6 +21,7 @@ This guide covers day-to-day operational tasks for managing the SES Mail system.
 **Most common tasks:**
 
 1. **Refresh OAuth token** (every 7 days in testing mode)
+
    ```bash
    AWS_PROFILE=ses-mail python3 scripts/refresh_oauth_token.py --env test
    ```
@@ -28,6 +29,7 @@ This guide covers day-to-day operational tasks for managing the SES Mail system.
 2. **Add routing rule** (when adding new email addresses)
    - See [Email Routing Management](#adding-routing-rules) for detailed commands
    - Quick example: Forward `new@example.com` to Gmail:
+
    ```bash
    AWS_PROFILE=ses-mail aws dynamodb put-item \
      --table-name ses-mail-email-routing-test \
@@ -35,6 +37,7 @@ This guide covers day-to-day operational tasks for managing the SES Mail system.
    ```
 
 3. **Check logs** (when debugging email issues)
+
    ```bash
    # Router logs
    AWS_PROFILE=ses-mail aws logs tail /aws/lambda/ses-mail-router-enrichment-test --follow
@@ -44,6 +47,7 @@ This guide covers day-to-day operational tasks for managing the SES Mail system.
    ```
 
 4. **Monitor dashboard** (weekly health check)
+
    ```bash
    # Get dashboard URL
    cd terraform/environments/test && terraform output dashboard_url
@@ -60,7 +64,7 @@ This guide covers day-to-day operational tasks for managing the SES Mail system.
 ## Quick Command Reference
 
 | Task | Command |
-|------|---------|
+| ---- | ------- |
 | **Deploy Changes** | `AWS_PROFILE=ses-mail make apply ENV=test` |
 | **Show Plan** | `AWS_PROFILE=ses-mail make show-plan ENV=test` |
 | **Validate Config** | `AWS_PROFILE=ses-mail make validate ENV=test` |
@@ -94,10 +98,12 @@ The system uses DynamoDB to store email routing rules with hierarchical address 
 **Table Name**: `ses-mail-email-routing-{environment}`
 
 **Key Schema:**
+
 - **PK (Primary Key)**: `ROUTE#<email-pattern>`
 - **SK (Sort Key)**: `RULE#v1`
 
 **Attributes:**
+
 - `entity_type`: Always `"ROUTE"`
 - `recipient`: Email pattern (denormalized from PK)
 - `action`: `"forward-to-gmail"` or `"bounce"`
@@ -443,7 +449,8 @@ terraform output smtp_port
 ```
 
 **Example output:**
-```
+
+```text
 smtp_endpoint = "email-smtp.ap-southeast-2.amazonaws.com"
 smtp_port = 587  # or 465 for TLS, 25 for plaintext
 ```
@@ -492,6 +499,7 @@ AWS_PROFILE=ses-mail aws dynamodb get-item \
 ```
 
 **Response includes:**
+
 - `username`: SMTP username (same as IAM access key ID)
 - `status`: `active`, `pending`, or `disabled`
 - `iam_user_arn`: ARN of the created IAM user
@@ -517,6 +525,7 @@ AWS_PROFILE=ses-mail aws kms decrypt \
 ```
 
 **Output:**
+
 ```json
 {
   "access_key_id": "AKIAEXAMPLE123",
@@ -620,7 +629,8 @@ terraform output spf_record
 ```
 
 **Example output:**
-```
+
+```text
 "v=spf1 include:amazonses.com ~all"
 ```
 
@@ -640,11 +650,13 @@ terraform output spf_record
 The system automatically detects security issues with incoming emails:
 
 **Silent Drops** (stored in S3 with `action=silent-drop` tag, auto-deleted after 90 days):
+
 - Spam detected by SES
 - Virus-infected emails
 - DMARC policy=reject failures
 
 **Bounced** (notification sent to sender):
+
 - DKIM failures (standalone, without spam/virus/DMARC-reject)
 - SPF failures (standalone, without spam/virus/DMARC-reject)
 - Policy violations (no routing rule configured)
@@ -652,12 +664,14 @@ The system automatically detects security issues with incoming emails:
 ### Security Verdict Metrics
 
 **CloudWatch Metrics** (namespace: `SESMail/{environment}`):
+
 - `SpamDetected` - Count of spam emails (silent dropped)
 - `VirusDetected` - Count of virus emails (silent dropped)
 - `DmarcRejectDetected` - Count of DMARC policy=reject emails (silent dropped)
 - `AuthFailDetected` - Count of DKIM/SPF failures (bounced to notify sender)
 
 **View spam metrics:**
+
 ```bash
 # Get spam count for last 24 hours
 AWS_PROFILE=ses-mail aws cloudwatch get-metric-statistics \
@@ -681,6 +695,7 @@ AWS_PROFILE=ses-mail aws cloudwatch get-metric-statistics \
 ### Query Silent Dropped Emails in S3
 
 **List silent dropped emails:**
+
 ```bash
 # Get S3 bucket name
 BUCKET=$(AWS_PROFILE=ses-mail aws s3 ls | grep ses-mail-storage | awk '{print $3}')
@@ -701,6 +716,7 @@ AWS_PROFILE=ses-mail aws s3api list-objects-v2 \
 ### Dashboard Widget
 
 The CloudWatch dashboard includes an "Inbound Security Verdict Detection" widget showing:
+
 - Spam (dropped) - orange line
 - Virus (dropped) - red line
 - DMARC Reject (dropped) - pink line
@@ -711,11 +727,13 @@ The CloudWatch dashboard includes an "Inbound Security Verdict Detection" widget
 The system uses **smart bounce logic** to prevent **backscatter spam**:
 
 **Silent Drops** (spam/virus/DMARC-reject):
+
 - Spammers forge sender addresses (bouncing would spam innocent victims)
 - Industry best practice (RFC 5321 Section 3.7): silently drop spam
 - DMARC policy=reject indicates sender wants failed emails dropped
 
 **Bounces** (DKIM/SPF standalone failures):
+
 - Legitimate senders with misconfigured servers
 - Bounce notification helps them fix the issue
 - Only bounced when spam/virus/DMARC-reject verdicts are NOT present
@@ -727,11 +745,13 @@ The system automatically tracks all outbound emails sent via SES SMTP using a Co
 ### Configuration Set
 
 All emails sent from verified domains automatically use the Configuration Set:
+
 - **Configuration Set Name**: `ses-mail-outbound-{environment}`
 - **Association**: Automatically configured at domain level (no SMTP client changes needed)
 - **Events Tracked**: Send, Delivery, Bounce, Reject, Complaint
 
 **Verify Configuration Set is associated:**
+
 ```bash
 AWS_PROFILE=ses-mail aws sesv2 get-email-identity \
   --email-identity YOUR_DOMAIN \
@@ -744,7 +764,7 @@ AWS_PROFILE=ses-mail aws sesv2 get-email-identity \
 Outbound email metrics are published to the `SESMail/{environment}` namespace:
 
 | Metric | Description |
-|--------|-------------|
+| ------ | ----------- |
 | `OutboundSend` | Total emails sent |
 | `OutboundDelivery` | Successfully delivered emails |
 | `OutboundBounce` | Total bounces (hard + soft) |
@@ -754,6 +774,7 @@ Outbound email metrics are published to the `SESMail/{environment}` namespace:
 | `OutboundReject` | Rejected by SES (invalid sender, etc.) |
 
 **View metrics:**
+
 ```bash
 # Check send volume (last hour)
 AWS_PROFILE=ses-mail aws cloudwatch get-metric-statistics \
@@ -769,34 +790,39 @@ AWS_PROFILE=ses-mail aws cloudwatch get-metric-statistics \
 ### Dashboard Widgets
 
 The CloudWatch dashboard includes 4 outbound email widgets:
+
 1. **Outbound Email Volume** - Line graph showing sends, deliveries, bounces, complaints, rejects
 2. **Outbound Delivery & Error Rates** - Percentage rates with warning/critical annotations
 3. **Outbound Bounce Types** - Hard vs soft bounces (stacked area)
 4. **AWS SES Reputation Metrics** - Native SES bounce/complaint rates from Configuration Set
 
 **Access dashboard:**
+
 ```bash
 # Get dashboard URL
 AWS_PROFILE=ses-mail make outputs ENV=test | grep cloudwatch_dashboard_url
 ```
 
-### CloudWatch Alarms
+### Reputation Alarms
 
 Two alarms monitor sender reputation:
 
 **High Bounce Rate Alarm:**
+
 - **Threshold**: 5% (industry standard warning level)
 - **Evaluation**: 2 consecutive 5-minute periods
 - **Action**: SNS notification to alarm topic
 - **Impact**: Sustained >10% bounce rate can result in SES sending suspension
 
 **High Complaint Rate Alarm:**
+
 - **Threshold**: 0.1% (AWS SES account health threshold)
 - **Evaluation**: 2 consecutive 5-minute periods
 - **Action**: SNS notification to alarm topic
 - **Severity**: CRITICAL - AWS may suspend account above 0.1%
 
 **Check alarm status:**
+
 ```bash
 AWS_PROFILE=ses-mail aws cloudwatch describe-alarms \
   --region ap-southeast-2 \
@@ -833,6 +859,7 @@ AWS_PROFILE=ses-mail aws ses send-email \
 ```
 
 **Verify metrics are published (wait 60 seconds after sending):**
+
 ```bash
 # Check Lambda logs
 AWS_PROFILE=ses-mail aws logs tail /aws/lambda/ses-mail-outbound-metrics-test \
@@ -853,25 +880,30 @@ AWS_PROFILE=ses-mail aws cloudwatch get-metric-statistics \
 
 ### Troubleshooting Outbound Metrics
 
-**Issue: Metrics not appearing after sending email**
+#### Issue: Metrics not appearing after sending email
 
 1. **Verify Configuration Set association:**
+
    ```bash
    AWS_PROFILE=ses-mail aws sesv2 get-email-identity \
      --email-identity YOUR_DOMAIN \
      --region ap-southeast-2
    ```
+
    Should show `"ConfigurationSetName": "ses-mail-outbound-test"`
 
 2. **Check SNS topic subscriptions:**
+
    ```bash
    AWS_PROFILE=ses-mail aws sns list-subscriptions \
      --region ap-southeast-2 \
      --query 'Subscriptions[?contains(TopicArn, `outbound`)]'
    ```
+
    All 4 topics should be subscribed to Lambda function
 
 3. **Check Lambda logs for errors:**
+
    ```bash
    AWS_PROFILE=ses-mail aws logs tail /aws/lambda/ses-mail-outbound-metrics-test \
      --region ap-southeast-2 \
@@ -879,15 +911,17 @@ AWS_PROFILE=ses-mail aws cloudwatch get-metric-statistics \
    ```
 
 4. **Verify SES event destinations:**
+
    ```bash
    AWS_PROFILE=ses-mail aws ses describe-configuration-set \
      --configuration-set-name ses-mail-outbound-test \
      --region ap-southeast-2
    ```
 
-**Issue: Alarm triggering frequently**
+#### Issue: Alarm triggering frequently
 
 High bounce/complaint rates indicate deliverability problems:
+
 - **Review bounce types**: Check `OutboundBounceHard` vs `OutboundBounceSoft` to determine if addresses are invalid (hard) or servers are temporarily unavailable (soft)
 - **Check recipient addresses**: Hard bounces usually mean the email address is invalid or doesn't exist - verify addresses before sending
 - **Review email content**: Complaints may indicate your messages are being flagged as spam by recipient mail servers
@@ -900,6 +934,7 @@ The system automatically validates email pipeline health hourly by sending test 
 ### How It Works
 
 **Hourly Canary Cycle:**
+
 1. **T+0s**: EventBridge triggers canary sender Lambda
 2. **T+1s**: Lambda validates DNS records (MX, SPF, DMARC, MTA-STS)
 3. **T+2s**: Lambda sends test email via SES SendRawEmail to `ses-canary-{env}@domain.com`
@@ -911,6 +946,7 @@ The system automatically validates email pipeline health hourly by sending test 
 9. **T+95s**: CloudWatch dashboard updates, alarms remain in OK state
 
 **What Gets Tested:**
+
 - DNS configuration (MX, SPF, DMARC, MTA-STS records)
 - SES sending capability (outbound SMTP path with DKIM signing)
 - SES receiving rules (inbound MX routing)
@@ -924,6 +960,7 @@ The system automatically validates email pipeline health hourly by sending test 
 ### Viewing Canary Metrics
 
 **Access Dashboard:**
+
 ```bash
 # Get dashboard URL
 AWS_PROFILE=ses-mail make outputs ENV=test | grep cloudwatch_dashboard_url
@@ -933,12 +970,14 @@ open "https://console.aws.amazon.com/cloudwatch/home?region=ap-southeast-2#dashb
 ```
 
 **Dashboard Widgets** (Section 10: Canary Monitoring):
+
 1. **Test Results**: Success count (green), Failure count (red), Monitor Errors (orange)
 2. **Processing Time**: Average, Maximum, Minimum, p99 latency in seconds
 3. **Step Function Executions**: Succeeded, Failed, Timed Out, Throttled, Duration
 4. **Success Rate**: Percentage calculation (successes / total tests × 100)
 
 **Check Recent Canary Results:**
+
 ```bash
 # Get success count (last 24 hours)
 AWS_PROFILE=ses-mail aws cloudwatch get-metric-statistics \
@@ -985,6 +1024,7 @@ AWS_PROFILE=ses-mail aws cloudwatch describe-alarms \
 ```
 
 **Alarm Types:**
+
 - `canary-failure-detected`: Canary test failed (email not delivered or error occurred)
 - `canary-monitor-errors`: Monitoring system issue (DynamoDB query failed, record missing, status still 'sent' after 90s)
 - `canary-monitor-stepfunction-failed`: Step Function execution failed
@@ -1013,6 +1053,7 @@ AWS_PROFILE=ses-mail aws stepfunctions get-execution-history \
 ```
 
 **Look for:**
+
 - Failed state: Which state failed? (InvokeCanarySender, QueryCompletionRecord, CheckStatus)
 - Status value: What was the DynamoDB status? (sent, completed, failed, missing)
 - Error message: What error was returned?
@@ -1020,6 +1061,7 @@ AWS_PROFILE=ses-mail aws stepfunctions get-execution-history \
 #### Step 3: Check Lambda Logs
 
 **Canary Sender Logs:**
+
 ```bash
 # Tail sender logs
 AWS_PROFILE=ses-mail aws logs tail /aws/lambda/ses-mail-canary-sender-test \
@@ -1035,6 +1077,7 @@ AWS_PROFILE=ses-mail aws logs filter-log-events \
 ```
 
 **Gmail Forwarder Logs** (for canary completion):
+
 ```bash
 # Search for canary-related logs
 AWS_PROFILE=ses-mail aws logs filter-log-events \
@@ -1062,6 +1105,7 @@ AWS_PROFILE=ses-mail aws dynamodb get-item \
 ```
 
 **Check:**
+
 - Does record exist? (If not, sender failed to write tracking record)
 - What's the status? (sent = incomplete, completed = success, failed = error in pipeline)
 - What's the sent_at timestamp? (How long ago was it sent?)
@@ -1088,17 +1132,20 @@ AWS_PROFILE=ses-mail aws xray batch-get-traces \
 #### Scenario 1: DNS Validation Failure
 
 **Symptoms:**
+
 - CanaryMonitorErrors metric spike
 - Sender logs show: "DNS validation failed"
 - Step Function fails at InvokeCanarySender state
 
 **Causes:**
+
 - MX record missing or misconfigured
 - SPF record syntax error or missing
 - DMARC record missing at `_dmarc.domain.com`
 - DNS propagation delay after recent changes
 
 **Resolution:**
+
 ```bash
 # Validate DNS records manually
 dig MX YOUR_DOMAIN
@@ -1115,16 +1162,19 @@ AWS_PROFILE=ses-mail make outputs ENV=test | grep -E "mx_record|spf_record|dmarc
 #### Scenario 2: Canary Email Not Forwarded to Gmail
 
 **Symptoms:**
+
 - CanaryFailure or CanaryMonitorErrors metric increase
 - DynamoDB record stuck at status='sent' after 90 seconds
 - Gmail forwarder logs don't show canary processing
 
 **Causes:**
+
 - Routing rule for `ses-canary-{env}@domain.com` missing or disabled
 - Gmail forwarder Lambda erroring (OAuth token expired, Gmail API quota)
 - SES receipt rule not active
 
 **Resolution:**
+
 ```bash
 # Check routing rule exists
 AWS_PROFILE=ses-mail aws dynamodb get-item \
@@ -1159,16 +1209,19 @@ AWS_PROFILE=ses-mail aws logs tail /aws/lambda/ses-mail-gmail-forwarder-test \
 #### Scenario 3: Step Function Execution Failed
 
 **Symptoms:**
+
 - `canary-monitor-stepfunction-failed` alarm triggered
 - No CanarySuccess or CanaryFailure metrics published
 - Step Function shows "Execution Failed" status
 
 **Causes:**
+
 - IAM permission missing (Lambda invoke, DynamoDB GetItem, CloudWatch PutMetricData)
 - Invalid Step Function definition (syntax error in JSONata)
 - EventBridge rule misconfigured
 
 **Resolution:**
+
 ```bash
 # Check EventBridge rule status
 AWS_PROFILE=ses-mail aws events describe-rule \
@@ -1194,16 +1247,19 @@ AWS_PROFILE=ses-mail aws stepfunctions start-execution \
 #### Scenario 4: Slow Processing Time (>30 seconds)
 
 **Symptoms:**
+
 - CanarySuccess metrics normal, but CanaryProcessingTime consistently >30s
 - Dashboard shows high p99 latency
 
 **Causes:**
+
 - Router Lambda cold starts
 - Gmail API slow responses
 - EventBridge routing delays
 - SQS queue backlog
 
 **Resolution:**
+
 ```bash
 # Check SQS queue depths
 AWS_PROFILE=ses-mail aws sqs get-queue-attributes \
@@ -1286,6 +1342,7 @@ CloudWatch Log Anomaly Detection uses machine learning to automatically identify
 ### Configured Detectors
 
 Anomaly detection is enabled for the following Lambda functions:
+
 - **Router Enrichment** - DynamoDB lookups and routing decisions
 - **Gmail Forwarder** - Gmail API integration and email forwarding
 - **Bouncer** - Email bounce handling
@@ -1293,6 +1350,7 @@ Anomaly detection is enabled for the following Lambda functions:
 - **Outbound Metrics Publisher** - SES reputation tracking
 
 **Configuration:**
+
 - Evaluation frequency: 15 minutes
 - Anomaly visibility: 7 days
 - Alarms: HIGH and MEDIUM severity anomalies trigger SNS notifications
@@ -1302,11 +1360,13 @@ Anomaly detection is enabled for the following Lambda functions:
 ### Viewing Anomalies
 
 **AWS Console:**
+
 1. Navigate to: CloudWatch → Logs → Anomaly detection → Anomalies
 2. Filter by time range or detector name (e.g., `ses-mail-router-enrichment-test`)
 3. Click an anomaly to view affected log entries and patterns
 
 **CLI:**
+
 ```bash
 # List all anomaly detectors
 AWS_PROFILE=ses-mail aws logs list-log-anomaly-detectors \
@@ -1323,7 +1383,7 @@ AWS_PROFILE=ses-mail aws logs list-anomalies \
 Anomalies are automatically assigned severity based on log keywords and deviation from baseline:
 
 | Severity | Alarms | Description | Recommended Action |
-|----------|--------|-------------|-------------------|
+| -------- | ------ | ----------- | ------------------ |
 | **LOW** | None | Minor deviation from learned patterns | Monitor, no immediate action required |
 | **MEDIUM** | Enabled | Moderate deviation, may indicate emerging issue | Review logs within 4 hours, check for patterns |
 | **HIGH** | Enabled | Significant deviation, likely indicates real issue | Investigate immediately, cross-reference with metrics/alarms |
@@ -1332,29 +1392,34 @@ Anomalies are automatically assigned severity based on log keywords and deviatio
 
 When you receive an anomaly detection alarm notification:
 
-**1. Check Alarm Severity**
+#### 1. Check Alarm Severity
+
 - Alarm name indicates severity: `ses-mail-{function}-anomaly-{high|medium}-{env}`
 - HIGH: Requires immediate investigation
 - MEDIUM: Review within 4 hours
 
-**2. View Anomaly in CloudWatch Console**
+#### 2. View Anomaly in CloudWatch Console
+
 - Navigate to: CloudWatch → Logs → Anomaly detection → Anomalies
 - Click detector name from alarm (e.g., `ses-mail-router-enrichment-test`)
 - Review affected log entries and deviation score
 - Examine timeline to understand pattern changes
 
-**3. Cross-Reference with Metrics**
+#### 3. Cross-Reference with Metrics
+
 - Check CloudWatch Dashboard for concurrent spikes/errors
 - Review Lambda error rates and duration metrics
 - Look for correlation with other alarms
 
-**4. Investigate Root Cause**
+#### 4. Investigate Root Cause
+
 - Examine affected log entries for error patterns
 - Check X-Ray traces for failed requests (if available)
 - Review recent deployments or configuration changes
 - Compare with baseline behavior from previous days
 
-**5. Take Action**
+#### 5. Take Action
+
 - **HIGH severity**: Immediate investigation and remediation required
 - **MEDIUM severity**: Schedule investigation within 4 hours, monitor for escalation
 - Document findings and resolution steps
@@ -1367,6 +1432,7 @@ When you receive an anomaly detection alarm notification:
 **Learning Period:** Detectors require 2-4 weeks to establish baseline patterns before accurate anomaly detection. New detectors will show status `TRAINING` or `ANALYZING` initially.
 
 **What Gets Flagged:**
+
 - Previously unseen log patterns (new error types)
 - Significant changes in log volume or frequency
 - New values for variable fields (IP addresses, resource IDs, error codes)
@@ -1375,10 +1441,12 @@ When you receive an anomaly detection alarm notification:
 **Integration with Existing Monitoring:**
 
 Anomaly detection complements but doesn't replace existing alarms:
+
 - **Existing Alarms**: Threshold-based, immediate alerts (Lambda errors > 0, high email volume)
 - **Anomaly Detection**: Pattern-based, analytical insights (unusual error patterns, emerging issues)
 
 Use anomaly detection to:
+
 - Identify subtle issues before they trigger threshold alarms
 - Investigate context during incident analysis
 - Detect changes in log structure or application behavior
@@ -1386,33 +1454,38 @@ Use anomaly detection to:
 ### Troubleshooting
 
 **Detector stuck in "TRAINING" status:**
+
 - Requires minimum log traffic (~10 events/hour) to train
 - Wait full 2-4 weeks before expecting "ACTIVE" or "ANALYZING" status
 - Verify log group has sufficient data
 
 **No anomalies detected:**
+
 - Good sign - indicates stable, healthy system
 - Validate with intentional error injection to confirm detector is working
 - Check detector status is "ACTIVE" or "ANALYZING" (not "TRAINING")
 
 **Too many false positives:**
+
 - Normal during initial learning period (first 2-4 weeks)
 - After learning, consider:
   - Reviewing what patterns are "normal" for your workload
   - Suppressing specific recurring false positives in the console
   - Waiting longer for model refinement
 
-### CloudWatch Alarms
+### Anomaly Detection Alarms
 
 CloudWatch alarms automatically trigger SNS notifications when HIGH severity anomalies are detected.
 
 **Alarm Configuration:**
+
 - Triggers on any HIGH severity anomaly (threshold: 0)
 - Evaluates every 15 minutes
 - Sends notifications via existing alarm SNS topic
 - One alarm per detector (5 total)
 
 **Alarm Names:**
+
 - `ses-mail-router-anomaly-high-{env}`
 - `ses-mail-gmail-forwarder-anomaly-high-{env}`
 - `ses-mail-bouncer-anomaly-high-{env}`
@@ -1420,6 +1493,7 @@ CloudWatch alarms automatically trigger SNS notifications when HIGH severity ano
 - `ses-mail-outbound-metrics-publisher-anomaly-high-{env}`
 
 **Check alarm status:**
+
 ```bash
 AWS_PROFILE=ses-mail aws cloudwatch describe-alarms \
   --region ap-southeast-2 \
@@ -1427,11 +1501,13 @@ AWS_PROFILE=ses-mail aws cloudwatch describe-alarms \
 ```
 
 **Expected behavior:**
+
 - During learning period (2-4 weeks): May trigger frequently due to false positives
 - After learning: Should only trigger on genuine unusual patterns
 - Alarms can be muted temporarily via CloudWatch console if needed
 
 **Responding to alarm notifications:**
+
 1. Check CloudWatch console for anomaly details (navigate to Logs → Anomaly detection → Anomalies)
 2. Review affected log entries to understand the pattern
 3. Cross-reference with other metrics and alarms
@@ -1448,11 +1524,13 @@ anomaly_detection_enabled = false
 ```
 
 Then redeploy:
+
 ```bash
 AWS_PROFILE=ses-mail make apply ENV=test >/dev/null
 ```
 
 To adjust evaluation frequency (cost optimization):
+
 ```hcl
 # Valid values: 300 (5m), 900 (15m), 1800 (30m), 3600 (60m)
 anomaly_detection_evaluation_frequency = 1800  # 30 minutes
@@ -1461,6 +1539,7 @@ anomaly_detection_evaluation_frequency = 1800  # 30 minutes
 ## Monitoring, Troubleshooting, and Recovery
 
 **For monitoring and troubleshooting**, see **[MONITORING.md](MONITORING.md)**:
+
 - CloudWatch Dashboard access
 - Viewing logs and X-Ray traces
 - Common issues and solutions
@@ -1468,6 +1547,7 @@ anomaly_detection_evaluation_frequency = 1800  # 30 minutes
 - Incident response procedures
 
 **For retry and recovery**, see **[RECOVERY.md](RECOVERY.md)**:
+
 - Dead Letter Queue (DLQ) management
 - Retry queue infrastructure
 - Systems Manager automation runbooks
@@ -1583,6 +1663,7 @@ terraform plan
 ### Disaster Recovery Checklist
 
 **Before disaster:**
+
 - [ ] Weekly DynamoDB routing rules export
 - [ ] OAuth credentials backed up securely
 - [ ] Terraform code in version control (git)
@@ -1590,6 +1671,7 @@ terraform plan
 - [ ] Documentation reviewed and up-to-date
 
 **During disaster:**
+
 1. Assess scope: What's affected? (routing rules, OAuth, infrastructure, all?)
 2. Check backups: When was last known-good state?
 3. Review recent changes: What changed before the disaster?
@@ -1598,6 +1680,7 @@ terraform plan
 6. Monitor: Watch logs and metrics for 24 hours
 
 **After recovery:**
+
 1. Document what happened (incident report)
 2. Update runbooks if needed
 3. Improve backup procedures if gaps found

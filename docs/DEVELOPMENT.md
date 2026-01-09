@@ -50,7 +50,7 @@ export ENV=test
 
 The system includes comprehensive integration tests that validate the entire email processing pipeline end-to-end, from SES receipt through to final handler processing (Gmail forwarding or bouncing).
 
-### Prerequisites
+### Integration Test Prerequisites
 
 Before running integration tests, ensure:
 
@@ -212,11 +212,13 @@ Example test configuration file (`scripts/test_config.json`):
 #### Test fails with "Message not found in input queue"
 
 **Causes:**
+
 - SES receipt rule not active or not publishing to SNS
 - SNS topic subscription to SQS input queue missing
 - Sender email not verified in SES (sandbox mode)
 
 **Solutions:**
+
 ```bash
 # Check SES receipt rule status
 AWS_PROFILE=ses-mail aws ses describe-active-receipt-rule-set
@@ -231,11 +233,13 @@ AWS_PROFILE=ses-mail aws logs tail /aws/lambda/ses-mail-router-enrichment-test -
 #### Test fails with "Router logs not found"
 
 **Causes:**
+
 - EventBridge Pipes not active or not invoking router lambda
 - Router lambda missing DynamoDB permissions
 - DynamoDB routing table not accessible
 
 **Solutions:**
+
 ```bash
 # Check EventBridge Pipes status
 AWS_PROFILE=ses-mail aws pipes list-pipes
@@ -250,11 +254,13 @@ AWS_PROFILE=ses-mail aws dynamodb describe-table --table-name ses-mail-email-rou
 #### Test fails with "Message not found in handler queue"
 
 **Causes:**
+
 - EventBridge Event Bus rules not active
 - Event pattern not matching routing decision
 - EventBridge missing SQS send permissions
 
 **Solutions:**
+
 ```bash
 # Check EventBridge rules
 AWS_PROFILE=ses-mail aws events list-rules --event-bus-name ses-mail-email-routing-test
@@ -269,11 +275,13 @@ AWS_PROFILE=ses-mail aws logs tail /aws/events/ses-mail-email-routing-test --fol
 #### Test fails with "X-Ray trace not found"
 
 **Causes:**
+
 - X-Ray trace not yet available (takes 60-90 seconds)
 - SNS topic Active tracing not enabled
 - Lambda functions X-Ray tracing not enabled
 
 **Solutions:**
+
 ```bash
 # Wait longer (traces can take 60-90 seconds)
 sleep 90
@@ -288,11 +296,13 @@ AWS_PROFILE=ses-mail aws lambda get-function --function-name ses-mail-router-enr
 #### Messages found in dead letter queues
 
 **Causes:**
+
 - Handler lambda errors (check CloudWatch Logs)
 - Gmail OAuth token expired
 - SES sending permissions missing (bouncer)
 
 **Solutions:**
+
 ```bash
 # Check handler lambda logs
 AWS_PROFILE=ses-mail aws logs tail /aws/lambda/ses-mail-gmail-forwarder-test --follow
@@ -382,7 +392,7 @@ AWS_PROFILE=ses-mail aws dynamodb put-item \
 
 ## Contributing Guidelines
 
-### Terraform Conventions
+### Terraform Coding Conventions
 
 **IMPORTANT**: Always use the Makefile for Terraform operations. Never run `terraform` commands directly.
 
@@ -391,6 +401,7 @@ AWS_PROFILE=ses-mail aws dynamodb put-item \
 When writing Terraform, never use `jsonencode` where an `aws_iam_policy_document` can be used.
 
 **Bad:**
+
 ```hcl
 resource "aws_iam_role_policy" "example" {
   role = aws_iam_role.example.id
@@ -406,6 +417,7 @@ resource "aws_iam_role_policy" "example" {
 ```
 
 **Good:**
+
 ```hcl
 data "aws_iam_policy_document" "example" {
   statement {
@@ -469,6 +481,7 @@ terraform plan  # ❌ WRONG
 Only create commits when requested by the user. Follow these steps:
 
 1. Run git commands in parallel:
+
    ```bash
    git status
    git diff
@@ -478,6 +491,7 @@ Only create commits when requested by the user. Follow these steps:
 2. Analyze changes and draft concise commit message (1-2 sentences focusing on "why")
 
 3. Add relevant files and create commit:
+
    ```bash
    git add <files>
    git commit -m "$(cat <<'EOF'
@@ -498,6 +512,7 @@ Only create commits when requested by the user. Follow these steps:
 When user asks to create a PR:
 
 1. Run in parallel:
+
    ```bash
    git status
    git diff
@@ -508,6 +523,7 @@ When user asks to create a PR:
 2. Analyze ALL commits (not just latest)
 
 3. Create PR:
+
    ```bash
    gh pr create --title "PR title" --body "$(cat <<'EOF'
    ## Summary
@@ -533,6 +549,7 @@ Lambda functions are in `terraform/modules/ses-mail/lambda/`:
 - Gmail API integration uses OAuth token from SSM Parameter Store
 
 **Lambda handlers:**
+
 - `router_enrichment.lambda_handler` - SNS event → DynamoDB lookup → EventBridge
 - `gmail_forwarder.lambda_handler` - SQS event → Fetch from S3 → Gmail API → Delete from S3
 - `bouncer.lambda_handler` - SQS event → Send bounce via SES
@@ -570,7 +587,7 @@ When making changes:
 ### Terraform Operations
 
 | Command | Description |
-|---------|-------------|
+| ------- | ----------- |
 | `make init ENV=test` | Initialize Terraform backend |
 | `make validate ENV=test` | Validate Terraform configuration |
 | `make plan ENV=test` | Create Terraform plan file |

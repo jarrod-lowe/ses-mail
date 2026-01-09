@@ -35,7 +35,7 @@ SES Mail is a serverless email receiving and forwarding system built on AWS that
 
 ### High-Level Architecture
 
-```
+```text
 ┌─────────┐     ┌────┐     ┌─────┐     ┌─────┐     ┌──────────────┐     ┌──────────┐
 │   SES   │────▶│ S3 │────▶│ SNS │────▶│ SQS │────▶│ EventBridge  │────▶│   SQS    │
 │         │     └────┘     └─────┘     └─────┘     │    Pipes     │     │ (Handler)│
@@ -155,7 +155,7 @@ SES Mail is a serverless email receiving and forwarding system built on AWS that
 
 ### Data Flow Diagram
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────┐
 │                     Email Processing Timeline                   │
 ├─────────────────────────────────────────────────────────────────┤
@@ -196,7 +196,7 @@ The system tracks all outbound emails sent via SES SMTP using an event-driven me
 
 ### Architecture Overview
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────┐
 │  Outbound Email Metrics Pipeline                                │
 │                                                                  │
@@ -276,6 +276,7 @@ The system tracks all outbound emails sent via SES SMTP using an event-driven me
 #### Event Destinations
 
 Each event type has a dedicated SNS topic:
+
 - **Send events**: Published when SES accepts email for delivery
 - **Delivery events**: Published when recipient server accepts email
 - **Bounce events**: Published when email bounces (hard or soft)
@@ -283,6 +284,7 @@ Each event type has a dedicated SNS topic:
 - **Complaint events**: Published when recipient marks email as spam
 
 All SNS topics have:
+
 - X-Ray Active tracing enabled
 - IAM policies allowing SES to publish
 - Lambda subscription for metrics processing
@@ -292,6 +294,7 @@ All SNS topics have:
 **Function**: `terraform/modules/ses-mail/lambda/outbound_metrics_publisher.py`
 
 **Responsibilities**:
+
 1. Parse SNS notifications from SES event destinations
 2. Extract event type (send, delivery, bounce, reject, complaint)
 3. Classify bounce type:
@@ -306,6 +309,7 @@ All SNS topics have:
 **Tracing**: X-Ray Active
 
 **Bounce Classification Logic**:
+
 ```python
 # Hard bounces (permanent failures)
 bounce_type = "Permanent"
@@ -317,6 +321,7 @@ bounce_subtypes = ["General", "MailboxFull", "MessageTooLarge", "ContentRejected
 ```
 
 **Error Handling**:
+
 - Malformed events logged but don't fail function
 - CloudWatch PutMetricData failures logged with stack trace
 - X-Ray subsegments for debugging
@@ -326,7 +331,7 @@ bounce_subtypes = ["General", "MailboxFull", "MessageTooLarge", "ContentRejected
 **Namespace**: `SESMail/{environment}`
 
 | Metric | Unit | Description |
-|--------|------|-------------|
+| -------- | ------ | ------------- |
 | OutboundSend | Count | Emails accepted by SES |
 | OutboundDelivery | Count | Emails successfully delivered |
 | OutboundBounce | Count | Total bounces (hard + soft) |
@@ -373,6 +378,7 @@ Four widgets added to existing `ses-mail-dashboard-{environment}`:
 #### CloudWatch Alarms
 
 **High Bounce Rate Alarm**:
+
 - **Metric**: `(OutboundBounce / OutboundSend) * 100`
 - **Threshold**: 5%
 - **Evaluation**: 2 consecutive 5-minute periods
@@ -381,6 +387,7 @@ Four widgets added to existing `ses-mail-dashboard-{environment}`:
 - **Rationale**: Industry standard; sustained >10% risks SES suspension
 
 **High Complaint Rate Alarm**:
+
 - **Metric**: `(OutboundComplaint / OutboundSend) * 100`
 - **Threshold**: 0.1%
 - **Evaluation**: 2 consecutive 5-minute periods
@@ -418,22 +425,26 @@ Four widgets added to existing `ses-mail-dashboard-{environment}`:
 ### Design Decisions
 
 **Why SESv2 instead of SESv1?**
+
 - SESv1 (`aws_ses_domain_identity`) doesn't support Configuration Set association
 - SESv2 (`aws_sesv2_email_identity`) allows `configuration_set_name` attribute
 - Migration from v1 to v2 required but DKIM tokens preserved (no DNS changes)
 
 **Why SNS instead of direct CloudWatch Events?**
+
 - SES event destinations only support SNS, Kinesis Firehose, or Pinpoint
 - SNS provides natural fan-out if we add more subscribers later
 - Lambda can batch multiple SNS messages for efficient CloudWatch puts
 
 **Why custom metrics instead of native SES metrics?**
+
 - Native SES metrics lack granularity (no send vs delivery breakdown)
 - Custom metrics allow bounce type classification (hard vs soft)
 - Enables metric math for rate calculations (bounce%, complaint%)
 - Metrics in existing `SESMail/{environment}` namespace for consistency
 
 **Why account-level instead of per-domain metrics?**
+
 - Simpler implementation (no domain extraction from events)
 - Adequate for single-domain deployments
 - Can add domain dimension later if needed (Phase 2)
@@ -441,6 +452,7 @@ Four widgets added to existing `ses-mail-dashboard-{environment}`:
 ### Cost Estimate
 
 **Monthly costs for 10,000 outbound emails**:
+
 - SNS notifications: 40,000 events × $0.50/million = **$0.02**
 - Lambda invocations: 40,000 × $0.20/million = **$0.01** (within free tier)
 - Lambda duration: 40,000 × 200ms × $0.0000166667/GB-sec × 0.256GB = **$0.03**
@@ -453,16 +465,19 @@ Four widgets added to existing `ses-mail-dashboard-{environment}`:
 ### Scalability
 
 **Current capacity**:
+
 - SNS: 100,000 messages/sec per topic (far exceeds needs)
 - Lambda: 1,000 concurrent executions (default account limit)
 - CloudWatch: 40 transactions/sec per dimension (publish limit)
 
 **Bottleneck**: CloudWatch PutMetricData at ~40 TPS
+
 - At 4 events per email (send, delivery, bounce/reject, possible complaint)
 - Theoretical max: ~10 emails/sec = 36,000 emails/hour
 - Well above expected load for single-domain usage
 
 **If scaling needed**:
+
 - Batch more aggressively (currently max 20 metrics/call)
 - Use embedded metric format (EMF) for higher throughput
 - Request CloudWatch quota increase
@@ -470,12 +485,14 @@ Four widgets added to existing `ses-mail-dashboard-{environment}`:
 ### Monitoring the Metrics System
 
 **Health checks**:
+
 1. SNS topic subscriptions active
 2. Lambda function not throttling/erroring
 3. CloudWatch metrics publishing within 60 seconds
 4. Dashboard widgets displaying data
 
 **Troubleshooting**:
+
 - Lambda logs: `/aws/lambda/ses-mail-outbound-metrics-{env}`
 - X-Ray traces: Filter by annotation `service=ses-mail-outbound-metrics`
 - Test with SES Mailbox Simulator: `success@simulator.amazonses.com`
@@ -487,6 +504,7 @@ Four widgets added to existing `ses-mail-dashboard-{environment}`:
 **Purpose**: Email receiving and domain verification
 
 **Configuration:**
+
 - Verified domains via TXT records
 - DKIM signing (3 CNAME records per domain)
 - DMARC policy enforcement
@@ -494,11 +512,13 @@ Four widgets added to existing `ses-mail-dashboard-{environment}`:
 - Active receipt rule set: `ses-ruleset-{env}`
 
 **Receipt Rule:**
+
 - Action 1: Store in S3 bucket
 - Action 2: Publish to SNS topic
 - Executes as single atomic action
 
 **Spam/Virus Protection:**
+
 - SpamAssassin integration (spam scoring)
 - ClamAV virus scanning
 - Automatic DKIM/SPF/DMARC validation
@@ -510,6 +530,7 @@ Four widgets added to existing `ses-mail-dashboard-{environment}`:
 **Bucket:** `ses-mail-storage-{account-id}-{env}`
 
 **Configuration:**
+
 - Server-side encryption: AES256
 - Lifecycle policy: Delete objects after 90 days
 - Note: Handler lambdas do NOT delete objects to prevent race conditions with multiple actions
@@ -525,11 +546,13 @@ Four widgets added to existing `ses-mail-dashboard-{environment}`:
 **Topic:** `ses-email-processing-{env}`
 
 **Configuration:**
+
 - X-Ray Active tracing enabled
 - Subscription: SQS input queue with raw message delivery
 - Access policy: SES can publish, SQS can subscribe
 
 **Benefits:**
+
 - Initiates distributed tracing
 - Enables future fan-out to additional processors
 - Decouples SES from downstream processing
@@ -561,6 +584,7 @@ Four widgets added to existing `ses-mail-dashboard-{environment}`:
    - Message retention: 14 days
 
 **Common Configuration:**
+
 - Long polling enabled (20s wait time)
 - Redrive policy: 3 attempts before DLQ
 - CloudWatch alarms on DLQ depth and message age
@@ -572,6 +596,7 @@ Four widgets added to existing `ses-mail-dashboard-{environment}`:
 **Purpose**: Serverless message enrichment and routing
 
 **Configuration:**
+
 - Source: SQS input queue
 - Enrichment: Router lambda function
 - Target: EventBridge Event Bus
@@ -580,6 +605,7 @@ Four widgets added to existing `ses-mail-dashboard-{environment}`:
 - Logging: CloudWatch Logs (INFO level with execution data)
 
 **Benefits:**
+
 - Managed polling (no custom code)
 - Built-in retries and error handling
 - CloudWatch integration for monitoring
@@ -594,6 +620,7 @@ Four widgets added to existing `ses-mail-dashboard-{environment}`:
 **Purpose**: Query DynamoDB for routing rules and enrich messages
 
 **Configuration:**
+
 - Runtime: Python 3.12
 - Memory: 128 MB
 - Timeout: 30 seconds
@@ -601,15 +628,18 @@ Four widgets added to existing `ses-mail-dashboard-{environment}`:
 - VPC: None (DynamoDB is public endpoint)
 
 **Environment Variables:**
+
 - `ROUTING_TABLE`: DynamoDB table name
 - `LOG_LEVEL`: INFO
 
 **IAM Permissions:**
+
 - `dynamodb:GetItem` on routing table
 - `xray:PutTraceSegments`
 - `logs:CreateLogGroup`, `logs:CreateLogStream`, `logs:PutLogEvents`
 
 **Key Logic:**
+
 1. Extract recipient addresses from SES event
 2. For each recipient, perform hierarchical lookup:
    - Try exact match: `ROUTE#user+tag@example.com`
@@ -627,6 +657,7 @@ Four widgets added to existing `ses-mail-dashboard-{environment}`:
 **Purpose**: Fetch email from S3 and import to Gmail via API
 
 **Configuration:**
+
 - Runtime: Python 3.12
 - Memory: 128 MB
 - Timeout: 5 minutes
@@ -634,12 +665,14 @@ Four widgets added to existing `ses-mail-dashboard-{environment}`:
 - Lambda layers: Google API client libraries
 
 **Environment Variables:**
+
 - `S3_BUCKET`: Email storage bucket
 - `OAUTH_CLIENT_CREDENTIALS_PARAM`: SSM parameter for OAuth client
 - `OAUTH_REFRESH_TOKEN_PARAM`: SSM parameter for refresh token
 - `RETRY_QUEUE_URL`: Retry queue for token expiration failures
 
 **IAM Permissions:**
+
 - `s3:GetObject`, `s3:DeleteObject` on email bucket
 - `ssm:GetParameter` on OAuth credential parameters
 - `kms:Decrypt` for SecureString parameters
@@ -648,6 +681,7 @@ Four widgets added to existing `ses-mail-dashboard-{environment}`:
 - `gmail.insert` via OAuth (not IAM)
 
 **Key Logic:**
+
 1. Retrieve OAuth credentials from SSM
 2. Generate fresh access token from refresh token
 3. Build Gmail API service
@@ -664,11 +698,13 @@ Four widgets added to existing `ses-mail-dashboard-{environment}`:
 **Purpose**: Generate and send bounce messages
 
 **Configuration:**
+
 - Runtime: Python 3.12
 - Memory: 128 MB
 - Timeout: 1 minute
 
 **Key Logic:**
+
 1. Extract original sender and recipient
 2. Generate bounce message (RFC 3464 format)
 3. Send via SES `send_raw_email`
@@ -682,6 +718,7 @@ Four widgets added to existing `ses-mail-dashboard-{environment}`:
 **Trigger**: DynamoDB Streams from routing table
 
 **Configuration:**
+
 - Runtime: Python 3.12
 - Memory: 128 MB
 - Timeout: 1 minute
@@ -690,6 +727,7 @@ Four widgets added to existing `ses-mail-dashboard-{environment}`:
 **Key Logic:**
 
 INSERT event (status="pending"):
+
 1. Create IAM user: `ses-smtp-user-{username}-{timestamp}`
 2. Generate IAM access keys
 3. Convert secret key to SMTP password (AWS SigV4 algorithm)
@@ -697,6 +735,7 @@ INSERT event (status="pending"):
 5. Update DynamoDB record with status="active" and encrypted credentials
 
 REMOVE event:
+
 1. List and delete all access keys for user
 2. List and delete all inline policies
 3. Delete IAM user
@@ -709,6 +748,7 @@ REMOVE event:
 **Purpose**: Send hourly test emails to validate end-to-end email pipeline
 
 **Configuration:**
+
 - Runtime: Python 3.12
 - Memory: 128 MB
 - Timeout: 2 minutes
@@ -716,18 +756,21 @@ REMOVE event:
 - Lambda layers: dnspython for DNS validation
 
 **Environment Variables:**
+
 - `ENVIRONMENT`: Deployment environment (test/prod)
 - `CANARY_EMAIL`: Canary recipient address (ses-canary-{env}@domain)
 - `DOMAIN`: Primary domain for DNS validation
 - `DYNAMODB_TABLE_NAME`: Routing table for tracking records
 
 **IAM Permissions:**
+
 - `ses:SendRawEmail` for sending test emails
 - `dynamodb:PutItem` for tracking records
 - `route53:TestDNSAnswer` for DNS validation (via dnspython library)
 - `logs:*`, `xray:*` for observability
 
 **Key Logic:**
+
 1. Validate DNS records (MX, SPF, DMARC, MTA-STS) using dnspython
 2. Construct test email with X-Canary-ID header
 3. Send via SES SendRawEmail API to ses-canary-{env}@domain
@@ -742,6 +785,7 @@ REMOVE event:
 **Purpose**: Store routing rules and SMTP credentials
 
 **Configuration:**
+
 - Billing mode: PAY_PER_REQUEST (no provisioned capacity)
 - Partition key (PK): String
 - Sort key (SK): String
@@ -775,6 +819,7 @@ Entity types stored in same table using generic PK/SK:
 5. Auto-cleanup: TTL attribute set to 10 minutes after creation
 
 **DynamoDB Streams:**
+
 - Stream ARN: Available via `describe-table`
 - View type: NEW_AND_OLD_IMAGES (captures before and after)
 - Triggers: Credential manager Lambda
@@ -789,6 +834,7 @@ Entity types stored in same table using generic PK/SK:
 **Rules:**
 
 1. **Gmail Forwarder Rule** (`route-to-gmail-{env}`):
+
    ```json
    {
      "source": ["ses.email.router"],
@@ -802,9 +848,11 @@ Entity types stored in same table using generic PK/SK:
      }
    }
    ```
+
    Target: SQS queue `ses-gmail-forwarder-{env}`
 
 2. **Bouncer Rule** (`route-to-bouncer-{env}`):
+
    ```json
    {
      "source": ["ses.email.router"],
@@ -818,9 +866,11 @@ Entity types stored in same table using generic PK/SK:
      }
    }
    ```
+
    Target: SQS queue `ses-bouncer-{env}`
 
 **Logging:**
+
 - CloudWatch log group: `/aws/events/ses-mail-email-routing-{env}`
 - Log level: INFO with execution data
 - Retention: 30 days
@@ -832,6 +882,7 @@ Entity types stored in same table using generic PK/SK:
 **Purpose**: Process retry queue after OAuth token refresh
 
 **Workflow:**
+
 1. Receive SQS messages from retry queue (batch of 10)
 2. For each message:
    - Invoke Gmail forwarder Lambda
@@ -842,6 +893,7 @@ Entity types stored in same table using generic PK/SK:
 3. Continue processing until retry queue empty
 
 **Execution Trigger:**
+
 - Manual: Via OAuth refresh script
 - Scheduled: Every hour (checks if queue has messages)
 
@@ -850,12 +902,14 @@ Entity types stored in same table using generic PK/SK:
 **Purpose**: Monitor OAuth token expiration
 
 **Workflow:**
+
 1. Get token metadata from SSM Parameter Store
 2. Calculate seconds until expiration using JSONata
 3. Publish metric to CloudWatch
 4. Run every 5 minutes (EventBridge Rule trigger)
 
 **JSONata Expression:**
+
 ```jsonata
 {
   "namespace": "SESMail/test",
@@ -870,6 +924,7 @@ Entity types stored in same table using generic PK/SK:
 **Purpose**: Orchestrate canary test and validate email pipeline health
 
 **Workflow:**
+
 1. Invoke canary sender Lambda
 2. Wait 90 seconds for email processing
 3. Query DynamoDB for completion record (GetItem)
@@ -880,10 +935,12 @@ Entity types stored in same table using generic PK/SK:
 5. Error handling: Catch all failures → Publish CanaryMonitorErrors
 
 **Execution Trigger:**
+
 - Scheduled: Every hour via EventBridge Rule
 - Manual: Via AWS Console or CLI for testing
 
 **JSONata Features:**
+
 - Status routing: `$states.input.Item.status.S = 'completed'`
 - Processing time calculation: `($toMillis(completed_at) - $toMillis(sent_at)) / 1000`
 - Existence checks: `$exists($states.input.Item)`
@@ -893,6 +950,7 @@ Entity types stored in same table using generic PK/SK:
 **Dashboard:** `ses-mail-dashboard-{env}`
 
 **Widgets:**
+
 - Email processing metrics (accepted, bounced, spam)
 - Lambda metrics (invocations, errors, duration)
 - Queue metrics (depth, age, DLQ)
@@ -923,6 +981,7 @@ Entity types stored in same table using generic PK/SK:
    - Canary lambda anomaly detection alarms (HIGH and MEDIUM severity)
 
 **Log Groups:**
+
 - `/aws/lambda/ses-mail-router-enrichment-{env}`
 - `/aws/lambda/ses-mail-gmail-forwarder-{env}`
 - `/aws/lambda/ses-mail-bouncer-{env}`
@@ -936,11 +995,13 @@ Entity types stored in same table using generic PK/SK:
 **Retention:** 30 days (configurable)
 
 **Structured Logging:**
+
 - JSON format
 - Correlation IDs for tracing
 - Log levels: DEBUG, INFO, WARNING, ERROR
 
 **Log Anomaly Detection:**
+
 - Machine learning-based pattern analysis on 5 Lambda log groups
 - Detectors: router-enrichment, gmail-forwarder, bouncer, smtp-credential-manager, outbound-metrics-publisher
 - Evaluation frequency: 15 minutes
@@ -950,12 +1011,14 @@ Entity types stored in same table using generic PK/SK:
 - Status: TRAINING → ANALYZING → ACTIVE
 
 **Published Metrics:**
+
 - Namespace: `AWS/Logs`
 - Metric Name: `AnomalyCount`
 - Dimensions: `LogAnomalyDetector` (detector name), `LogAnomalyPriority` (LOW/MEDIUM/HIGH)
 - Available for CloudWatch alarms and dashboards
 
 **CloudWatch Alarms:**
+
 - 10 alarms configured (5 HIGH severity, 5 MEDIUM severity)
 - Threshold: 0 (alert on any anomaly at configured severity)
 - Evaluation period: 15 minutes
@@ -965,7 +1028,7 @@ Entity types stored in same table using generic PK/SK:
 **Alarm Coverage:**
 
 | Lambda Function | HIGH Alarm | MEDIUM Alarm |
-|----------------|-----------|--------------|
+| ---------------- | ----------- | -------------- |
 | Router Enrichment | `ses-mail-router-anomaly-high-{env}` | `ses-mail-router-anomaly-medium-{env}` |
 | Gmail Forwarder | `ses-mail-gmail-forwarder-anomaly-high-{env}` | `ses-mail-gmail-forwarder-anomaly-medium-{env}` |
 | Bouncer | `ses-mail-bouncer-anomaly-high-{env}` | `ses-mail-bouncer-anomaly-medium-{env}` |
@@ -973,6 +1036,7 @@ Entity types stored in same table using generic PK/SK:
 | Outbound Metrics Publisher | `ses-mail-outbound-metrics-publisher-anomaly-high-{env}` | `ses-mail-outbound-metrics-publisher-anomaly-medium-{env}` |
 
 **Benefits:**
+
 - Detects unusual error patterns not caught by threshold-based alarms
 - Identifies changes in log volume, structure, or application behavior
 - Provides early warning of emerging issues before threshold breach
@@ -984,6 +1048,7 @@ Entity types stored in same table using generic PK/SK:
 **Purpose**: Distributed tracing across the email processing pipeline
 
 **Trace Propagation:**
+
 1. SNS topic (Active tracing) → initiates trace
 2. SQS queues → propagate trace context
 3. EventBridge Pipes → maintain trace context
@@ -992,6 +1057,7 @@ Entity types stored in same table using generic PK/SK:
 6. Handler Lambdas → continue trace
 
 **Custom Annotations:**
+
 - `messageId`: SES message ID
 - `source`: Email sender
 - `recipient`: Email recipient
@@ -999,6 +1065,7 @@ Entity types stored in same table using generic PK/SK:
 - `routing_match`: Which rule matched (exact, normalized, wildcard)
 
 **Service Map Shows:**
+
 - End-to-end latency breakdown
 - Error rates per component
 - Bottlenecks and retry patterns
@@ -1008,25 +1075,30 @@ Entity types stored in same table using generic PK/SK:
 ### Single-Table DynamoDB Design
 
 **Rationale**: Use one table for multiple entity types to:
+
 - Reduce costs (one table vs. many)
 - Simplify access control (one IAM policy)
 - Enable future extensibility without schema changes
 
 **Implementation:**
+
 - Generic PK/SK keys with prefixed values
 - Entity type denormalized in attributes
 - Prefixes: `ROUTE#`, `SMTP_USER#`, `CONFIG#` (future)
 
 **Benefits:**
+
 - Add new entity types without new tables
 - Consistent access patterns
 - Atomic transactions within partition key
 
 **Trade-offs:**
+
 - More complex queries (need to filter by entity_type)
 - Less obvious schema (requires documentation)
 
 **Future Extensions:**
+
 - `CONFIG#<setting>` for system configuration
 - `METRICS#<date>` for usage metrics
 - `AUDIT#<timestamp>` for audit logs
@@ -1036,12 +1108,14 @@ Entity types stored in same table using generic PK/SK:
 **Rationale**: Support flexible routing rules from specific to general
 
 **Lookup Order:**
+
 1. Exact match: `user+tag@example.com`
 2. Normalized match: `user@example.com` (Gmail plus addressing)
 3. Domain wildcard: `*@example.com`
 4. Global wildcard: `*` (catch-all)
 
 **Implementation:**
+
 ```python
 def lookup_routing_rule(email):
     # Try exact match
@@ -1067,11 +1141,13 @@ def lookup_routing_rule(email):
 ```
 
 **Benefits:**
+
 - Flexibility: Support specific overrides and broad defaults
 - Gmail compatibility: Plus addressing works naturally
 - Fallback: Always have a default action
 
 **Performance:**
+
 - 4 DynamoDB GetItem calls maximum (single-digit milliseconds each)
 - Early exit on first match
 - No scans required (all queries use PK)
@@ -1081,18 +1157,21 @@ def lookup_routing_rule(email):
 **Rationale**: Decouple components for reliability and scalability
 
 **Principles:**
+
 1. **Asynchronous processing**: No synchronous dependencies
 2. **At-least-once delivery**: Idempotent handlers tolerate duplicates
 3. **Dead letter queues**: Capture failures for analysis
 4. **Retry with backoff**: Automatic retries with exponential backoff
 
 **Benefits:**
+
 - **Fault isolation**: One component failure doesn't cascade
 - **Independent scaling**: Each component scales independently
 - **Easy extension**: Add new handlers without changing existing ones
 - **Observability**: Each integration point is traceable
 
 **Trade-offs:**
+
 - **Eventual consistency**: Small delay between SES receipt and Gmail delivery
 - **Complexity**: More components to manage and monitor
 - **Debugging**: Distributed traces required to follow message flow
@@ -1104,6 +1183,7 @@ def lookup_routing_rule(email):
 **Solution**: Multi-layer monitoring and automatic retry
 
 **Architecture:**
+
 1. **Proactive monitoring**: Step Function checks expiration every 5 minutes
 2. **CloudWatch alarms**: Two-tier alerting (24hr warning, 6hr critical)
 3. **SNS notifications**: Email/SMS alerts to administrators
@@ -1112,6 +1192,7 @@ def lookup_routing_rule(email):
 6. **Automatic replay**: Script triggers Step Function to process retry queue
 
 **Benefits:**
+
 - Zero data loss (messages queued during expiration)
 - Proactive alerts (refresh before expiration)
 - Automatic recovery (no manual message replay)
@@ -1126,7 +1207,7 @@ def lookup_routing_rule(email):
 
 **Architecture:**
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────┐
 │  Canary Monitoring Pipeline (Hourly)                           │
 │                                                                  │
@@ -1233,6 +1314,7 @@ def lookup_routing_rule(email):
      - All use `evaluation_periods=1` to catch transient issues during bedding-in period
 
 **Benefits:**
+
 - **Proactive Failure Detection**: Catch pipeline issues before users report them
 - **End-to-End Validation**: Tests full path from SES → S3 → Router → Gmail (same as real emails)
 - **DNS Health Monitoring**: Validates MX, SPF, DMARC, MTA-STS records hourly
@@ -1243,42 +1325,50 @@ def lookup_routing_rule(email):
 **Design Decisions:**
 
 **Why hourly frequency?**
+
 - Balances detection speed with cost/noise
 - Catches issues within ~30 minutes on average
 - Avoids SES rate limits and quota consumption
 
 **Why 90-second wait?**
+
 - Typical pipeline latency: 5-10 seconds
 - Provides margin for: SES delays, Router cold starts, Gmail API latency
 - Alerts if processing takes longer (potential performance issue)
 
 **Why separate sender and monitor?**
+
 - **Sender**: Simple, focused on email delivery
 - **Monitor**: Complex orchestration (wait, query, metrics, routing)
 - Easier to test and debug independently
 - Sender can be triggered standalone for testing
 
 **Why write tracking record after sending?**
+
 - Captures ses_message_id from send operation
 - Status='sent' allows monitor to detect "email stuck in pipeline" vs "sender failed"
 - Step Function can differentiate between send failures and pipeline failures
 
 **Why TTL of 10 minutes?**
+
 - Canary records only valuable during test execution (90 seconds)
 - TTL cleanup prevents table bloat
 - 10 minutes provides buffer for debugging if needed
 
 **Why use SES SendRawEmail instead of SMTP?**
+
 - **SMTP limitation**: Can't send TO own domain without routing loop
 - **SendRawEmail**: Sends outbound via SMTP (validates SPF/DMARC/DKIM), delivers inbound via MX records
 - **Full validation**: Tests both outbound SMTP path AND inbound MX/receipt rules
 
 **Why JSONata instead of JSONPath?**
+
 - JSONata supports complex transformations and calculations
 - Enables processing_time calculation: `($toMillis(completed_at) - $toMillis(sent_at)) / 1000`
 - Better error handling with `$exists()` conditionals
 
 **Cost Estimate (10,000 canary tests/month):**
+
 - Lambda invocations: 20,000 (sender + monitor) × $0.20/million = **$0.004**
 - Lambda duration: 20,000 × 500ms × $0.0000166667/GB-sec × 0.128GB = **$0.02**
 - Step Functions: 10,000 executions × $0.025/1000 = **$0.25**
@@ -1292,18 +1382,21 @@ def lookup_routing_rule(email):
 **Monitoring the Canary System:**
 
 **Health Checks:**
+
 1. Step Function executions succeed hourly
 2. CanarySuccess metric published hourly
 3. Processing time remains under 30 seconds (typical: 5-10s)
 4. No CanaryMonitorErrors metric spikes
 
 **Troubleshooting:**
+
 - Lambda logs: `/aws/lambda/ses-mail-canary-sender-{env}`, `/aws/lambda/ses-mail-gmail-forwarder-{env}`
 - Step Function logs: `/aws/states/ses-mail-canary-monitor-{env}`
 - X-Ray traces: Filter by annotation `canary_id=canary-*`
 - DynamoDB query: Check tracking record status
 
 **Future Enhancements:**
+
 1. Auto-mark canary emails as read in Gmail (prevent inbox clutter)
 2. Multi-region canary tests (validate DNS globally)
 3. Canary email with attachments (test S3 large object handling)
@@ -1318,17 +1411,20 @@ def lookup_routing_rule(email):
 **Application:** `ses-mail-{env}`
 
 **Configuration:**
+
 - Application tagged with: `Application=ses-mail-{env}`
 - All resources auto-tagged via Terraform default_tags
 - AppRegistry discovers resources by tag
 
 **Benefits:**
+
 - Unified application view in AWS Console
 - Cost tracking at application level
 - Resource grouping and management
 - Application health monitoring
 
 **Access:**
+
 ```bash
 cd terraform/environments/test
 terraform output myapplications_url
@@ -1340,12 +1436,14 @@ terraform output myapplications_url
 **Resource Group:** `ses-mail-{env}`
 
 **Tags:**
+
 - `Project`: ses-mail
 - `ManagedBy`: terraform
 - `Environment`: test or prod
 - `Application`: ses-mail-{env}
 
 **Benefits:**
+
 - View all resources in one place
 - Cost allocation by environment
 - Bulk operations on tagged resources
@@ -1356,6 +1454,7 @@ terraform output myapplications_url
 **Purpose**: Sync tags across resources for AppRegistry
 
 **Configuration:**
+
 - Enable GLE at account level
 - Optional for AppRegistry (works without it)
 - Tag sync Lambda triggered on resource changes
@@ -1367,12 +1466,14 @@ terraform output myapplications_url
 ### Encryption
 
 **At Rest:**
+
 - S3: AES256 server-side encryption
 - DynamoDB: AWS-managed encryption
 - SMTP credentials: KMS customer-managed key
 - SSM parameters: KMS encryption (SecureString)
 
 **In Transit:**
+
 - TLS 1.2+ for all AWS service communication
 - Gmail API: HTTPS only
 - SMTP: STARTTLS (port 587) or TLS (port 465)
@@ -1400,6 +1501,7 @@ terraform output myapplications_url
    - `kms:Encrypt`, `kms:Decrypt` on SMTP credential key
 
 **Service Roles:**
+
 - EventBridge Pipes: Poll SQS, invoke Lambda, publish to Event Bus
 - SES: Write to S3, publish to SNS
 - Step Functions: Invoke Lambda, publish CloudWatch metrics
@@ -1430,6 +1532,7 @@ Each SMTP IAM user has inline policy restricting `ses:SendEmail` and `ses:SendRa
 ```
 
 **Benefits:**
+
 - Prevents credential misuse for spoofing
 - Limits blast radius if credentials compromised
 - Enforces application-specific From addresses
@@ -1437,12 +1540,14 @@ Each SMTP IAM user has inline policy restricting `ses:SendEmail` and `ses:SendRa
 ### KMS Key Management
 
 **SMTP Credential Encryption Key:**
+
 - Alias: `alias/ses-mail-smtp-credentials-{env}`
 - Type: Customer-managed symmetric key
 - Rotation: Enabled (automatic annual rotation)
 - Key policy: Only credential manager Lambda can encrypt/decrypt
 
 **Benefits:**
+
 - Credentials encrypted at rest in DynamoDB
 - Audit trail via CloudTrail
 - Separation of duties (different key per environment)
@@ -1452,21 +1557,25 @@ Each SMTP IAM user has inline policy restricting `ses:SendEmail` and `ses:SendRa
 ### Concurrency and Scaling
 
 **Lambda:**
+
 - Concurrent executions: 1000 (account default, can request increase)
 - Each function scales independently
 - Reserved concurrency: Not configured (use unreserved pool)
 
 **SQS:**
+
 - No throughput limits
 - Long polling reduces empty receives
 - Batching: EventBridge Pipes processes messages individually
 
 **DynamoDB:**
+
 - PAY_PER_REQUEST: Auto-scales to workload
 - No provisioned capacity to manage
 - Sub-10ms read latency (GetItem)
 
 **EventBridge:**
+
 - Soft limit: 2400 requests/second per Event Bus
 - Can request increase if needed
 
@@ -1483,7 +1592,7 @@ Each SMTP IAM user has inline policy restricting `ses:SendEmail` and `ses:SendRa
 **Latency Breakdown:**
 
 | Component | Typical Latency |
-|-----------|----------------|
+| ----------- | ---------------- |
 | SES → S3 | <500ms |
 | SNS → SQS | <200ms |
 | SQS → EventBridge Pipes | <1s (long polling) |
@@ -1507,7 +1616,7 @@ Each SMTP IAM user has inline policy restricting `ses:SendEmail` and `ses:SendRa
 **Cost Breakdown (Estimate for 10,000 emails/month):**
 
 | Service | Monthly Cost |
-|---------|-------------|
+| --------- | ------------- |
 | SES Receiving | $0 (1,000 free, then $0.10/1000) |
 | S3 Storage | <$1 (temporary, 7-day lifecycle) |
 | Lambda | <$2 (mostly within free tier) |
@@ -1520,13 +1629,14 @@ Each SMTP IAM user has inline policy restricting `ses:SendEmail` and `ses:SendRa
 **Cost Scaling (estimated):**
 
 | Email Volume | Estimated Monthly Cost |
-|--------------|----------------------|
+| -------------- | ---------------------- |
 | 10K emails/month | ~$10/month |
 | 100K emails/month | ~$50-75/month |
 | 500K emails/month | ~$200-250/month |
 | 1M emails/month | ~$400-500/month |
 
 **Note**: Costs scale approximately linearly with email volume. The main cost drivers at scale are:
+
 - Lambda invocations and execution time
 - S3 storage (mitigated by 7-day lifecycle)
 - CloudWatch Logs (consider adjusting retention at high volumes)
@@ -1553,6 +1663,7 @@ Each SMTP IAM user has inline policy restricting `ses:SendEmail` and `ses:SendRa
 **Environment Isolation:**
 
 Even in shared account mode:
+
 - Separate S3 buckets
 - Separate DynamoDB tables
 - Separate Lambda functions
@@ -1560,6 +1671,7 @@ Even in shared account mode:
 - Environment-specific naming: `{resource}-{env}`
 
 **State Management:**
+
 - Terraform state: S3 bucket `terraform-state-{account-id}`
 - State key: `ses-mail/{env}.tfstate`
 - Backend locking: S3 native locking (no DynamoDB)

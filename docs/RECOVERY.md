@@ -26,11 +26,13 @@ The system has three dead letter queues (DLQs) that receive messages after faile
 ### When to Investigate DLQ Messages
 
 **Automated Redrive (Safe)**:
+
 - Single message in DLQ after transient error (network timeout, rate limiting)
 - Multiple messages with same timestamp (likely AWS service issue)
 - Gmail API token expiration (check logs for "token expired" errors)
 
 **Manual Investigation Required**:
+
 - Messages repeatedly appearing in DLQ after redrive
 - DLQ alarms triggering multiple times for same message
 - Error messages indicating data corruption or malformed payloads
@@ -38,7 +40,7 @@ The system has three dead letter queues (DLQs) that receive messages after faile
 
 ### Investigating DLQ Messages
 
-**Step 1: Check CloudWatch Logs**
+#### Step 1: Check CloudWatch Logs
 
 Use the saved CloudWatch Logs Insights query "dlq-message-investigation":
 
@@ -50,11 +52,12 @@ Use the saved CloudWatch Logs Insights query "dlq-message-investigation":
 ```
 
 Look for:
+
 - Error messages with messageId matching DLQ messages
 - Stack traces indicating code bugs
 - AWS API errors (throttling, permissions, service issues)
 
-**Step 2: Inspect DLQ Message Content**
+#### Step 2: Inspect DLQ Message Content
 
 ```bash
 # Receive a message from the DLQ (without deleting)
@@ -68,7 +71,7 @@ AWS_PROFILE=ses-mail aws sqs receive-message \
 # Check if email still exists in S3 bucket
 ```
 
-**Step 3: Check X-Ray Traces**
+#### Step 3: Check X-Ray Traces
 
 ```bash
 # Go to X-Ray Console → Traces
@@ -77,19 +80,22 @@ AWS_PROFILE=ses-mail aws sqs receive-message \
 # Review trace timeline for bottlenecks or errors
 ```
 
-**Step 4: Decide on Remediation**
+#### Step 4: Decide on Remediation
 
 **Redrive to Source Queue** (automated):
+
 - Transient errors (network, throttling, temporary service issues)
 - Token refresh issues (after updating Gmail token)
 - One-time AWS service disruptions
 
 **Fix Code and Redeploy**:
+
 - Application bugs (null pointer, data validation errors)
 - Missing error handling for edge cases
 - Incorrect business logic
 
 **Manual Processing**:
+
 - Data corruption in S3 email file
 - Permanent external service failure
 - Invalid routing rules in DynamoDB
@@ -103,11 +109,13 @@ See [Systems Manager Automation Runbooks](#systems-manager-automation-runbooks) 
 The system includes dedicated retry queues for handling Gmail token expiration failures:
 
 **Retry Queue:** `ses-mail-gmail-forwarder-retry-{environment}`
+
 - Visibility timeout: 15 minutes
 - Message retention: 14 days
 - Max receive count: 3 (then moves to retry DLQ)
 
 **Retry DLQ:** `ses-mail-gmail-forwarder-retry-dlq-{environment}`
+
 - Message retention: 14 days
 
 ## Automatic Retry Queueing
@@ -115,11 +123,13 @@ The system includes dedicated retry queues for handling Gmail token expiration f
 The Gmail forwarder Lambda automatically detects OAuth token expiration and queues failed messages for retry:
 
 **Error detection:**
+
 - `RefreshError` from Google Auth library
 - HTTP 401/403 from Gmail API
 - Error messages containing: `invalid_grant`, `token has been expired`, `token expired`, `invalid credentials`, `credentials have expired`, `unauthorized`, `authentication failed`
 
 **Automatic queueing:**
+
 1. Message is queued to retry queue with metadata
 2. Original message removed from processing queue
 3. Event logged in CloudWatch
@@ -136,6 +146,7 @@ AWS_PROFILE=ses-mail aws stepfunctions start-execution \
 ```
 
 **What happens:**
+
 1. Step Function reads messages from retry queue (batches of 10)
 2. Invokes Gmail Forwarder Lambda with original SES events
 3. Implements exponential backoff (30s, 60s, 120s intervals)
@@ -194,35 +205,40 @@ The system provides automation runbooks for common operational tasks.
 
 ### Available Runbooks
 
-**SESMail-DLQ-Redrive-{environment}**
+#### SESMail-DLQ-Redrive-{environment}
 
 **Purpose:** Redrive messages from DLQ back to source queue with velocity control
 
 **When to Use:**
+
 - After fixing transient errors (token refresh, service restoration)
 - After deploying code fixes for application bugs
 - When DLQ messages are verified safe to reprocess
 
 **Parameters:**
+
 - `DLQUrl`: Dead letter queue URL to redrive from
 - `SourceQueueUrl`: Source queue URL to send messages back to
 - `MaxMessages`: Maximum number of messages to redrive (0 = all)
 - `VelocityPerSecond`: Rate limiting (messages per second)
 
 **Outputs:**
+
 - `RedrivenCount`: Number of messages successfully redriven
 - `FailedCount`: Number of messages that failed during redrive
 
-**SESMail-Queue-HealthCheck-{environment}**
+#### SESMail-Queue-HealthCheck-{environment}
 
 **Purpose:** Check health of all queues and DLQs
 
 **When to Use:**
+
 - During incident response to quickly assess system state
 - As part of regular health monitoring
 - Before and after maintenance windows
 
 **Outputs:**
+
 - `HealthReport`: JSON with queue depths, ages, DLQ counts, and detected issues
 - `HealthStatus`: HEALTHY or UNHEALTHY
 
@@ -268,6 +284,7 @@ AWS_PROFILE=ses-mail aws ssm describe-automation-executions \
 ```
 
 **Important:** Only redrive messages after:
+
 1. Investigating the root cause
 2. Confirming the issue is resolved (code deployed, token refreshed, service restored)
 3. Verifying messages won't immediately fail again

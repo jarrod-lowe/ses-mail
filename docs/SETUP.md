@@ -19,7 +19,7 @@ This guide walks you through the complete first-time setup of the SES Mail syste
 Before starting setup, verify you have all required tools and access:
 
 | Prerequisite | Verification Command | Expected Result |
-|--------------|---------------------|-----------------|
+| ------------ | -------------------- | --------------- |
 | AWS CLI | `aws --version` | AWS CLI 2.x or higher |
 | AWS Profile | `aws sts get-caller-identity --profile ses-mail` | Account details |
 | Terraform | `terraform version` | Terraform v1.0+ |
@@ -28,11 +28,13 @@ Before starting setup, verify you have all required tools and access:
 | Google Cloud access | Browser access to console.cloud.google.com | Can log in |
 
 **AWS Requirements:**
+
 - AWS account with administrative access
 - SES production access enabled (not sandbox mode)
 - AWS CLI configured with profile named `ses-mail`
 
 **Google Cloud Requirements:**
+
 - Google Cloud account
 - Ability to create projects
 - Gmail account for testing
@@ -135,6 +137,7 @@ pip3 install -r requirements.txt
 ```
 
 **What happens:**
+
 1. A browser window will open
 2. Select your Google account
 3. Click "Continue" to grant permissions
@@ -177,6 +180,7 @@ AWS_PROFILE=ses-mail aws sts get-caller-identity
 ```
 
 **Expected output:**
+
 ```json
 {
     "UserId": "AIDAEXAMPLEID",
@@ -193,7 +197,7 @@ AWS_PROFILE=ses-mail aws sts get-caller-identity
 
 The infrastructure is organized into environments and a reusable module:
 
-```
+```text
 terraform/
 ├── environments/
 │   ├── test/              # Test environment configuration
@@ -249,11 +253,11 @@ backup_mx_servers = ["backup-mail.example.com"]
 
 ### 3.3 Choose Deployment Mode
 
-**Option A: Separate AWS Accounts (Recommended)**
+#### Option A: Separate AWS Accounts (Recommended)
 
 If test and prod use different AWS accounts, no additional configuration needed. Each environment manages its own SES ruleset independently.
 
-**Option B: Shared AWS Account**
+#### Option B: Shared AWS Account
 
 If test and prod share the same AWS account, you must configure test to join prod's SES ruleset (AWS SES only allows one active ruleset per account).
 
@@ -264,6 +268,7 @@ join_existing_deployment = "prod"
 ```
 
 **Important deployment order for shared accounts:**
+
 1. Deploy **prod** environment FIRST
 2. Then deploy **test** environment
 
@@ -379,7 +384,8 @@ For each of the 3 DKIM tokens in the Terraform output:
 - **TTL**: 1800
 
 Example:
-```
+
+```text
 abcdef123._domainkey.mail.example.com → abcdef123.dkim.amazonses.com
 ghijkl456._domainkey.mail.example.com → ghijkl456.dkim.amazonses.com
 mnopqr789._domainkey.mail.example.com → mnopqr789.dkim.amazonses.com
@@ -395,6 +401,7 @@ mnopqr789._domainkey.mail.example.com → mnopqr789.dkim.amazonses.com
 - **TTL**: 1800
 
 **DMARC policy options:**
+
 - `p=none` - Monitor only (good for testing)
 - `p=quarantine` - Mark suspicious emails
 - `p=reject` - Block unauthenticated emails (recommended for production)
@@ -453,6 +460,7 @@ AWS_PROFILE=ses-mail aws ses get-identity-verification-attributes \
 ```
 
 **Expected output:**
+
 ```json
 {
     "VerificationAttributes": {
@@ -470,12 +478,14 @@ AWS_PROFILE=ses-mail aws ses get-identity-verification-attributes \
 MTA-STS (Mail Transfer Agent Strict Transport Security) enforces TLS encryption for email delivery.
 
 **When to use MTA-STS:**
+
 - ✅ You require strict TLS enforcement for email delivery
 - ✅ You want to protect against SMTP downgrade attacks
 - ✅ You have compliance requirements for email encryption (HIPAA, PCI-DSS, etc.)
 - ✅ You're running a production email service
 
 **Skip MTA-STS if:**
+
 - ❌ You're just testing the system
 - ❌ Standard email security (DKIM/SPF/DMARC) is sufficient for your use case
 - ❌ You don't want to manage additional AWS infrastructure (CloudFront + ACM certificates)
@@ -538,12 +548,14 @@ This creates the CloudFront distributions that were skipped in the initial deplo
 SMTP TLS Reporting (TLS-RPT) provides visibility into TLS connection failures when other mail servers deliver email to your domain.
 
 **When to use TLS-RPT:**
+
 - ✅ You want detailed reports on TLS handshake failures
 - ✅ You're troubleshooting email delivery issues
 - ✅ You want to monitor MTA-STS policy violations
 - ✅ You have dedicated email monitoring infrastructure
 
 **Skip TLS-RPT if:**
+
 - ❌ You don't have infrastructure to receive and process reports (they arrive as emails)
 - ❌ You're not actively debugging email delivery
 - ❌ MTA-STS monitoring alone is sufficient
@@ -603,13 +615,15 @@ AWS_PROFILE=ses-mail python3 scripts/refresh_oauth_token.py --env prod
 6. CloudWatch metric is published for expiration monitoring
 
 **Interactive prompts:**
+
 - Browser opens automatically
 - Review requested permissions
 - Click "Allow" to grant access
 - Return to terminal after authorization
 
 **Expected output:**
-```
+
+```text
 INFO - Starting OAuth token refresh for environment: test
 INFO - Retrieving OAuth client credentials from SSM
 INFO - Successfully retrieved OAuth credentials
@@ -711,6 +725,7 @@ terraform output dashboard_url
 ```
 
 Or navigate manually:
+
 1. Go to: **AWS Console** → **CloudWatch** → **Dashboards**
 2. Select: `ses-mail-dashboard-test` (or `ses-mail-dashboard-prod`)
 
@@ -727,6 +742,7 @@ terraform output myapplications_url
 ```
 
 Or navigate manually:
+
 1. Go to: **AWS Console** → **Systems Manager** → **AppManager** → **Applications**
 2. Select: `ses-mail-test` (or `ses-mail-prod`)
 
@@ -755,6 +771,7 @@ AWS_PROFILE=ses-mail aws dynamodb put-item \
 ```
 
 **Replace:**
+
 - `test@mail.example.com` with your receiving email address
 - `your-email@gmail.com` with your Gmail address
 
@@ -779,6 +796,7 @@ AWS_PROFILE=ses-mail aws ses send-email \
 ```
 
 **What should happen:**
+
 1. Email arrives at SES
 2. SES stores in S3
 3. SNS notification triggers router
@@ -800,6 +818,7 @@ AWS_PROFILE=ses-mail aws logs tail /aws/lambda/ses-mail-gmail-forwarder-test --f
 ```
 
 **Look for:**
+
 - Router log: "Successfully enriched message" with routing decision
 - Gmail forwarder log: "Successfully imported message to Gmail"
 
@@ -832,6 +851,7 @@ Setup is complete! Now you can:
 **Symptoms:** SES shows domain verification status as "Pending" or "Failed"
 
 **Solutions:**
+
 1. Verify DNS TXT record was added correctly: `dig +short TXT _amazonses.mail.example.com`
 2. Wait longer for DNS propagation (up to 48 hours)
 3. Check for typos in TXT record value
@@ -842,6 +862,7 @@ Setup is complete! Now you can:
 **Symptoms:** Browser doesn't open, or authorization callback fails
 
 **Solutions:**
+
 1. Check port 8080 is not in use: `lsof -i :8080`
 2. Ensure `redirect_uris` in `client_secret.json` includes `http://localhost:8080/callback`
 3. Try revoking app access at <https://myaccount.google.com/permissions> and re-authorizing
@@ -852,6 +873,7 @@ Setup is complete! Now you can:
 **Symptoms:** Terraform errors during `make apply`
 
 **Common causes:**
+
 1. **State bucket access denied**: Check AWS credentials have S3 permissions
 2. **Resource already exists**: Run `terraform import` for existing resources
 3. **Lambda packaging fails**: Ensure Python dependencies install correctly
@@ -862,6 +884,7 @@ Setup is complete! Now you can:
 **Symptoms:** Test email sent but not received in Gmail
 
 **Debugging steps:**
+
 1. Check SES rule is active: `aws ses describe-active-receipt-rule-set`
 2. Verify routing rule exists in DynamoDB
 3. Check Lambda logs for errors

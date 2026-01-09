@@ -32,6 +32,7 @@ terraform version
 **After upgrading Terraform:**
 
 1. **Run plan to check for deprecations**:
+
    ```bash
    AWS_PROFILE=ses-mail make validate ENV=test
    AWS_PROFILE=ses-mail make plan ENV=test
@@ -43,11 +44,13 @@ terraform version
    - Deprecate old syntax
 
 3. **Test in test environment first**:
+
    ```bash
    AWS_PROFILE=ses-mail make apply ENV=test
    ```
 
 4. **Only upgrade prod after testing**:
+
    ```bash
    AWS_PROFILE=ses-mail make apply ENV=prod
    ```
@@ -69,7 +72,7 @@ terraform {
 
 **Upgrade process:**
 
-1. Check AWS provider changelog: https://github.com/hashicorp/terraform-provider-aws/releases
+1. Check AWS provider changelog: <https://github.com/hashicorp/terraform-provider-aws/releases>
 2. Update version in `main.tf`
 3. Run `terraform init -upgrade`
 4. Run `make plan` and review changes
@@ -81,7 +84,7 @@ terraform {
 
 Lambda functions are automatically packaged during Terraform apply. To update:
 
-**Option A: Modify code and deploy**
+#### Option A: Modify code and deploy
 
 ```bash
 # 1. Edit Lambda function code
@@ -97,7 +100,7 @@ AWS_PROFILE=ses-mail aws lambda get-function \
   --query 'Configuration.LastModified'
 ```
 
-**Option B: Force repackage without code changes**
+#### Option B: Force repackage without code changes
 
 ```bash
 # Remove existing package to force rebuild
@@ -122,6 +125,7 @@ resource "aws_lambda_function" "router_enrichment" {
 ```
 
 **Important**:
+
 1. Test locally with new Python version first
 2. Update dependencies in `requirements.txt` if needed
 3. Deploy to test environment and run integration tests
@@ -153,11 +157,13 @@ AWS_PROFILE=ses-mail python3 scripts/integration_test.py --env test
 ```
 
 **Critical dependencies to watch:**
+
 - `google-auth` / `google-auth-oauthlib` (Gmail API authentication)
 - `google-api-python-client` (Gmail API)
 - `boto3` (AWS SDK - usually managed by Lambda runtime)
 
 **Breaking change checklist:**
+
 - [ ] Review dependency changelog
 - [ ] Update authentication code if OAuth library changed
 - [ ] Test token refresh flow
@@ -169,7 +175,7 @@ AWS_PROFILE=ses-mail python3 scripts/integration_test.py --env test
 
 When AWS releases new features for services used in this project:
 
-**Example: EventBridge Pipes new features**
+#### Example: EventBridge Pipes new features
 
 1. Check if Terraform AWS provider supports the feature
 2. Update provider version if needed (see above)
@@ -190,6 +196,7 @@ resource "aws_lambda_layer_version" "dependencies" {
 ```
 
 **Update process:**
+
 1. Build new layer with updated dependencies
 2. Deploy new layer version
 3. Update Lambda functions to use new layer version
@@ -211,10 +218,12 @@ AWS_PROFILE=ses-mail aws dynamodb update-item \
 ```
 
 **Safe changes:**
+
 - Adding new attributes
 - Adding new entity types (e.g., `CONFIG#`, `METRICS#`)
 
 **Breaking changes (require migration):**
+
 - Changing PK/SK format
 - Renaming critical attributes (`action`, `target`, `recipient`)
 - Changing attribute types (String → Number)
@@ -224,12 +233,14 @@ AWS_PROFILE=ses-mail aws dynamodb update-item \
 For breaking schema changes:
 
 1. **Create migration script**:
+
    ```python
    # scripts/migrate_dynamodb_schema.py
    # Scan table, transform items, write back
    ```
 
 2. **Test on copy of table**:
+
    ```bash
    # Create table backup
    AWS_PROFILE=ses-mail aws dynamodb create-backup \
@@ -242,6 +253,7 @@ For breaking schema changes:
    ```
 
 3. **Verify migration**:
+
    ```bash
    # Check data integrity
    AWS_PROFILE=ses-mail aws dynamodb scan --table-name ses-mail-email-routing-test
@@ -261,11 +273,13 @@ For breaking schema changes:
 **For shared AWS account** (`join_existing_deployment = "prod"` in test):
 
 1. **Upgrade prod first**:
+
    ```bash
    AWS_PROFILE=ses-mail make apply ENV=prod
    ```
 
 2. **Then upgrade test**:
+
    ```bash
    AWS_PROFILE=ses-mail make apply ENV=test
    ```
@@ -290,7 +304,7 @@ For major changes:
 
 If upgrade causes issues:
 
-**Option A: Terraform rollback**
+#### Option A: Terraform rollback
 
 ```bash
 # View Terraform state history
@@ -305,7 +319,7 @@ git checkout <previous-commit>
 AWS_PROFILE=ses-mail make apply ENV=test
 ```
 
-**Option B: Lambda function rollback**
+#### Option B: Lambda function rollback
 
 ```bash
 # List function versions
