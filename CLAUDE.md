@@ -117,6 +117,26 @@ Quick command:
 AWS_PROFILE=ses-mail python3 scripts/refresh_oauth_token.py --env test
 ```
 
+### Integration Testing
+
+**IMPORTANT**: Integration tests require activating the Python virtual environment before running.
+
+For complete integration testing documentation, see [docs/DEVELOPMENT.md#integration-testing](docs/DEVELOPMENT.md#integration-testing).
+
+Quick command:
+
+```bash
+# Run integration tests - MUST activate venv first
+source .venv/bin/activate
+AWS_PROFILE=ses-mail python3 scripts/integration_test.py \
+  --env test \
+  --from sender@testmail.domain.com \
+  --test-domain testmail.domain.com \
+  --gmail-target your-email@gmail.com
+```
+
+**Common mistake**: Running tests without activating venv will fail with import errors. Always use `source .venv/bin/activate` first.
+
 ## Architecture
 
 The system uses a fully event-driven architecture:

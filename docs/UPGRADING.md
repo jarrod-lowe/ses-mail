@@ -153,6 +153,7 @@ AWS_PROFILE=ses-mail make package ENV=test
 AWS_PROFILE=ses-mail make apply ENV=test
 
 # 4. Test deployed functions
+source .venv/bin/activate
 AWS_PROFILE=ses-mail python3 scripts/integration_test.py --env test
 ```
 
@@ -259,6 +260,7 @@ For breaking schema changes:
    AWS_PROFILE=ses-mail aws dynamodb scan --table-name ses-mail-email-routing-test
 
    # Run integration tests
+   source .venv/bin/activate
    AWS_PROFILE=ses-mail python3 scripts/integration_test.py --env test
    ```
 

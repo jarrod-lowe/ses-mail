@@ -67,6 +67,7 @@ The integration test script (`scripts/integration_test.py`) sends test emails th
 
 ```bash
 # Run all integration tests for test environment
+source .venv/bin/activate
 AWS_PROFILE=ses-mail python3 scripts/integration_test.py \
   --env test \
   --from sender@testmail.domain.com \
@@ -74,6 +75,7 @@ AWS_PROFILE=ses-mail python3 scripts/integration_test.py \
   --gmail-target your-email@gmail.com
 
 # Run with verbose logging
+source .venv/bin/activate
 AWS_PROFILE=ses-mail python3 scripts/integration_test.py \
   --env test \
   --from sender@testmail.domain.com \
@@ -82,6 +84,7 @@ AWS_PROFILE=ses-mail python3 scripts/integration_test.py \
   --verbose
 
 # Skip cleanup of test routing rules (for debugging)
+source .venv/bin/activate
 AWS_PROFILE=ses-mail python3 scripts/integration_test.py \
   --env test \
   --from sender@testmail.domain.com \

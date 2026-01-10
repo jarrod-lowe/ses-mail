@@ -617,7 +617,7 @@ EOT
 SOURCE '${aws_cloudwatch_log_group.lambda_router_logs.name}' | SOURCE '${aws_cloudwatch_log_group.lambda_gmail_forwarder_logs.name}' | SOURCE '${aws_cloudwatch_log_group.lambda_bouncer_logs.name}' | filter message = "Routing decision" or message = "Action result"
 | fields @timestamp, messageId, sender, subject, recipient, action, result, error, lookupKey, target, resultId, xray_trace_id
 | sort @timestamp desc
-| limit 50
+| limit 200
 EOT
           region  = var.aws_region
           stacked = false

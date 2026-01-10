@@ -27,8 +27,29 @@ from email.message import EmailMessage
 from email.utils import formatdate, make_msgid
 from typing import Dict, Any, List, Optional
 
-import boto3
-from botocore.exceptions import ClientError
+try:
+    import boto3
+    from botocore.exceptions import ClientError
+except ImportError as e:
+    print("="*80, file=sys.stderr)
+    print("INTEGRATION TEST DID NOT RUN - Missing Python dependencies", file=sys.stderr)
+    print("="*80, file=sys.stderr)
+    print("", file=sys.stderr)
+    print(f"Missing package: {e.name}", file=sys.stderr)
+    print("", file=sys.stderr)
+    print("You MUST activate the virtual environment before running tests:", file=sys.stderr)
+    print("", file=sys.stderr)
+    print("  source .venv/bin/activate", file=sys.stderr)
+    print("  python3 scripts/integration_test.py --env test", file=sys.stderr)
+    print("", file=sys.stderr)
+    print("If .venv doesn't exist, create it first:", file=sys.stderr)
+    print("  python3 -m venv .venv", file=sys.stderr)
+    print("  source .venv/bin/activate", file=sys.stderr)
+    print("  pip install boto3", file=sys.stderr)
+    print("", file=sys.stderr)
+    print("DO NOT install packages globally - always use the venv!", file=sys.stderr)
+    print("="*80, file=sys.stderr)
+    sys.exit(1)
 
 # Configure logging
 logging.basicConfig(

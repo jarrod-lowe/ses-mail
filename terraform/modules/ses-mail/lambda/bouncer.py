@@ -194,12 +194,12 @@ def process_bounce_request(message: Dict[str, Any], sqs_message_id: str):
             subsegment.put_annotation('action', 'bounce')
 
             # Count bounce reasons for X-Ray analytics
-            bounce_reasons = {'security': 0, 'policy': 0}
+            bounce_reasons = {'auth-fail': 0, 'policy': 0}
             for target_info in targets:
                 reason = target_info.get('reason', 'policy')
                 bounce_reasons[reason] += 1
 
-            subsegment.put_annotation('bounce_security_count', bounce_reasons['security'])
+            subsegment.put_annotation('bounce_auth_fail_count', bounce_reasons['auth-fail'])
             subsegment.put_annotation('bounce_policy_count', bounce_reasons['policy'])
 
         # Send bounce notification for each target recipient
@@ -270,7 +270,7 @@ def send_bounce_notification(
         original_sender: Original sender email address
         original_subject: Original email subject
         original_timestamp: Original email timestamp
-        bounce_reason: Reason for bounce ('security' or 'policy')
+        bounce_reason: Reason for bounce ('auth-fail' or 'policy')
 
     Returns:
         str: SES bounce message ID
@@ -279,9 +279,9 @@ def send_bounce_notification(
     bounce_subject = f"Mail Delivery Failed: {original_subject}"
 
     # Determine bounce reason text without revealing internal system details
-    if bounce_reason == 'security':
-        reason_text = "Your message was rejected due to security policies."
-        reason_html = "Your message was rejected due to security policies."
+    if bounce_reason == 'auth-fail':
+        reason_text = "Your message failed email authentication checks (SPF/DKIM). This typically indicates a mail server configuration issue. Please verify your email server's SPF and DKIM settings."
+        reason_html = "Your message failed email authentication checks (SPF/DKIM). This typically indicates a mail server configuration issue. Please verify your email server's SPF and DKIM settings."
     else:  # policy
         reason_text = f"The recipient address ({recipient}) is not configured to receive mail."
         reason_html = f"The recipient address (<strong>{recipient}</strong>) is not configured to receive mail."
