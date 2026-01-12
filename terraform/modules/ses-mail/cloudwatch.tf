@@ -893,6 +893,85 @@ resource "aws_cloudwatch_metric_alarm" "lambda_bouncer_errors" {
   ok_actions    = [var.alarm_sns_topic_arn]
 }
 
+# ===========================
+# Lambda Business Logic Failure Alarms
+# ===========================
+# These alarms monitor custom failure metrics published by Lambda functions.
+# AWS/Lambda Errors alarms (above) only catch unhandled exceptions (OOM, timeout, etc).
+# Business logic failures are caught and handled gracefully, but still indicate problems.
+
+# CloudWatch Alarm for router enrichment failures (custom metric)
+resource "aws_cloudwatch_metric_alarm" "router_enrichment_failures" {
+  alarm_name          = "ses-mail-router-enrichment-failures-${var.environment}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "RouterEnrichmentFailure"
+  namespace           = "SESMail/${var.environment}"
+  period              = 300
+  statistic           = "Sum"
+  threshold           = 0
+  alarm_description   = "Alert when router enrichment fails to process messages (${var.environment}). Catches business logic failures like KeyError, DynamoDB errors, or invalid data."
+  treat_missing_data  = "notBreaching"
+
+  alarm_actions = [var.alarm_sns_topic_arn]
+  ok_actions    = [var.alarm_sns_topic_arn]
+}
+
+# CloudWatch Alarm for Gmail forwarder failures (custom metric)
+resource "aws_cloudwatch_metric_alarm" "gmail_forwarder_failures" {
+  alarm_name          = "ses-mail-gmail-forwarder-failures-${var.environment}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "GmailForwardFailure"
+  namespace           = "SESMail/${var.environment}"
+  period              = 300
+  statistic           = "Sum"
+  threshold           = 0
+  alarm_description   = "Alert when Gmail forwarder fails to forward messages (${var.environment}). Catches failures in Gmail API calls, token errors, or email formatting issues."
+  treat_missing_data  = "notBreaching"
+
+  alarm_actions = [var.alarm_sns_topic_arn]
+  ok_actions    = [var.alarm_sns_topic_arn]
+}
+
+# CloudWatch Alarm for bouncer failures (custom metric)
+resource "aws_cloudwatch_metric_alarm" "bouncer_failures" {
+  alarm_name          = "ses-mail-bouncer-failures-${var.environment}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "BounceSendFailure"
+  namespace           = "SESMail/${var.environment}"
+  period              = 300
+  statistic           = "Sum"
+  threshold           = 0
+  alarm_description   = "Alert when bouncer fails to send bounce notifications (${var.environment}). Catches failures in SES API calls or email generation."
+  treat_missing_data  = "notBreaching"
+
+  alarm_actions = [var.alarm_sns_topic_arn]
+  ok_actions    = [var.alarm_sns_topic_arn]
+}
+
+# CloudWatch Alarm for SMTP credential manager failures (custom metric)
+resource "aws_cloudwatch_metric_alarm" "smtp_credential_manager_failures" {
+  alarm_name          = "ses-mail-smtp-credential-manager-failures-${var.environment}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "SMTPCredentialCreationFailure"
+  namespace           = "SESMail/${var.environment}"
+  period              = 300
+  statistic           = "Sum"
+  threshold           = 0
+  alarm_description   = "Alert when SMTP credential manager fails to create credentials (${var.environment}). Catches failures in IAM operations or DynamoDB updates."
+  treat_missing_data  = "notBreaching"
+
+  alarm_actions = [var.alarm_sns_topic_arn]
+  ok_actions    = [var.alarm_sns_topic_arn]
+}
+
+# ===========================
+# OAuth Token Management Alarms
+# ===========================
+
 # CloudWatch Alarm for Gmail OAuth refresh token expiration (24 hour warning)
 resource "aws_cloudwatch_metric_alarm" "gmail_token_expiring_warning" {
   alarm_name          = "ses-mail-gmail-token-expiring-warning-${var.environment}"
