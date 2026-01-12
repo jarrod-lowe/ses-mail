@@ -282,6 +282,7 @@ def lambda_handler(event, context):
                 "forward-to-gmail": {"count": 0, "targets": []},
                 "bounce": {"count": 0, "targets": []},
                 "spam": {"count": 0, "targets": []},
+                "silent-drop": {"count": 0, "targets": []},
             }
 
             for action_type, dest in routing_results:
