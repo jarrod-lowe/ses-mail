@@ -98,7 +98,7 @@ resource "aws_lambda_function" "gmail_forwarder" {
   handler          = "gmail_forwarder.lambda_handler"
   source_code_hash = data.archive_file.gmail_forwarder_zip.output_base64sha256
   runtime          = "python3.12"
-  timeout          = 10
+  timeout          = 30
   memory_size      = 128
 
   # Attach shared layer and Gmail layer for dependencies
