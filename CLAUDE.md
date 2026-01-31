@@ -86,10 +86,10 @@ Removes everything including Lambda layers. Next apply will rebuild layers (~30-
 
 For complete routing rule management, see [docs/OPERATIONS.md#email-routing-management](docs/OPERATIONS.md#email-routing-management).
 
-Quick example:
+Quick example (single action):
 
 ```bash
-# Add a routing rule (single-table design pattern)
+# Add a routing rule with single action
 AWS_PROFILE=ses-mail aws dynamodb put-item \
   --table-name ses-mail-email-routing-test \
   --item '{
@@ -97,12 +97,33 @@ AWS_PROFILE=ses-mail aws dynamodb put-item \
     "SK": {"S": "RULE#v1"},
     "entity_type": {"S": "ROUTE"},
     "recipient": {"S": "support@example.com"},
-    "action": {"S": "forward-to-gmail"},
-    "target": {"S": "your-email@gmail.com"},
+    "actions": {"L": [{"M": {"type": {"S": "forward-to-gmail"}, "target": {"S": "your-email@gmail.com"}}}]},
     "enabled": {"BOOL": true},
     "created_at": {"S": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"},
     "updated_at": {"S": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"},
     "description": {"S": "Forward support emails to Gmail"}
+  }'
+```
+
+Quick example (multi-action - forward AND store):
+
+```bash
+# Add a routing rule with multiple actions
+AWS_PROFILE=ses-mail aws dynamodb put-item \
+  --table-name ses-mail-email-routing-test \
+  --item '{
+    "PK": {"S": "ROUTE#important@example.com"},
+    "SK": {"S": "RULE#v1"},
+    "entity_type": {"S": "ROUTE"},
+    "recipient": {"S": "important@example.com"},
+    "actions": {"L": [
+      {"M": {"type": {"S": "forward-to-gmail"}, "target": {"S": "your-email@gmail.com"}}},
+      {"M": {"type": {"S": "store"}}}
+    ]},
+    "enabled": {"BOOL": true},
+    "created_at": {"S": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"},
+    "updated_at": {"S": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"},
+    "description": {"S": "Forward to Gmail and keep a copy in S3"}
   }'
 ```
 

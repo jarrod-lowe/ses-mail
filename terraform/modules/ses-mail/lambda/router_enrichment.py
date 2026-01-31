@@ -454,23 +454,35 @@ def decide_action(ses_message: Dict[str, Any]) -> List[Tuple[str, Optional[Any]]
             })
         else:
             # Normal email - follow routing rules
-            routing_decision, destination, lookup_key, metadata = get_routing_decision(target)
-            if routing_decision == 'bounce':
-                results.append((routing_decision, {"target": target, "reason": "policy", "metadata": metadata}))
-            else:
-                results.append((routing_decision, {"target": target, "destination": destination, "metadata": metadata}))
+            actions_list, lookup_key, metadata = get_routing_decision(target)
 
-            # Log routing decision with full context
-            logger.info("Routing decision", extra={
-                "messageId": message_id,
-                "sender": source,
-                "subject": subject,
-                "recipient": target,
-                "action": routing_decision,
-                "lookupKey": lookup_key,
-                "target": destination if routing_decision == 'forward-to-gmail' else target,
-                "metadata": metadata
-            })
+            # Process each action in the list (multi-action support)
+            for action_info in actions_list:
+                action_type = action_info.get('type', 'store')
+                action_target = action_info.get('target')
+
+                if action_type == 'bounce':
+                    results.append((action_type, {"target": target, "reason": "policy", "metadata": metadata}))
+                else:
+                    results.append((action_type, {"target": target, "destination": action_target, "metadata": metadata}))
+
+                # Log routing decision with full context
+                logger.info("Routing decision", extra={
+                    "messageId": message_id,
+                    "sender": source,
+                    "subject": subject,
+                    "recipient": target,
+                    "action": action_type,
+                    "lookupKey": lookup_key,
+                    "target": action_target if action_type == 'forward-to-gmail' else target,
+                    "metadata": metadata
+                })
+
+                # Update counts
+                if action_type in counts:
+                    counts[action_type] += 1
+            continue  # Skip the count update below since we already counted
+
         counts[results[-1][0]] += 1
 
     # Tag S3 object with routing metadata (non-blocking, best-effort)
@@ -527,7 +539,7 @@ def decide_action(ses_message: Dict[str, Any]) -> List[Tuple[str, Optional[Any]]
     return results
 
 
-def get_routing_decision(recipient: str) -> Tuple[str, Optional[str], Optional[str], Dict]:
+def get_routing_decision(recipient: str) -> Tuple[List[Dict[str, Any]], Optional[str], Dict]:
     """
     Determine routing decision for a recipient using hierarchical DynamoDB lookup.
 
@@ -536,10 +548,13 @@ def get_routing_decision(recipient: str) -> Tuple[str, Optional[str], Optional[s
     2. Normalized match (e.g., user@example.com)
     3. Domain wildcard (e.g., *@example.com)
     4. Global wildcard (e.g., *)
+
     Args:
         recipient: Email address to look up
+
     Returns:
-        tuple: (routing action, target destination, lookup key, metadata dict)
+        tuple: (actions list, lookup key, metadata dict)
+               actions list contains dicts like {'type': 'forward-to-gmail', 'target': 'me@gmail.com'}
     """
     logger.info("Looking up routing rule for recipient", extra={"recipient": recipient})
 
@@ -557,15 +572,14 @@ def get_routing_decision(recipient: str) -> Tuple[str, Optional[str], Optional[s
                 logger.info("Rule is disabled, continuing search", extra={"lookupKey": lookup_key})
                 continue
 
-            action = rule.get('action', 'bounce')
-            target = rule.get('target', None)
+            actions = rule.get('actions', [{'type': 'bounce'}])
             metadata = rule.get('metadata', {})
-            # Return action, target, lookupKey, and metadata
-            return action, target, lookup_key, metadata
+            # Return actions list, lookupKey, and metadata
+            return actions, lookup_key, metadata
 
     # No rule found - default to store
     logger.warning("No routing rule found, defaulting to store", extra={"recipient": recipient})
-    return 'store', None, None, {}
+    return [{'type': 'store'}], None, {}
 
 def check_spam(ses_message: Dict[str, Any]) -> Optional[str]:
     """
@@ -706,7 +720,8 @@ def lookup_routing_rule(route_key: str) -> Optional[Dict[str, Any]]:
         route_key: DynamoDB partition key (e.g., "ROUTE#user@example.com")
 
     Returns:
-        dict: Routing rule or None if not found
+        dict: Routing rule or None if not found.
+              Contains 'actions' list with dicts like {'type': 'forward-to-gmail', 'target': 'me@gmail.com'}
     """
     try:
         response = dynamodb.get_item(
@@ -723,10 +738,31 @@ def lookup_routing_rule(route_key: str) -> Optional[Dict[str, Any]]:
 
         # Convert DynamoDB item to Python dict
         item = response['Item']
+
+        # Parse actions: support both new format (actions array) and old format (action/target)
+        actions = []
+        if 'actions' in item:
+            # New format: actions is a list of action objects
+            for action_item in item['actions'].get('L', []):
+                action_map = action_item.get('M', {})
+                action_obj = {
+                    'type': action_map.get('type', {}).get('S', 'store'),
+                }
+                if 'target' in action_map:
+                    action_obj['target'] = action_map['target'].get('S', '')
+                actions.append(action_obj)
+        else:
+            # Old format: convert action/target to actions list (backward compatibility)
+            old_action = item.get('action', {}).get('S', 'bounce')
+            old_target = item.get('target', {}).get('S', '')
+            action_obj = {'type': old_action}
+            if old_target:
+                action_obj['target'] = old_target
+            actions.append(action_obj)
+
         rule = {
             'recipient': item.get('recipient', {}).get('S', ''),
-            'action': item.get('action', {}).get('S', 'bounce'),
-            'target': item.get('target', {}).get('S', ''),
+            'actions': actions,
             'enabled': item.get('enabled', {}).get('BOOL', True),
             'description': item.get('description', {}).get('S', ''),
             'created_at': item.get('created_at', {}).get('S', ''),

@@ -106,12 +106,30 @@ The system uses DynamoDB to store email routing rules with hierarchical address 
 
 - `entity_type`: Always `"ROUTE"`
 - `recipient`: Email pattern (denormalized from PK)
-- `action`: `"forward-to-gmail"` or `"bounce"`
-- `target`: Gmail address (for forward-to-gmail) or empty string (for bounce)
+- `actions`: List of action objects (see format below)
 - `enabled`: Boolean (`true` or `false`)
 - `created_at`: ISO 8601 timestamp
 - `updated_at`: ISO 8601 timestamp
 - `description`: Human-readable description
+
+**Actions Format:**
+
+The `actions` attribute is a list of action objects. Each action has:
+- `type`: `"forward-to-gmail"`, `"bounce"`, or `"store"`
+- `target`: Target email (required for `forward-to-gmail`, omit for others)
+
+Single action example:
+```json
+"actions": [{"type": "forward-to-gmail", "target": "me@gmail.com"}]
+```
+
+Multi-action example (forward AND store):
+```json
+"actions": [
+  {"type": "forward-to-gmail", "target": "me@gmail.com"},
+  {"type": "store"}
+]
+```
 
 ### Adding Routing Rules
 
@@ -125,8 +143,7 @@ AWS_PROFILE=ses-mail aws dynamodb put-item \
     "SK": {"S": "RULE#v1"},
     "entity_type": {"S": "ROUTE"},
     "recipient": {"S": "support@example.com"},
-    "action": {"S": "forward-to-gmail"},
-    "target": {"S": "your-email@gmail.com"},
+    "actions": {"L": [{"M": {"type": {"S": "forward-to-gmail"}, "target": {"S": "your-email@gmail.com"}}}]},
     "enabled": {"BOOL": true},
     "created_at": {"S": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"},
     "updated_at": {"S": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"},
@@ -144,12 +161,34 @@ AWS_PROFILE=ses-mail aws dynamodb put-item \
     "SK": {"S": "RULE#v1"},
     "entity_type": {"S": "ROUTE"},
     "recipient": {"S": "*@example.com"},
-    "action": {"S": "forward-to-gmail"},
-    "target": {"S": "catch-all@gmail.com"},
+    "actions": {"L": [{"M": {"type": {"S": "forward-to-gmail"}, "target": {"S": "catch-all@gmail.com"}}}]},
     "enabled": {"BOOL": true},
     "created_at": {"S": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"},
     "updated_at": {"S": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"},
     "description": {"S": "Forward all domain emails to Gmail"}
+  }'
+```
+
+#### Multi-Action Rule (Forward AND Store)
+
+Use multiple actions to both forward to Gmail and keep a copy in S3:
+
+```bash
+AWS_PROFILE=ses-mail aws dynamodb put-item \
+  --table-name ses-mail-email-routing-test \
+  --item '{
+    "PK": {"S": "ROUTE#important@example.com"},
+    "SK": {"S": "RULE#v1"},
+    "entity_type": {"S": "ROUTE"},
+    "recipient": {"S": "important@example.com"},
+    "actions": {"L": [
+      {"M": {"type": {"S": "forward-to-gmail"}, "target": {"S": "your-email@gmail.com"}}},
+      {"M": {"type": {"S": "store"}}}
+    ]},
+    "enabled": {"BOOL": true},
+    "created_at": {"S": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"},
+    "updated_at": {"S": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"},
+    "description": {"S": "Forward to Gmail and keep a copy in S3"}
   }'
 ```
 
@@ -163,8 +202,7 @@ AWS_PROFILE=ses-mail aws dynamodb put-item \
     "SK": {"S": "RULE#v1"},
     "entity_type": {"S": "ROUTE"},
     "recipient": {"S": "*"},
-    "action": {"S": "bounce"},
-    "target": {"S": ""},
+    "actions": {"L": [{"M": {"type": {"S": "bounce"}}}]},
     "enabled": {"BOOL": true},
     "created_at": {"S": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"},
     "updated_at": {"S": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"},
@@ -184,8 +222,7 @@ AWS_PROFILE=ses-mail aws dynamodb put-item \
     "SK": {"S": "RULE#v1"},
     "entity_type": {"S": "ROUTE"},
     "recipient": {"S": "ses-canary-test@YOUR_DOMAIN"},
-    "action": {"S": "forward-to-gmail"},
-    "target": {"S": "your-email@gmail.com"},
+    "actions": {"L": [{"M": {"type": {"S": "forward-to-gmail"}, "target": {"S": "your-email@gmail.com"}}}]},
     "enabled": {"BOOL": true},
     "created_at": {"S": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"},
     "updated_at": {"S": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"},

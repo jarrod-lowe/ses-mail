@@ -142,32 +142,66 @@ class IntegrationTest:
         description: str = ''
     ) -> None:
         """
-        Create a test routing rule in DynamoDB.
+        Create a test routing rule in DynamoDB (single action).
 
         Args:
             recipient: Email pattern (e.g., test@example.com, *@example.com)
-            action: Routing action (forward-to-gmail or bounce)
+            action: Routing action (forward-to-gmail, bounce, store)
             target: Target email for forwarding
             description: Human-readable description
         """
+        # Convert single action to actions list format
+        actions = [{'type': action}]
+        if target:
+            actions[0]['target'] = target
+
+        self.create_test_routing_rule_multi(recipient, actions, description)
+
+    def create_test_routing_rule_multi(
+        self,
+        recipient: str,
+        actions: List[Dict[str, str]],
+        description: str = ''
+    ) -> None:
+        """
+        Create a test routing rule in DynamoDB with multiple actions.
+
+        Args:
+            recipient: Email pattern (e.g., test@example.com, *@example.com)
+            actions: List of action dicts, e.g., [{'type': 'forward-to-gmail', 'target': 'me@gmail.com'}, {'type': 'store'}]
+            description: Human-readable description
+        """
         timestamp = datetime.now(timezone.utc).isoformat()
+
+        # Convert actions to DynamoDB format
+        actions_dynamo = []
+        for action in actions:
+            action_item = {'type': {'S': action['type']}}
+            if 'target' in action:
+                action_item['target'] = {'S': action['target']}
+            actions_dynamo.append({'M': action_item})
+
+        # Build description from actions if not provided
+        if not description:
+            action_str = ', '.join(a['type'] for a in actions)
+            description = f'Test rule: {action_str} for {recipient}'
 
         item = {
             'PK': {'S': f'ROUTE#{recipient}'},
             'SK': {'S': 'RULE#v1'},
             'entity_type': {'S': 'ROUTE'},
             'recipient': {'S': recipient},
-            'action': {'S': action},
-            'target': {'S': target},
+            'actions': {'L': actions_dynamo},
             'enabled': {'BOOL': True},
             'created_at': {'S': timestamp},
             'updated_at': {'S': timestamp},
-            'description': {'S': description or f'Test rule: {action} for {recipient}'}
+            'description': {'S': description}
         }
 
         try:
             self.dynamodb.put_item(TableName=self.table_name, Item=item)
-            logger.info(f"Created test routing rule: {recipient} → {action}")
+            action_str = ', '.join(a['type'] for a in actions)
+            logger.info(f"Created test routing rule: {recipient} → {action_str}")
         except ClientError as e:
             logger.error(f"Failed to create routing rule for {recipient}: {e}")
             raise
@@ -1134,6 +1168,140 @@ class IntegrationTest:
 
         return result
 
+    def test_multi_action(
+        self,
+        from_addr: str,
+        to_addr: str,
+        gmail_target: str
+    ) -> Dict[str, Any]:
+        """
+        Test multi-action routing rule (forward-to-gmail + store).
+
+        Args:
+            from_addr: Sender email address
+            to_addr: Recipient email address
+            gmail_target: Gmail address for forwarding
+
+        Returns:
+            dict: Test results
+        """
+        test_name = "Multi-Action Rule (forward-to-gmail + store)"
+        logger.info(f"\n{'='*60}")
+        logger.info(f"Test: {test_name}")
+        logger.info(f"{'='*60}")
+
+        result = {
+            'name': test_name,
+            'status': 'FAIL',
+            'details': {},
+            'errors': []
+        }
+
+        try:
+            # 1. Create multi-action routing rule
+            logger.info("Step 1: Creating multi-action routing rule...")
+            self.create_test_routing_rule_multi(
+                recipient=to_addr,
+                actions=[
+                    {'type': 'forward-to-gmail', 'target': gmail_target},
+                    {'type': 'store'}
+                ],
+                description='Integration test: forward-to-gmail + store'
+            )
+            result['details']['routing_rule_created'] = True
+
+            # 2. Send test email
+            logger.info("Step 2: Sending test email...")
+            subject = f"Integration Test - Multi-Action - {int(time.time())}"
+            body = f"This email should be forwarded to Gmail AND stored.\nTimestamp: {datetime.now(timezone.utc).isoformat()}"
+
+            message_id = self.send_test_email(from_addr, to_addr, subject, body)
+            result['details']['message_id'] = message_id
+            result['details']['email_sent'] = True
+
+            # 3. Wait for router processing
+            logger.info("Step 3: Waiting for router enrichment...")
+            time.sleep(10)
+            router_logs = self.get_router_logs(message_id, since_minutes=2)
+            if router_logs:
+                result['details']['router_processed'] = True
+                # Look for both actions in logs
+                found_forward = False
+                found_store = False
+                for log in router_logs:
+                    msg = log.get('message', '')
+                    if 'forward-to-gmail' in msg:
+                        found_forward = True
+                    if 'store' in msg:
+                        found_store = True
+                result['details']['found_forward_action'] = found_forward
+                result['details']['found_store_action'] = found_store
+            else:
+                result['errors'].append("Router logs not found")
+
+            # 4. Wait for Gmail forwarder to process
+            logger.info("Step 4: Waiting for Gmail forwarder...")
+            gmail_success = self.wait_for_handler_success(
+                handler_name='gmail-forwarder',
+                message_id=message_id,
+                success_pattern='Successfully imported to Gmail',
+                timeout_seconds=60
+            )
+            if gmail_success:
+                result['details']['gmail_handler_success'] = True
+            else:
+                result['errors'].append("Gmail forwarder lambda did not successfully process message")
+
+            # 5. Verify S3 object exists (from store action)
+            logger.info("Step 5: Verifying S3 object exists...")
+            bucket = f"ses-mail-storage-{self.account_id}-{self.environment}"
+            s3_key = f"emails/{message_id}"
+
+            try:
+                self.s3.head_object(Bucket=bucket, Key=s3_key)
+                result['details']['s3_object_exists'] = True
+            except ClientError as e:
+                error_code = e.response.get('Error', {}).get('Code')
+                result['errors'].append(f"S3 object not found: {error_code}")
+
+            # 6. Verify S3 tags show multiple actions
+            logger.info("Step 6: Verifying S3 tags show multiple actions...")
+            tag_verification = self.verify_s3_tags(bucket, s3_key, {
+                'messageId': message_id,
+            })
+            result['details']['tag_verification'] = tag_verification
+
+            if tag_verification.get('found'):
+                # Get actual action tag
+                response = self.s3.get_object_tagging(Bucket=bucket, Key=s3_key)
+                tags_dict = {t['Key']: t['Value'] for t in response.get('TagSet', [])}
+                action_tag = tags_dict.get('action', '')
+                result['details']['action_tag'] = action_tag
+
+                # Check that action tag contains both actions
+                if 'forward-to-gmail' in action_tag and 'store' in action_tag:
+                    result['details']['multi_action_tag_verified'] = True
+                else:
+                    result['errors'].append(f"Action tag missing expected values: {action_tag}")
+
+            # 7. Check DLQs
+            logger.info("Step 7: Checking dead letter queues...")
+            gmail_dlq_url = self.get_queue_url(self.gmail_dlq_name)
+            dlq_count = self.check_dlq_messages(gmail_dlq_url)
+            result['details']['dlq_messages'] = dlq_count
+            if dlq_count > 0:
+                result['errors'].append(f"Found {dlq_count} messages in DLQ")
+
+            # 8. Determine overall status
+            if not result['errors']:
+                result['status'] = 'PASS'
+
+        except Exception as e:
+            logger.error(f"Test failed with exception: {e}", exc_info=True)
+            result['errors'].append(str(e))
+
+        return result
+
     def cleanup_test_rules(self, recipients: List[str]) -> None:
         """Clean up test routing rules."""
         logger.info("\nCleaning up test routing rules...")
@@ -1235,6 +1403,16 @@ class IntegrationTest:
         if not skip_cleanup:
             self.delete_test_routing_rule(to_addr)
             # Note: S3 object is intentionally NOT deleted for manual verification
+
+        # Test 4: Multi-action (forward-to-gmail + store)
+        to_addr = f"test-multi-action@{test_domain}"
+        test_recipients.append(to_addr)
+        result = self.test_multi_action(from_addr, to_addr, gmail_target)
+        self.results['tests'].append(result)
+
+        # Clean up test 4 rule
+        if not skip_cleanup:
+            self.delete_test_routing_rule(to_addr)
 
         # Generate report
         self.generate_report()

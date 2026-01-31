@@ -798,7 +798,9 @@ Entity types stored in same table using generic PK/SK:
 1. **Routing Rules**:
    - PK: `ROUTE#<email-pattern>`
    - SK: `RULE#v1`
-   - Attributes: entity_type, recipient, action, target, enabled, timestamps
+   - Attributes: entity_type, recipient, actions (list), enabled, timestamps
+   - Actions format: `[{"type": "forward-to-gmail", "target": "me@gmail.com"}, {"type": "store"}]`
+   - Supports multiple actions per rule (e.g., forward AND store)
 
 2. **SMTP Credentials**:
    - PK: `SMTP_USER#<username>`
@@ -1084,13 +1086,49 @@ Entity types stored in same table using generic PK/SK:
 
 - Generic PK/SK keys with prefixed values
 - Entity type denormalized in attributes
-- Prefixes: `ROUTE#`, `SMTP_USER#`, `CONFIG#` (future)
+- Prefixes: `ROUTE#`, `SMTP_USER#`, `CANARY#`, `CONFIG#` (future)
+
+**Routing Rule Schema:**
+
+```json
+{
+  "PK": "ROUTE#support@example.com",
+  "SK": "RULE#v1",
+  "entity_type": "ROUTE",
+  "recipient": "support@example.com",
+  "actions": [
+    {"type": "forward-to-gmail", "target": "me@gmail.com"},
+    {"type": "store"}
+  ],
+  "enabled": true,
+  "created_at": "2024-01-01T00:00:00Z",
+  "updated_at": "2024-01-01T00:00:00Z",
+  "description": "Forward support emails and keep a copy"
+}
+```
+
+**Action Types:**
+- `forward-to-gmail`: Forward to Gmail via API (requires `target`)
+- `store`: Keep in S3 only (no `target`)
+- `bounce`: Send bounce message (no `target`)
+
+**Multi-Action Support:**
+
+Rules can trigger multiple actions per email. For example, forwarding to Gmail while keeping a copy in S3:
+
+```json
+"actions": [
+  {"type": "forward-to-gmail", "target": "me@gmail.com"},
+  {"type": "store"}
+]
+```
 
 **Benefits:**
 
 - Add new entity types without new tables
 - Consistent access patterns
 - Atomic transactions within partition key
+- Flexible multi-action routing per rule
 
 **Trade-offs:**
 
