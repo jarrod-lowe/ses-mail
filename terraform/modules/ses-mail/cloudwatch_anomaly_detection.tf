@@ -153,23 +153,120 @@ resource "aws_cloudwatch_log_anomaly_detector" "canary_sender" {
 # CloudWatch Alarms for Anomalies
 # ===========================
 
-# High Severity Anomaly Alarm (aggregated across all Lambda functions)
+# High Severity Anomaly Alarm (aggregated across ses-mail Lambda functions only)
+# Uses metric math to sum anomalies from each detector, filtering out anomalies from other log groups
 resource "aws_cloudwatch_metric_alarm" "anomaly_high" {
   count = var.anomaly_detection_enabled ? 1 : 0
 
   alarm_name          = "ses-mail-anomaly-high-${var.environment}"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 1
-  metric_name         = "AnomalyCount"
-  namespace           = "AWS/Logs"
-  period              = 900 # 15 minutes
-  statistic           = "Sum"
   threshold           = 0
-  alarm_description   = "Alert when HIGH severity anomalies detected in any Lambda function logs (${var.environment})"
+  alarm_description   = "HIGH severity anomalies in ses-mail Lambda logs (${var.environment})"
   treat_missing_data  = "notBreaching"
 
-  dimensions = {
-    LogAnomalyPriority = "HIGH"
+  # Router Enrichment Lambda
+  metric_query {
+    id          = "router"
+    return_data = false
+    metric {
+      metric_name = "AnomalyCount"
+      namespace   = "AWS/Logs"
+      period      = 900
+      stat        = "Sum"
+      dimensions = {
+        LogAnomalyDetector = "ses-mail-router-enrichment-${var.environment}"
+        LogAnomalyPriority = "HIGH"
+      }
+    }
+  }
+
+  # Gmail Forwarder Lambda
+  metric_query {
+    id          = "gmail"
+    return_data = false
+    metric {
+      metric_name = "AnomalyCount"
+      namespace   = "AWS/Logs"
+      period      = 900
+      stat        = "Sum"
+      dimensions = {
+        LogAnomalyDetector = "ses-mail-gmail-forwarder-${var.environment}"
+        LogAnomalyPriority = "HIGH"
+      }
+    }
+  }
+
+  # Bouncer Lambda
+  metric_query {
+    id          = "bouncer"
+    return_data = false
+    metric {
+      metric_name = "AnomalyCount"
+      namespace   = "AWS/Logs"
+      period      = 900
+      stat        = "Sum"
+      dimensions = {
+        LogAnomalyDetector = "ses-mail-bouncer-${var.environment}"
+        LogAnomalyPriority = "HIGH"
+      }
+    }
+  }
+
+  # SMTP Credential Manager Lambda
+  metric_query {
+    id          = "smtp"
+    return_data = false
+    metric {
+      metric_name = "AnomalyCount"
+      namespace   = "AWS/Logs"
+      period      = 900
+      stat        = "Sum"
+      dimensions = {
+        LogAnomalyDetector = "ses-mail-smtp-credential-manager-${var.environment}"
+        LogAnomalyPriority = "HIGH"
+      }
+    }
+  }
+
+  # Outbound Metrics Publisher Lambda
+  metric_query {
+    id          = "metrics"
+    return_data = false
+    metric {
+      metric_name = "AnomalyCount"
+      namespace   = "AWS/Logs"
+      period      = 900
+      stat        = "Sum"
+      dimensions = {
+        LogAnomalyDetector = "ses-mail-outbound-metrics-publisher-${var.environment}"
+        LogAnomalyPriority = "HIGH"
+      }
+    }
+  }
+
+  # Canary Sender Lambda
+  metric_query {
+    id          = "canary"
+    return_data = false
+    metric {
+      metric_name = "AnomalyCount"
+      namespace   = "AWS/Logs"
+      period      = 900
+      stat        = "Sum"
+      dimensions = {
+        LogAnomalyDetector = "ses-mail-canary-sender-${var.environment}"
+        LogAnomalyPriority = "HIGH"
+      }
+    }
+  }
+
+  # Sum all ses-mail detectors
+  metric_query {
+    id          = "total"
+    expression  = "router + gmail + bouncer + smtp + metrics + canary"
+    label       = "Total HIGH Anomalies"
+    return_data = true
   }
 
   alarm_actions = [var.alarm_sns_topic_arn]
@@ -184,23 +281,120 @@ resource "aws_cloudwatch_metric_alarm" "anomaly_high" {
   }
 }
 
-# Medium Severity Anomaly Alarm (aggregated across all Lambda functions)
+# Medium Severity Anomaly Alarm (aggregated across ses-mail Lambda functions only)
+# Uses metric math to sum anomalies from each detector, filtering out anomalies from other log groups
 resource "aws_cloudwatch_metric_alarm" "anomaly_medium" {
   count = var.anomaly_detection_enabled ? 1 : 0
 
   alarm_name          = "ses-mail-anomaly-medium-${var.environment}"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 1
-  metric_name         = "AnomalyCount"
-  namespace           = "AWS/Logs"
-  period              = 900
-  statistic           = "Sum"
   threshold           = 0
-  alarm_description   = "Alert when MEDIUM severity anomalies detected in any Lambda function logs (${var.environment})"
+  alarm_description   = "MEDIUM severity anomalies in ses-mail Lambda logs (${var.environment})"
   treat_missing_data  = "notBreaching"
 
-  dimensions = {
-    LogAnomalyPriority = "MEDIUM"
+  # Router Enrichment Lambda
+  metric_query {
+    id          = "router"
+    return_data = false
+    metric {
+      metric_name = "AnomalyCount"
+      namespace   = "AWS/Logs"
+      period      = 900
+      stat        = "Sum"
+      dimensions = {
+        LogAnomalyDetector = "ses-mail-router-enrichment-${var.environment}"
+        LogAnomalyPriority = "MEDIUM"
+      }
+    }
+  }
+
+  # Gmail Forwarder Lambda
+  metric_query {
+    id          = "gmail"
+    return_data = false
+    metric {
+      metric_name = "AnomalyCount"
+      namespace   = "AWS/Logs"
+      period      = 900
+      stat        = "Sum"
+      dimensions = {
+        LogAnomalyDetector = "ses-mail-gmail-forwarder-${var.environment}"
+        LogAnomalyPriority = "MEDIUM"
+      }
+    }
+  }
+
+  # Bouncer Lambda
+  metric_query {
+    id          = "bouncer"
+    return_data = false
+    metric {
+      metric_name = "AnomalyCount"
+      namespace   = "AWS/Logs"
+      period      = 900
+      stat        = "Sum"
+      dimensions = {
+        LogAnomalyDetector = "ses-mail-bouncer-${var.environment}"
+        LogAnomalyPriority = "MEDIUM"
+      }
+    }
+  }
+
+  # SMTP Credential Manager Lambda
+  metric_query {
+    id          = "smtp"
+    return_data = false
+    metric {
+      metric_name = "AnomalyCount"
+      namespace   = "AWS/Logs"
+      period      = 900
+      stat        = "Sum"
+      dimensions = {
+        LogAnomalyDetector = "ses-mail-smtp-credential-manager-${var.environment}"
+        LogAnomalyPriority = "MEDIUM"
+      }
+    }
+  }
+
+  # Outbound Metrics Publisher Lambda
+  metric_query {
+    id          = "metrics"
+    return_data = false
+    metric {
+      metric_name = "AnomalyCount"
+      namespace   = "AWS/Logs"
+      period      = 900
+      stat        = "Sum"
+      dimensions = {
+        LogAnomalyDetector = "ses-mail-outbound-metrics-publisher-${var.environment}"
+        LogAnomalyPriority = "MEDIUM"
+      }
+    }
+  }
+
+  # Canary Sender Lambda
+  metric_query {
+    id          = "canary"
+    return_data = false
+    metric {
+      metric_name = "AnomalyCount"
+      namespace   = "AWS/Logs"
+      period      = 900
+      stat        = "Sum"
+      dimensions = {
+        LogAnomalyDetector = "ses-mail-canary-sender-${var.environment}"
+        LogAnomalyPriority = "MEDIUM"
+      }
+    }
+  }
+
+  # Sum all ses-mail detectors
+  metric_query {
+    id          = "total"
+    expression  = "router + gmail + bouncer + smtp + metrics + canary"
+    label       = "Total MEDIUM Anomalies"
+    return_data = true
   }
 
   alarm_actions = [var.alarm_sns_topic_arn]
