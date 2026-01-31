@@ -280,6 +280,7 @@ def lambda_handler(event, context):
             actions = {
                 "store": {"count": 0, "targets": []},
                 "forward-to-gmail": {"count": 0, "targets": []},
+                "deliver-to-jmap": {"count": 0, "targets": []},
                 "bounce": {"count": 0, "targets": []},
                 "spam": {"count": 0, "targets": []},
                 "silent-drop": {"count": 0, "targets": []},
@@ -417,6 +418,7 @@ def decide_action(ses_message: Dict[str, Any]) -> List[Tuple[str, Optional[Any]]
     results = []
     counts = {
         "forward-to-gmail": 0,
+        "deliver-to-jmap": 0,
         "store": 0,
         "bounce": 0,
         "silent-drop": 0,
@@ -463,6 +465,15 @@ def decide_action(ses_message: Dict[str, Any]) -> List[Tuple[str, Optional[Any]]
 
                 if action_type == 'bounce':
                     results.append((action_type, {"target": target, "reason": "policy", "metadata": metadata}))
+                elif action_type == 'deliver-to-jmap':
+                    # Include mailboxIds for JMAP delivery
+                    mailbox_ids = action_info.get('mailboxIds', ['inbox'])
+                    results.append((action_type, {
+                        "target": target,
+                        "destination": action_target,
+                        "mailboxIds": mailbox_ids,
+                        "metadata": metadata
+                    }))
                 else:
                     results.append((action_type, {"target": target, "destination": action_target, "metadata": metadata}))
 
@@ -474,7 +485,7 @@ def decide_action(ses_message: Dict[str, Any]) -> List[Tuple[str, Optional[Any]]
                     "recipient": target,
                     "action": action_type,
                     "lookupKey": lookup_key,
-                    "target": action_target if action_type == 'forward-to-gmail' else target,
+                    "target": action_target if action_type in ('forward-to-gmail', 'deliver-to-jmap') else target,
                     "metadata": metadata
                 })
 
@@ -750,6 +761,10 @@ def lookup_routing_rule(route_key: str) -> Optional[Dict[str, Any]]:
                 }
                 if 'target' in action_map:
                     action_obj['target'] = action_map['target'].get('S', '')
+                # Parse mailboxIds for deliver-to-jmap action
+                if 'mailboxIds' in action_map:
+                    mailbox_ids_list = action_map['mailboxIds'].get('L', [])
+                    action_obj['mailboxIds'] = [mid.get('S', 'inbox') for mid in mailbox_ids_list]
                 actions.append(action_obj)
         else:
             # Old format: convert action/target to actions list (backward compatibility)

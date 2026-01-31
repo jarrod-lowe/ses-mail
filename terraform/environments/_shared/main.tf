@@ -82,4 +82,5 @@ module "ses_mail" {
   join_existing_deployment       = var.join_existing_deployment
   canary_gmail_label             = var.canary_gmail_label
   canary_target_email            = var.canary_target_email
+  jmap_deployment                = var.jmap_deployment
 }

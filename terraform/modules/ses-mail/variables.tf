@@ -167,3 +167,18 @@ variable "canary_target_email" {
   description = "Target Gmail address for canary test emails. If not set, canary routing rule will not be created."
   type        = string
 }
+
+# ===========================
+# JMAP Integration
+# ===========================
+
+variable "jmap_deployment" {
+  description = "JMAP service deployment to integrate with (prod or test). If null, JMAP integration is disabled."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.jmap_deployment == null || contains(["prod", "test"], var.jmap_deployment)
+    error_message = "jmap_deployment must be null, 'prod', or 'test'"
+  }
+}

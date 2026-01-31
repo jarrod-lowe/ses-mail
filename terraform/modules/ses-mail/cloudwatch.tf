@@ -29,6 +29,7 @@ resource "aws_cloudwatch_dashboard" "ses_mail" {
           metrics = [
             ["SESMail/${var.environment}", "RouterEnrichmentSuccess", { stat = "Sum", label = "Router Success", color = "#2ca02c" }],
             [".", "GmailForwardSuccess", { stat = "Sum", label = "Gmail Success", color = "#1f77b4" }],
+            [".", "JmapDeliverSuccess", { stat = "Sum", label = "JMAP Success", color = "#17becf" }],
             [".", "BounceSendSuccess", { stat = "Sum", label = "Bounce Success", color = "#9467bd" }]
           ]
           period = 300
@@ -53,6 +54,7 @@ resource "aws_cloudwatch_dashboard" "ses_mail" {
           metrics = [
             ["SESMail/${var.environment}", "RouterEnrichmentFailure", { stat = "Sum", label = "Router Failure", color = "#d62728" }],
             [".", "GmailForwardFailure", { stat = "Sum", label = "Gmail Failure", color = "#ff7f0e" }],
+            [".", "JmapDeliverFailure", { stat = "Sum", label = "JMAP Failure", color = "#bcbd22" }],
             [".", "BounceSendFailure", { stat = "Sum", label = "Bounce Failure", color = "#8c564b" }]
           ]
           period = 300

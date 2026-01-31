@@ -132,3 +132,14 @@ variable "mta_sts_mode" {
     error_message = "MTA-STS mode must be one of: testing, enforce, none"
   }
 }
+
+variable "jmap_deployment" {
+  description = "JMAP service deployment to integrate with (prod or test). If null, JMAP integration is disabled."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.jmap_deployment == null || contains(["prod", "test"], var.jmap_deployment)
+    error_message = "jmap_deployment must be null, 'prod', or 'test'"
+  }
+}
