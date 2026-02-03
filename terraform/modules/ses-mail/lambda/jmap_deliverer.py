@@ -24,6 +24,7 @@ from botocore.exceptions import ClientError
 # X-Ray SDK for distributed tracing
 from aws_xray_sdk.core import xray_recorder
 from aws_xray_sdk.core import patch_all
+from aws_xray_sdk.ext.util import inject_trace_header
 patch_all()
 
 # Configure structured JSON logging
@@ -107,7 +108,7 @@ def sign_request(method: str, url: str, body: bytes | None = None, headers: dict
     return dict(aws_request.headers)
 
 
-def make_jmap_request(account_id: str, method_calls: list, using: list) -> dict:
+def make_jmap_request(account_id: str, method_calls: list, using: list, operation: str | None = None) -> dict:
     """
     Make a JMAP API request with SigV4 authentication.
 
@@ -115,6 +116,7 @@ def make_jmap_request(account_id: str, method_calls: list, using: list) -> dict:
         account_id: JMAP account ID to operate on
         method_calls: List of JMAP method calls
         using: List of JMAP capabilities to use
+        operation: Optional JMAP operation name for X-Ray annotation
 
     Returns:
         dict: JMAP response
@@ -146,6 +148,11 @@ def make_jmap_request(account_id: str, method_calls: list, using: list) -> dict:
             subsegment.namespace = 'remote'
             subsegment.put_http_meta(XRAY_HTTP_URL, url)
             subsegment.put_http_meta(XRAY_HTTP_METHOD, 'POST')
+            if operation:
+                subsegment.put_annotation('operation', operation)
+            subsegment.put_annotation('account_id', account_id)
+            # Inject X-Ray trace header for downstream trace linking
+            inject_trace_header(signed_headers, subsegment)
 
         request = Request(url, data=body_bytes, headers=signed_headers, method='POST')
         with urlopen(request, timeout=30) as response:
@@ -184,7 +191,7 @@ def make_jmap_request(account_id: str, method_calls: list, using: list) -> dict:
         xray_recorder.end_subsegment()
 
 
-def upload_blob_stream(presigned_url: str, email_stream, size: int) -> None:
+def upload_blob_stream(presigned_url: str, email_stream, size: int, blob_id: str | None = None) -> None:
     """
     Upload email stream to the presigned S3 URL from Blob/allocate.
     Streams directly from S3 without loading entire email into memory.
@@ -193,6 +200,7 @@ def upload_blob_stream(presigned_url: str, email_stream, size: int) -> None:
         presigned_url: Presigned URL for uploading
         email_stream: File-like object (S3 StreamingBody) containing email bytes
         size: Size of the email in bytes (for Content-Length header)
+        blob_id: Optional blob ID for X-Ray annotation
 
     Raises:
         RuntimeError: If upload fails
@@ -200,16 +208,20 @@ def upload_blob_stream(presigned_url: str, email_stream, size: int) -> None:
     subsegment = xray_recorder.begin_subsegment('blob-upload')
 
     try:
+        headers = {
+            'Content-Type': 'message/rfc822',
+            'Content-Length': str(size)
+        }
+
         if subsegment:
             subsegment.namespace = 'remote'
             subsegment.put_http_meta(XRAY_HTTP_URL, presigned_url.split('?')[0])  # Strip query params for logging
             subsegment.put_http_meta(XRAY_HTTP_METHOD, 'PUT')
             subsegment.put_annotation('blob_size', size)
-
-        headers = {
-            'Content-Type': 'message/rfc822',
-            'Content-Length': str(size)
-        }
+            if blob_id:
+                subsegment.put_annotation('blob_id', blob_id)
+            # Inject X-Ray trace header for downstream trace linking
+            inject_trace_header(headers, subsegment)
 
         # urllib.request supports file-like objects for streaming upload
         request = Request(presigned_url, data=email_stream, headers=headers, method='PUT')
@@ -282,7 +294,8 @@ def deliver_to_jmap(account_id: str, email_size: int, email_stream, mailbox_ids:
                     }
                 }
             }, "c0"]
-        ]
+        ],
+        operation='Blob/allocate'
     )
 
     # Extract blob info from response
@@ -315,7 +328,7 @@ def deliver_to_jmap(account_id: str, email_size: int, email_stream, mailbox_ids:
     })
 
     # Step 2: Upload email stream to presigned URL (no memory copy)
-    upload_blob_stream(upload_url, email_stream, email_size)
+    upload_blob_stream(upload_url, email_stream, email_size, blob_id=blob_id)
 
     # Step 3: Import email using the blob
     # Convert mailbox_ids list to the JMAP format {mailboxId: true, ...}
@@ -343,7 +356,8 @@ def deliver_to_jmap(account_id: str, email_size: int, email_stream, mailbox_ids:
                     }
                 }
             }, "c0"]
-        ]
+        ],
+        operation='Email/import'
     )
 
     # Extract import result
@@ -580,6 +594,10 @@ def process_sqs_record(record) -> dict:
 
         if subsegment:
             subsegment.put_annotation('delivery_status', 'success')
+            # Add final IDs from first delivery for trace correlation
+            if delivery_results:
+                subsegment.put_annotation('email_id', delivery_results[0].get('email_id'))
+                subsegment.put_annotation('blob_id', delivery_results[0].get('blob_id'))
 
         return {
             'messageId': message_id,
